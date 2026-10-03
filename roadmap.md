@@ -8,6 +8,33 @@ This is a proposed development order, not a release schedule. Priorities can
 change as we investigate real recordings and contributors bring experiments.
 Checked items work in the current application; unchecked items are planned.
 
+## Contributor issue backlog
+
+These issues turn the next stages into scoped tasks with acceptance criteria and
+verification suggestions. Comment on an issue if you would like to work on it;
+check dependencies and discuss the approach before starting a large change.
+The later experiments below remain roadmap ideas until they are scoped as issues.
+
+| Issue | Task | Depends on |
+| --- | --- | --- |
+| [#1](https://github.com/marrabld/omazone/issues/1) | Common processor contract and offline chain | Foundation |
+| [#2](https://github.com/marrabld/omazone/issues/2) | Zoomable waveform and region selection | Foundation |
+| [#3](https://github.com/marrabld/omazone/issues/3) | Suspected hard-clipping detection | #2 for waveform overlay |
+| [#4](https://github.com/marrabld/omazone/issues/4) | Selected-region looping with shared A/B cursor | #2 |
+| [#5](https://github.com/marrabld/omazone/issues/5) | Short-interval offline declipping prototype | #2, #3 for integration |
+| [#6](https://github.com/marrabld/omazone/issues/6) | High-pass, low-pass, and notch filters | #1 for integration |
+| [#7](https://github.com/marrabld/omazone/issues/7) | Stereo-linked broadband compressor | #1 |
+| [#8](https://github.com/marrabld/omazone/issues/8) | Single downward dynamic-EQ band | #1, #6; #7 may help |
+| [#9](https://github.com/marrabld/omazone/issues/9) | LUFS metering and matched previews | Foundation |
+| [#10](https://github.com/marrabld/omazone/issues/10) | Smoother A/B and seek transitions | Coordinate with #4 |
+| [#11](https://github.com/marrabld/omazone/issues/11) | Output gain and overload indicators | Foundation |
+| [#12](https://github.com/marrabld/omazone/issues/12) | Readable log-frequency labels | Good first issue |
+| [#13](https://github.com/marrabld/omazone/issues/13) | Generated-signal matching tutorial | Good first issue |
+| [#14](https://github.com/marrabld/omazone/issues/14) | Windows/macOS setup and playback validation | Good first issue |
+
+Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
+status. Numerical prototypes can often start before their GUI integration dependencies.
+
 ## Working foundation
 
 - [x] Whole-file spectral analysis and reference-matching EQ.

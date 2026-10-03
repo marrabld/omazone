@@ -124,6 +124,11 @@ Start with the [roadmap](roadmap.md), then browse or open an
 describe the intended behaviour and measurements before implementing it. Small,
 focused pull requests are easiest to review.
 
+For smaller starting tasks, try [frequency-label cleanup](https://github.com/marrabld/omazone/issues/12),
+the [generated-signal tutorial](https://github.com/marrabld/omazone/issues/13), or
+[Windows/macOS validation](https://github.com/marrabld/omazone/issues/14).
+Comment on the issue you want to pick up so other contributors can coordinate.
+
 Useful contributions include:
 
 - DSP implementations with clear explanations and meaningful verification signals.
