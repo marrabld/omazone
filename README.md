@@ -20,7 +20,12 @@ uv run omazone
 
 Load a mix and a reference, adjust the matching controls, then click **Analyse +
 process**. Play auditions the original; the listening button switches to the
-processed version at the same playback position. Stop and Play restart playback.
+processed version at the same playback position. Click or drag the seek bar to
+audition another section. Playback pauses during a drag and resumes on release
+if it was playing. Play/Pause and Stop preserve the cursor; seek to the left edge
+to restart. Pressing Play after reaching the end starts from the beginning.
+The time display shows elapsed and total time. With the seek bar focused, arrow
+keys move one second and Page Up/Down move ten seconds.
 Changed settings require another render. WAV, FLAC, and AIFF mono/stereo files
 are supported. Different reference and mix sample rates are supported.
 

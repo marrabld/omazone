@@ -34,6 +34,50 @@ class Worker(QtCore.QThread):
             self.failed.emit(str(error))
 
 
+class SeekSlider(QtWidgets.QSlider):
+    """Click anywhere or drag to seek; keyboard navigation remains native Qt."""
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.setSliderDown(True)
+            self.move_to(event.position().x())
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.isSliderDown():
+            self.move_to(event.position().x())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.move_to(event.position().x())
+            self.setSliderDown(False)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def move_to(self, x):
+        option = QtWidgets.QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle = self.style().subControlRect(
+            QtWidgets.QStyle.ComplexControl.CC_Slider,
+            option,
+            QtWidgets.QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        span = max(1, self.width() - handle.width())
+        position = min(span, max(0, round(x - handle.width() / 2)))
+        self.setValue(
+            QtWidgets.QStyle.sliderValueFromPosition(
+                self.minimum(), self.maximum(), position, span, option.upsideDown
+            )
+        )
+
+
 def load_audio(path):
     audio, rate = sf.read(path, always_2d=True, dtype="float64")
     if audio.shape[1] > 2:
@@ -53,6 +97,7 @@ class Window(QtWidgets.QMainWindow):
         self.position = 0
         self.playing = False
         self.listen_processed = False
+        self.resume_after_scrub = False
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -92,6 +137,18 @@ class Window(QtWidgets.QMainWindow):
         self.button(row, "Stop", self.stop)
         self.ab_button = self.button(row, "Listening: original", self.toggle_ab)
         layout.addLayout(row)
+        transport = QtWidgets.QHBoxLayout()
+        self.seek_slider = SeekSlider(QtCore.Qt.Orientation.Horizontal)
+        self.seek_slider.setRange(0, 0)
+        self.seek_slider.setToolTip("Click or drag to seek. Arrow keys move one second.")
+        self.seek_slider.sliderPressed.connect(self.begin_scrub)
+        self.seek_slider.sliderReleased.connect(self.end_scrub)
+        self.seek_slider.valueChanged.connect(self.seek)
+        transport.addWidget(self.seek_slider, 1)
+        self.time_label = QtWidgets.QLabel("0:00.0 / 0:00.0")
+        self.time_label.setMinimumWidth(160)
+        transport.addWidget(self.time_label)
+        layout.addLayout(transport)
         self.meters = QtWidgets.QLabel("RMS and sample-peak measurements appear after processing.")
         layout.addWidget(self.meters)
         self.note = QtWidgets.QLabel(
@@ -112,6 +169,10 @@ class Window(QtWidgets.QMainWindow):
             QPushButton:hover { border-color: #63dfc0; }
             QPushButton:disabled { color: #647085; }
             QDoubleSpinBox { background: #1c2737; padding: 8px; border: 1px solid #384b64; }
+            QSlider::groove:horizontal { background: #253246; height: 6px; border-radius: 3px; }
+            QSlider::sub-page:horizontal { background: #63dfc0; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #d8e1ed; width: 14px;
+                                         margin: -5px 0; border-radius: 7px; }
         """)
         self.update_buttons()
 
@@ -154,6 +215,7 @@ class Window(QtWidgets.QMainWindow):
         self.export_button.setEnabled(not busy and self.output is not None)
         self.play_button.setEnabled(not busy and self.source is not None)
         self.ab_button.setEnabled(self.output is not None)
+        self.seek_slider.setEnabled(not busy and self.source is not None)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.setEnabled(not busy)
 
@@ -190,6 +252,13 @@ class Window(QtWidgets.QMainWindow):
     def loaded(self, target, data):
         setattr(self, target, data)
         self.invalidate()
+        if target == "source":
+            self.position = 0
+            with QtCore.QSignalBlocker(self.seek_slider):
+                self.seek_slider.setRange(0, len(data[0]))
+                self.seek_slider.setSingleStep(data[1])
+                self.seek_slider.setPageStep(data[1] * 10)
+        self.update_transport()
         mix = self.source[3] if self.source else "none"
         reference = self.reference[3] if self.reference else "none"
         self.files.setText(f"Mix: {mix}    |    Reference: {reference}")
@@ -280,16 +349,21 @@ class Window(QtWidgets.QMainWindow):
         )
 
     def play(self):
+        if self.playing:
+            self.stop()
+            return
         self.stop()
         if self.preview is None:
             source = self.source[0]
             self.preview = audition_pair(source, source)
-        self.position = 0
+        if self.position >= len(self.source[0]):
+            self.position = 0
         try:
             import sounddevice as sd
 
             def callback(outdata, frames, time_info, status):
                 audio = self.preview[int(self.listen_processed)]
+                # Seeking stops the stream before changing this shared cursor.
                 available = min(frames, len(audio) - self.position)
                 outdata.fill(0)
                 if available > 0:
@@ -307,7 +381,7 @@ class Window(QtWidgets.QMainWindow):
             )
             self.playing = True
             self.stream.start()
-            self.play_button.setText("Restart")
+            self.play_button.setText("Pause")
         except Exception as error:  # noqa: BLE001 -- audio backend failures need a UI message
             self.stop()
             self.error(f"Playback unavailable: {error}")
@@ -323,6 +397,43 @@ class Window(QtWidgets.QMainWindow):
     def check_playback(self):
         if self.stream is not None and not self.playing:
             self.stop()
+        self.update_transport()
+
+    def begin_scrub(self):
+        self.resume_after_scrub = self.playing
+        self.stop()
+
+    def end_scrub(self):
+        if self.resume_after_scrub:
+            self.resume_after_scrub = False
+            if self.source is not None and self.position < len(self.source[0]):
+                self.play()
+
+    def seek(self, position):
+        if self.source is None:
+            return
+        resume = self.playing
+        self.stop()
+        self.position = min(len(self.source[0]), max(0, position))
+        self.update_transport()
+        if resume and self.position < len(self.source[0]):
+            self.play()
+
+    def update_transport(self):
+        if self.source is None:
+            return
+        rate = self.source[1]
+        if not self.seek_slider.isSliderDown():
+            with QtCore.QSignalBlocker(self.seek_slider):
+                self.seek_slider.setValue(self.position)
+
+        def timestamp(samples):
+            tenths = round(samples / rate * 10)
+            minutes, remainder = divmod(tenths, 600)
+            seconds, fraction = divmod(remainder, 10)
+            return f"{minutes}:{seconds:02d}.{fraction}"
+
+        self.time_label.setText(f"{timestamp(self.position)} / {timestamp(len(self.source[0]))}")
 
     def toggle_ab(self):
         self.listen_processed = not self.listen_processed
