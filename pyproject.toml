@@ -2,6 +2,8 @@
 name = "omazone"
 version = "0.1.0"
 description = "An offline spectral-matching DSP playground"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=2.0", "scipy>=1.14", "soundfile>=0.13",

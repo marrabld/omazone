@@ -1,5 +1,10 @@
 # Omazone
 
+Licensed under the GNU General Public License version 3 only (`GPL-3.0-only`).
+See [LICENSE](LICENSE) for the full terms. You may use, modify, and redistribute
+Omazone under those terms, including commercially. Distributed derivatives must
+remain GPL-licensed and provide corresponding source. There is no warranty.
+
 A Python desktop playground for learning mastering DSP. The first experiment
 is reference-matching EQ, with spectrum plots, a requested-versus-actual filter
 response, offline rendering, A/B playback, and WAV export.
