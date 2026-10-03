@@ -19,6 +19,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Offline, block-based rendering with compensated filter delay.
 - RMS-matched original/processed A/B playback at the same song position.
 - Click-and-drag seeking, elapsed/total time, and pause/resume.
+- Linked mono/stereo waveform views with peak-preserving zoom and region selection.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
 
@@ -68,6 +69,37 @@ keys move one second and Page Up/Down move ten seconds.
 Changed settings require another render. WAV, FLAC, and AIFF mono/stereo files
 are supported. Different reference and mix sample rates are supported.
 
+## Inspect a waveform and select a region
+
+Loading a mix opens the **Waveform / selection** tab. It shows the original mix,
+with separate linked plots for left and right channels, or one plot for mono.
+The existing spectrum and correction plots are under **Spectrum / EQ**.
+
+![Omazone showing a full-song stereo waveform, selected region, exact sample bounds, and the A/B playback cursor](docs/images/omazone-waveform-selection.png)
+
+- Use the mouse wheel to zoom horizontally and drag the background to pan.
+- **Shift+drag** on the background creates a selection. Drag its green edges to
+  resize it, or drag the shaded region to move it. Both channels share the region.
+- Edit **Start** and **End** in seconds for precise adjustment. Spin-box steps
+  move one sample; the label shows exact sample indices and duration.
+- **Select view** selects the visible time range. **Zoom selection** magnifies
+  the region; **Fit song** returns to the full track; **Clear** removes it.
+- Click the background to seek, or use **Seek start** to audition from the selected
+  region's beginning. The white cursor follows the existing playback transport.
+
+Selection bounds are half-open sample intervals `[start, end)`, like a NumPy
+slice. Selection currently supports inspection and seeking; processing/export
+still use the whole file and playback does not stop or loop at the region end.
+Selected-region looping is tracked in [#4](https://github.com/marrabld/omazone/issues/4).
+A new mix clears the selection, while changing matching controls or the reference
+keeps it.
+
+Wide views draw min/max buckets to preserve transients. Zooming in displays raw
+samples. An overview bucket may include samples just outside the viewport edge;
+zoom to sample level when inspecting an exact boundary. Peak-index construction
+runs alongside file analysis in the loading worker, while redraws use a bounded
+number of display points.
+
 ## Current limitations
 
 The interface shows RMS and sample peaks, not LUFS or true peaks. Preview is
@@ -108,9 +140,12 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 
 - `src/omazone/engine.py`: analysis, filter design, processor, offline render.
 - `src/omazone/gui.py`: Qt interface, worker thread, preview playback, export.
+- `src/omazone/waveform.py`: peak index and GUI-independent sample-region model.
+- `src/omazone/waveform_view.py`: linked waveform plots, selection, zoom, and seeking.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.
+- `tests/test_waveform.py`: preserved peaks, raw-sample zoom, and region bounds.
 - `roadmap.md`: planned processing modules, priorities, and contribution ideas.
 
 The GUI uses PySide6 and pyqtgraph. The engine uses NumPy and SciPy; SoundFile

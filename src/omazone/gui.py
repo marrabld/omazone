@@ -17,6 +17,8 @@ from .engine import (
     render,
     rms_db,
 )
+from .waveform import PeakIndex
+from .waveform_view import WaveformView
 
 
 class Worker(QtCore.QThread):
@@ -82,7 +84,7 @@ def load_audio(path):
     audio, rate = sf.read(path, always_2d=True, dtype="float64")
     if audio.shape[1] > 2:
         raise ValueError("This workbench supports mono and stereo files.")
-    return audio, rate, analyse(audio, rate), Path(path).name
+    return audio, rate, analyse(audio, rate), Path(path).name, PeakIndex(audio)
 
 
 class Window(QtWidgets.QMainWindow):
@@ -116,11 +118,20 @@ class Window(QtWidgets.QMainWindow):
         layout.addLayout(row)
 
         pg.setConfigOptions(antialias=True, background="#141a24", foreground="#b8c4d6")
-        self.spectrum_plot = self.plot("Relative spectral power", "dB", layout)
+        self.views = QtWidgets.QTabWidget()
+        spectra = QtWidgets.QWidget()
+        spectra_layout = QtWidgets.QVBoxLayout(spectra)
+        spectra_layout.setContentsMargins(0, 0, 0, 0)
+        self.spectrum_plot = self.plot("Relative spectral power", "dB", spectra_layout)
         self.spectrum_plot.addLegend()
-        self.eq_plot = self.plot("Filter gain", "dB", layout)
+        self.eq_plot = self.plot("Filter gain", "dB", spectra_layout)
         self.eq_plot.addLegend()
         self.eq_plot.setYRange(-8, 8)
+        self.views.addTab(spectra, "Spectrum / EQ")
+        self.waveform = WaveformView()
+        self.waveform.seek_requested.connect(self.seek)
+        self.views.addTab(self.waveform, "Waveform / selection")
+        layout.addWidget(self.views, 1)
 
         controls = QtWidgets.QHBoxLayout()
         self.amount = self.control(controls, "Match amount", 0, 100, 50, "%", 0)
@@ -216,6 +227,7 @@ class Window(QtWidgets.QMainWindow):
         self.play_button.setEnabled(not busy and self.source is not None)
         self.ab_button.setEnabled(self.output is not None)
         self.seek_slider.setEnabled(not busy and self.source is not None)
+        self.waveform.setEnabled(not busy and self.source is not None)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.setEnabled(not busy)
 
@@ -254,6 +266,9 @@ class Window(QtWidgets.QMainWindow):
         self.invalidate()
         if target == "source":
             self.position = 0
+            index = data[4] if len(data) > 4 else PeakIndex(data[0])
+            self.waveform.set_audio(index, data[1])
+            self.views.setCurrentWidget(self.waveform)
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
@@ -311,7 +326,7 @@ class Window(QtWidgets.QMainWindow):
             max_boost_db=self.boost.value(),
             max_cut_db=self.cut.value(),
         )
-        source, rate, spectrum, _ = self.source
+        source, rate, spectrum = self.source[:3]
         reference = self.reference[2]
 
         def calculate():
@@ -434,6 +449,7 @@ class Window(QtWidgets.QMainWindow):
             return f"{minutes}:{seconds:02d}.{fraction}"
 
         self.time_label.setText(f"{timestamp(self.position)} / {timestamp(len(self.source[0]))}")
+        self.waveform.set_position(self.position)
 
     def toggle_ab(self):
         self.listen_processed = not self.listen_processed

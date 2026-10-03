@@ -44,13 +44,14 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Stereo-preserving shared EQ coefficients.
 - [x] RMS-matched A/B playback with shared headroom.
 - [x] Scrubbing, elapsed/total time, and pause/resume.
+- [x] Linked waveform plots, peak-preserving overview, and sample-accurate selection.
 - [x] Float-WAV export and automated DSP/GUI checks.
 
 ## 1. Inspection and selected-region repair
 
 Make it possible to identify a damaged passage and judge a repair locally.
 
-- [ ] Zoomable waveform with a region-selection tool.
+- [x] Zoomable waveform with a region-selection tool.
 - [ ] Mark suspected clipped samples and runs of flattened peaks.
 - [ ] Input/output peak indicators to distinguish source damage from processing overload.
 - [ ] Audition and loop a selected section with the existing A/B comparison.
@@ -167,7 +168,7 @@ processor contracts, test signals, and Python reference outputs should carry ove
 - Document setup and playback on a second operating system.
 - Improve crowded logarithmic frequency labels or keyboard accessibility.
 - Add a small generated-signal demonstration explaining the matching filter.
-- Prototype waveform selection or a filter-response panel.
+- Improve waveform navigation or prototype a filter-response panel.
 - Submit a reproducible listening report with settings and timestamps.
 
 Open an [issue](https://github.com/marrabld/omazone/issues) to discuss a task or
