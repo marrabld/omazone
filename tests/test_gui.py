@@ -6,6 +6,7 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
+import pytest
 import soundfile as sf
 from PySide6 import QtCore, QtTest, QtWidgets
 from scipy import signal
@@ -212,5 +213,104 @@ def test_waveform_selection_zoom_seek_and_new_file_reset():
         assert len(view.channel_plots) == 1
         assert not view.regions[0].isVisible()
         assert view.end_time.maximum() == 1
+    finally:
+        window.close()
+
+
+def test_selection_playback_looping_edits_and_mode_changes(monkeypatch):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 48000
+    audio = np.random.default_rng(8).normal(0, 0.1, (128, 2)).astype(np.float32)
+    try:
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix.wav"))
+        assert not window.play_selection_button.isEnabled()
+        window.waveform.set_selection(SampleRegion(3, 8))
+        assert window.play_selection_button.isEnabled()
+        window.preview = (audio, audio * 0.5)
+        window.play_selection_button.click()
+        block = np.empty((3, 2), dtype=np.float32)
+        window.stream.callback(block, 3, None, None)
+        np.testing.assert_array_equal(block, audio[3:6])
+        with pytest.raises(sd.CallbackStop):
+            window.stream.callback(block, 3, None, None)
+        np.testing.assert_array_equal(block[:2], audio[6:8])
+        assert not np.any(block[2])
+        assert window.position == 8
+        window.check_playback()
+        assert not window.playing
+
+        window.loop_selection.setChecked(True)
+        window.play_selection_button.click()
+        block = np.empty((13, 2), dtype=np.float32)
+        window.stream.callback(block, 13, None, None)
+        np.testing.assert_array_equal(block, audio[3 + np.arange(13) % 5])
+        assert window.position == 6
+        window.toggle_ab()
+        window.stream.callback(block, 13, None, None)
+        np.testing.assert_array_equal(block, audio[3 + (3 + np.arange(13)) % 5] * 0.5)
+        assert window.position == 4
+        window.play()  # Pause.
+        assert not window.playing
+        window.play()
+        assert window.position == 4
+
+        window.waveform.set_selection(SampleRegion(20, 25))
+        assert not window.playing
+        assert window.resume_after_selection_edit
+        window.finish_selection_edit()
+        assert window.playing
+        assert window.position == 20
+        assert window.transport.loop
+        window.seek(22)
+        assert window.transport.loop
+        window.seek(40)
+        assert window.playing
+        assert window.transport.region is None
+        assert not window.loop_selection.isChecked()
+        assert window.position == 40
+
+        window.loop_selection.setChecked(True)
+        window.waveform.set_selection(SampleRegion(30, 35))
+        window.stop()  # Cancels pending resume after editing.
+        QtTest.QTest.qWait(180)
+        app.processEvents()
+        assert not window.playing
+        window.play_selection()
+        window.waveform.set_selection(None)
+        window.finish_selection_edit()
+        assert window.playing
+        assert window.transport.region is None
+        assert not window.loop_selection.isChecked()
+
+        window.waveform.set_selection(SampleRegion(120, 128))
+        window.loop_selection.setChecked(True)
+        window.play_selection()
+        window.loop_selection.setChecked(False)
+        assert window.playing
+        assert not window.transport.loop
+        window.whole_song_button.click()
+        assert window.transport.region is None
+        window.loop_selection.setChecked(True)
+        window.loaded("source", (audio[:64], rate, analyse(audio[:64], rate), "short.wav"))
+        assert window.transport.region is None
+        assert not window.loop_selection.isChecked()
+        assert not window.playing
     finally:
         window.close()

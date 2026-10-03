@@ -45,6 +45,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] RMS-matched A/B playback with shared headroom.
 - [x] Scrubbing, elapsed/total time, and pause/resume.
 - [x] Linked waveform plots, peak-preserving overview, and sample-accurate selection.
+- [x] One-shot selected-region playback and shared-cursor A/B looping.
 - [x] Float-WAV export and automated DSP/GUI checks.
 
 ## 1. Inspection and selected-region repair
@@ -54,7 +55,7 @@ Make it possible to identify a damaged passage and judge a repair locally.
 - [x] Zoomable waveform with a region-selection tool.
 - [ ] Mark suspected clipped samples and runs of flattened peaks.
 - [ ] Input/output peak indicators to distinguish source damage from processing overload.
-- [ ] Audition and loop a selected section with the existing A/B comparison.
+- [x] Audition and loop a selected section with the existing A/B comparison.
 - [ ] Inspect an actual clipped recording before choosing a reconstruction method.
 
 ### Declipping

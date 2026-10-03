@@ -20,6 +20,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - RMS-matched original/processed A/B playback at the same song position.
 - Click-and-drag seeking, elapsed/total time, and pause/resume.
 - Linked mono/stereo waveform views with peak-preserving zoom and region selection.
+- One-shot selection playback and sample-aligned loops with shared original/processed A/B.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
 
@@ -88,11 +89,36 @@ The existing spectrum and correction plots are under **Spectrum / EQ**.
   region's beginning. The white cursor follows the existing playback transport.
 
 Selection bounds are half-open sample intervals `[start, end)`, like a NumPy
-slice. Selection currently supports inspection and seeking; processing/export
-still use the whole file and playback does not stop or loop at the region end.
-Selected-region looping is tracked in [#4](https://github.com/marrabld/omazone/issues/4).
+slice. Processing and export still use the whole file.
 A new mix clears the selection, while changing matching controls or the reference
 keeps it.
+
+### Play and loop a selection
+
+![Omazone looping a selected stereo passage and switching from original to processed while preserving the playback position](docs/images/omazone-loop-demo.gif)
+
+The silent demo uses generated audio and the actual playback callback with a
+simulated device. Watch the white cursor wrap at the selection's end and the
+listening button switch to processed. [Recreate the demo](docs/loop-demo.md).
+
+Select a passage, then click **Play selection**. Playback starts at its beginning
+and stops at its exclusive end. Enable **Loop selection** to repeat it instead.
+The loop toggle prepares selected-region playback; if playback is already running,
+it continues within the selected bounds. Turning looping off retains one-shot
+selection mode, so playback stops at the region end.
+
+- A/B switches keep the same sample position, including across loop boundaries.
+- Play/Pause and Stop preserve the cursor and playback mode. Play after the end
+  of a one-shot selection restarts at its beginning.
+- Seeking inside the active region retains its mode. Seeking outside it returns
+  to whole-song mode and turns looping off. **Whole song** also exits region mode.
+- Editing an active selection pauses playback, then resumes after the bounds
+  settle. Clearing it returns to whole-song mode; Stop cancels a pending resume.
+- A new mix resets region playback and looping.
+
+Loop wraps are sample-exact, including regions shorter than an audio callback.
+There are no boundary fades yet, so mismatched endpoints can produce clicks;
+choose musically sensible boundaries while transition smoothing is developed.
 
 Wide views draw min/max buckets to preserve transients. Zooming in displays raw
 samples. An overview bucket may include samples just outside the viewport edge;
@@ -142,10 +168,12 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/gui.py`: Qt interface, worker thread, preview playback, export.
 - `src/omazone/waveform.py`: peak index and GUI-independent sample-region model.
 - `src/omazone/waveform_view.py`: linked waveform plots, selection, zoom, and seeking.
+- `src/omazone/playback.py`: GUI-independent sample cursor and selected-region buffer filling.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.
 - `tests/test_waveform.py`: preserved peaks, raw-sample zoom, and region bounds.
+- `tests/test_playback.py`: exact loop wraps, short regions, one-shot endings, and A/B alignment.
 - `roadmap.md`: planned processing modules, priorities, and contribution ideas.
 
 The GUI uses PySide6 and pyqtgraph. The engine uses NumPy and SciPy; SoundFile

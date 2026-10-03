@@ -17,6 +17,7 @@ from .engine import (
     render,
     rms_db,
 )
+from .playback import PlaybackCursor
 from .waveform import PeakIndex
 from .waveform_view import WaveformView
 
@@ -96,10 +97,11 @@ class Window(QtWidgets.QMainWindow):
         self.worker = None
         self.stream = None
         self.preview = None
-        self.position = 0
+        self.transport = PlaybackCursor()
         self.playing = False
         self.listen_processed = False
         self.resume_after_scrub = False
+        self.resume_after_selection_edit = False
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -130,6 +132,11 @@ class Window(QtWidgets.QMainWindow):
         self.views.addTab(spectra, "Spectrum / EQ")
         self.waveform = WaveformView()
         self.waveform.seek_requested.connect(self.seek)
+        self.waveform.selection_changed.connect(self.selection_changed)
+        self.selection_timer = QtCore.QTimer(self)
+        self.selection_timer.setSingleShot(True)
+        self.selection_timer.setInterval(150)
+        self.selection_timer.timeout.connect(self.finish_selection_edit)
         self.views.addTab(self.waveform, "Waveform / selection")
         layout.addWidget(self.views, 1)
 
@@ -148,6 +155,17 @@ class Window(QtWidgets.QMainWindow):
         self.button(row, "Stop", self.stop)
         self.ab_button = self.button(row, "Listening: original", self.toggle_ab)
         layout.addLayout(row)
+        selection_controls = QtWidgets.QHBoxLayout()
+        self.play_selection_button = self.button(
+            selection_controls, "Play selection", self.play_selection
+        )
+        self.loop_selection = QtWidgets.QCheckBox("Loop selection")
+        self.loop_selection.toggled.connect(self.loop_changed)
+        selection_controls.addWidget(self.loop_selection)
+        self.whole_song_button = self.button(selection_controls, "Whole song", self.whole_song)
+        self.playback_mode = QtWidgets.QLabel("Playback: whole song")
+        selection_controls.addWidget(self.playback_mode, 1)
+        layout.addLayout(selection_controls)
         transport = QtWidgets.QHBoxLayout()
         self.seek_slider = SeekSlider(QtCore.Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 0)
@@ -228,6 +246,10 @@ class Window(QtWidgets.QMainWindow):
         self.ab_button.setEnabled(self.output is not None)
         self.seek_slider.setEnabled(not busy and self.source is not None)
         self.waveform.setEnabled(not busy and self.source is not None)
+        has_selection = self.source is not None and self.waveform.selection is not None
+        self.play_selection_button.setEnabled(not busy and has_selection)
+        self.loop_selection.setEnabled(not busy and has_selection)
+        self.whole_song_button.setEnabled(not busy and self.source is not None)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.setEnabled(not busy)
 
@@ -265,6 +287,7 @@ class Window(QtWidgets.QMainWindow):
         setattr(self, target, data)
         self.invalidate()
         if target == "source":
+            self.reset_playback_mode()
             self.position = 0
             index = data[4] if len(data) > 4 else PeakIndex(data[0])
             self.waveform.set_audio(index, data[1])
@@ -371,20 +394,18 @@ class Window(QtWidgets.QMainWindow):
         if self.preview is None:
             source = self.source[0]
             self.preview = audition_pair(source, source)
-        if self.position >= len(self.source[0]):
+        if self.transport.region is not None:
+            region = self.transport.region
+            if not region.start <= self.position < region.end:
+                self.position = region.start
+        elif self.position >= len(self.source[0]):
             self.position = 0
         try:
             import sounddevice as sd
 
             def callback(outdata, frames, time_info, status):
                 audio = self.preview[int(self.listen_processed)]
-                # Seeking stops the stream before changing this shared cursor.
-                available = min(frames, len(audio) - self.position)
-                outdata.fill(0)
-                if available > 0:
-                    outdata[:available] = audio[self.position : self.position + available]
-                self.position += available
-                if self.position >= len(audio):
+                if self.transport.fill(audio, outdata):
                     self.playing = False
                     raise sd.CallbackStop
 
@@ -402,6 +423,8 @@ class Window(QtWidgets.QMainWindow):
             self.error(f"Playback unavailable: {error}")
 
     def stop(self):
+        self.selection_timer.stop()
+        self.resume_after_selection_edit = False
         if self.stream is not None:
             self.stream.stop()
             self.stream.close()
@@ -427,9 +450,12 @@ class Window(QtWidgets.QMainWindow):
     def seek(self, position):
         if self.source is None:
             return
-        resume = self.playing
+        resume = self.playing or self.resume_after_selection_edit
         self.stop()
         self.position = min(len(self.source[0]), max(0, position))
+        region = self.transport.region
+        if region is not None and not region.start <= self.position < region.end:
+            self.reset_playback_mode()
         self.update_transport()
         if resume and self.position < len(self.source[0]):
             self.play()
@@ -456,6 +482,79 @@ class Window(QtWidgets.QMainWindow):
         self.ab_button.setText(
             "Listening: processed" if self.listen_processed else "Listening: original"
         )
+
+    @property
+    def position(self):
+        return self.transport.position
+
+    @position.setter
+    def position(self, value):
+        self.transport.position = value
+
+    def reset_playback_mode(self):
+        self.transport.region = None
+        self.transport.loop = False
+        with QtCore.QSignalBlocker(self.loop_selection):
+            self.loop_selection.setChecked(False)
+        self.playback_mode.setText("Playback: whole song")
+
+    def set_region_mode(self, region):
+        self.transport.region = region
+        self.transport.loop = self.loop_selection.isChecked()
+        if not region.start <= self.position < region.end:
+            self.position = region.start
+        self.playback_mode.setText(
+            "Playback: looping selection" if self.transport.loop else "Playback: selection once"
+        )
+
+    def play_selection(self):
+        region = self.waveform.selection
+        if region is None:
+            return
+        self.stop()
+        self.position = region.start
+        self.set_region_mode(region)
+        self.update_transport()
+        self.play()
+
+    def loop_changed(self, enabled):
+        region = self.waveform.selection
+        resume = self.playing or self.resume_after_selection_edit
+        self.stop()
+        if region is not None:
+            self.set_region_mode(region)
+        else:
+            self.reset_playback_mode()
+        self.update_transport()
+        if resume:
+            self.play()
+
+    def whole_song(self):
+        resume = self.playing or self.resume_after_selection_edit
+        self.stop()
+        self.reset_playback_mode()
+        if resume and self.source is not None and self.position < len(self.source[0]):
+            self.play()
+
+    def selection_changed(self, region):
+        if self.transport.region is not None and self.transport.region != region:
+            resume = self.playing or self.resume_after_selection_edit
+            self.stop()
+            if region is None:
+                self.reset_playback_mode()
+            else:
+                self.set_region_mode(region)
+            self.resume_after_selection_edit = resume
+            if resume:
+                self.selection_timer.start()
+            self.update_transport()
+        self.update_buttons()
+
+    def finish_selection_edit(self):
+        resume = self.resume_after_selection_edit
+        self.resume_after_selection_edit = False
+        if resume and self.source is not None and self.position < len(self.source[0]):
+            self.play()
 
     def export(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
