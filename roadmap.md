@@ -52,6 +52,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Independent reference selection, named spectral targets, and profile JSON save/load.
 - [x] Section assignments, individual matching controls, and context-aware transition rendering.
 - [x] Selected-region hard-clipping candidates, editable rail hints, and per-channel waveform markers.
+- [x] Checked-candidate short-gap Hermite repair, original/repaired audition, reset, and full-precision export.
 - [x] Float-WAV export and automated DSP/GUI checks.
 
 ## 1. Inspection and selected-region repair
@@ -71,10 +72,11 @@ it does not recover the original recording with certainty. Gain reduction alone
 can address overload in a floating-point signal, but cannot undo baked-in clipping.
 
 - [x] Adjustable positive/negative clipping thresholds and a preview of detected intervals.
-- [ ] An interpolation baseline for short damaged intervals.
+- [x] An interpolation baseline for short damaged intervals.
 - [ ] Evaluate iterative band-limited or sparse reconstruction against that baseline.
-- [ ] Preserve samples outside the selected repair region and detected damage.
-- [ ] A/B the repaired section with the original, retaining an undoable source.
+- [x] Preserve samples outside the selected repair region and accepted damage mask.
+- [x] A/B the repaired section with the original, retaining a resettable source.
+- [ ] Accumulate repairs across regions and save/load repair sessions.
 
 Verify using known clean signals and recordings deliberately clipped at several
 levels. Measure reconstruction error and listen for boundary artefacts. Include

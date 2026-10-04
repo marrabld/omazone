@@ -24,6 +24,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Named targets captured from reference passages, with JSON profile save/load.
 - Per-section matching settings and full-song rendering with aligned EQ transitions.
 - Selected-region clipping inspection with editable rails, channel diagnostics, and waveform markers.
+- Checked-candidate short-gap declipping, original/repaired A/B, reset, and full-precision repair export.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
 
@@ -229,9 +230,57 @@ markers does not mean the recording is clean. For the acoustic-guitar repair,
 analyse the isolated recording or stem when available. Nearly constant selections
 provide insufficient waveform context and are not marked as clipping.
 
-Actual reconstruction and original/repaired A/B remain planned under
-[issue #5](https://github.com/marrabld/omazone/issues/5). Detection candidates are
-not automatically applied as a repair mask.
+Detection candidates are not automatically applied as a repair mask. Check the
+intervals you want to try reconstructing using the workflow below.
+
+## Reconstruct short clipped peaks
+
+In **Clipping inspection**, analyse a passage and inspect its candidates, then:
+
+1. Check individual **Repair?** boxes, or **Check shown** to include the displayed
+   plateau candidates. Over-range-only rows are not eligible.
+2. Set **Max gap**, **Context / side**, and **Peak bound**. Defaults are 1 ms,
+   eight intact samples per side, and four times the applicable clipping rail.
+3. Click **Repair checked**. The result column reports repaired intervals and
+   skipped intervals with reasons; hover over an elided reason to read it.
+4. The waveform shows the original signal with a green reconstruction overlay.
+   Use **Original / repaired** audition mode, looping, and the listening button
+   to compare the same passage at RMS-matched levels.
+5. **Export repaired WAV** saves the raw repaired signal as 64-bit floating-point
+   WAV, retaining sample precision outside the repaired mask. It does not include
+   preview gain matching or subsequent matching EQ.
+6. **Reset repair** restores the original processing input and invalidates any
+   mastering render based on the repair.
+
+![Checked repair candidates with reconstruction controls and repaired/skipped results](docs/images/omazone-declipping-controls.png)
+
+![Green reconstructed peaks over the original flattened waveform](docs/images/omazone-declipping-waveform.png)
+
+The original recording stays in memory unchanged. Whole-song matching and section
+matching use the repaired input after a successful repair, and their previous
+renders become stale. Mastering audition uses **Input / mastered**; when repair is
+active, its input side is the repaired signal. **Original / repaired** remains a
+separate comparison. Standard mastering export stays 32-bit float.
+
+Repair is an offline cubic-Hermite baseline using the intact endpoint samples and
+slopes fitted to surrounding audio. Only checked intervals that pass the checks
+are changed, without a broad section crossfade. Long runs, insufficient or damaged
+context, unsupported slopes, and inconsistent or excessive reconstructions are
+skipped. Samples outside successful intervals remain exactly unchanged internally.
+Restored peaks may exceed full scale; repair export preserves them rather than
+silently limiting or normalising.
+
+Each successful **Repair checked** creates a fresh result from the original and
+replaces the previous repair, rather than accumulating repairs from different
+selections. If no interval passes, the previous repair remains active. The table
+shows at most 500 intervals, so **Check shown** covers only displayed candidates.
+Use a short representative passage for this first version. Loading a new mix
+clears repair state; repair sessions are not yet saved across app restarts.
+
+This does not guarantee recovery. Tests show improvement on deliberately clipped
+sine/harmonic examples, but an intentionally flat-topped waveform can be made worse.
+Compare by listening, especially on guitar attacks, and use the isolated guitar
+recording when available. See [the algorithm and experiment](docs/declipping.md).
 
 ## Current limitations
 
@@ -280,6 +329,7 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/section_view.py`: reference capture, profile library, and section-assignment editor.
 - `src/omazone/clipping.py`: per-channel plateau candidates, over-range intervals, and threshold hints.
 - `src/omazone/clipping_view.py`: diagnostics controls, results table, and interval navigation.
+- `src/omazone/declipping.py`: selective Hermite reconstruction, intact-context checks, and rejected intervals.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.
@@ -287,6 +337,7 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `tests/test_playback.py`: exact loop wraps, short regions, one-shot endings, and A/B alignment.
 - `tests/test_sections.py`: profile validation, section context, dry gaps, stereo, and transition alignment.
 - `tests/test_clipping.py`: asymmetric/scaled clipping, rails, overloads, and documented detection limits.
+- `tests/test_declipping.py`: repair accuracy, exact masks, rejection cases, and a known worsening case.
 - `roadmap.md`: planned processing modules, priorities, and contribution ideas.
 
 The GUI uses PySide6 and pyqtgraph. The engine uses NumPy and SciPy; SoundFile

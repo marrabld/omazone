@@ -383,7 +383,7 @@ class SectionWorkbench(QtWidgets.QWidget):
         section = self.selected_section()
         if section is None:
             return
-        source = self.owner.source
+        source = self.owner.processing_source()
         targets = dict(self.targets)
         self.owner.start_job(
             lambda: section_curve(source[0], source[1], section, targets),
@@ -403,7 +403,7 @@ class SectionWorkbench(QtWidgets.QWidget):
         if self.owner.source is None or not self.sections:
             self.owner.error("Load a mix and add at least one section.")
             return
-        source = self.owner.source
+        source = self.owner.processing_source()
         sections, targets = tuple(self.sections), dict(self.targets)
         transition_ms = self.transition_ms.value()
         self.owner.invalidate()

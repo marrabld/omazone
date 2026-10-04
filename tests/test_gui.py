@@ -496,3 +496,140 @@ def test_clipping_inspection_markers_navigation_and_stale_results():
             window.worker.wait()
             app.processEvents()
         window.close()
+
+
+def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypatch):
+    import sounddevice as sd
+
+    from omazone.engine import design_match
+    from omazone.sections import capture_target
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    t = np.arange(rate // 4) / rate
+    clean = (0.9 * np.sin(2 * np.pi * 440 * t))[:, None]
+    clipped = np.clip(clean, -0.45, 0.6)
+    before = clipped.copy()
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (clipped, rate, analyse(clipped, rate), "clipped"))
+        window.waveform.set_selection(SampleRegion(0, len(clipped)))
+        inspector = window.clipping_inspector
+        inspector.positive.setValue(0.6)
+        inspector.negative.setValue(-0.45)
+        inspector.analyse()
+        wait()
+        assert not inspector.repair_button.isEnabled()
+        inspector.check_shown(True)
+        inspector.repair_button.click()
+        wait()
+        assert window.repair_result and len(window.repair_result.repaired) > 100
+        assert window.audition_mode == "repair"
+        assert window.preview_mode.currentData() == "repair"
+        assert window.processing_source()[0] is window.repair_result.audio
+        assert window.source[0] is clipped
+        np.testing.assert_array_equal(clipped, before)
+        assert window.waveform.repair_items
+        window.loop_selection.setChecked(True)
+        window.play_selection()
+        block = np.empty((128, 1), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[0][:128])
+        window.toggle_ab()
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[1][128:256])
+        assert window.ab_button.text() == "Listening: repaired"
+        window.stop()
+
+        export = tmp_path / "repaired.wav"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(export), "")
+        )
+        inspector.export_repair_button.click()
+        wait()
+        saved, saved_rate = sf.read(export, always_2d=True)
+        assert saved_rate == rate
+        assert sf.info(export).subtype == "DOUBLE"
+        np.testing.assert_array_equal(saved, window.repair_result.audio)
+
+        repaired = window.repair_result
+        window.loaded("reference", (clean, rate, analyse(clean, rate), "clean"))
+        window.process()
+        wait()
+        expected = design_match(analyse(repaired.audio, rate), analyse(clean, rate), rate)
+        np.testing.assert_allclose(window.output[2].coefficients, expected.coefficients)
+        assert window.audition_mode == "mastering"
+        assert window.ab_button.text() == "Listening: repaired input"
+        workbench = window.section_workbench
+        workbench.target_captured(
+            capture_target(clean, rate, SampleRegion(0, len(clean)), "Clean", "clean", "generated")
+        )
+        workbench.use_mix_selection()
+        workbench.add_section()
+        workbench.render_all()
+        wait()
+        np.testing.assert_array_equal(
+            window.section_result.curves[0].source.power, analyse(repaired.audio, rate).power
+        )
+        previous_output = window.output
+        inspector.max_run_ms.setValue(0.01)  # All checked runs exceed this limit.
+        inspector.repair()
+        wait()
+        assert window.repair_result is repaired
+        assert window.output is previous_output
+        assert "Skipped" in inspector.repair_summary.text()
+
+        window.preview_mode.setCurrentIndex(1)
+        assert window.preview is window.repair_preview
+        inspector.reset_repair_button.click()
+        assert window.repair_result is None
+        assert window.processing_source() is window.source
+        assert window.output is None
+        assert not window.waveform.repair_items
+        assert window.audition_mode == "mastering"
+        np.testing.assert_array_equal(window.source[0], before)
+        assert all(
+            inspector.table.item(row, 7).text() == ""
+            and inspector.table.item(row, 7).toolTip() == ""
+            for row in range(len(inspector.rows))
+        )
+
+        inspector.max_run_ms.setValue(1)
+        inspector.repair()
+        wait()
+        assert window.repair_result is not None
+        window.loaded("source", (clean, rate, analyse(clean, rate), "new file"))
+        assert window.repair_result is None
+        assert not window.waveform.repair_items
+        assert not inspector.export_repair_button.isEnabled()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
