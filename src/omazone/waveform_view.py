@@ -37,13 +37,16 @@ class WaveformView(QtWidgets.QWidget):
         self.curves = []
         self.regions = []
         self.playheads = []
+        self.section_items = []
+        self.clipping_items = []
+        self.clipping_markers = []
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        help_text = QtWidgets.QLabel(
+        self.help_text = QtWidgets.QLabel(
             "Wheel: zoom | Drag: pan | Shift+drag: select | Drag green edges: adjust | Click: seek"
         )
-        help_text.setWordWrap(True)
-        layout.addWidget(help_text)
+        self.help_text.setWordWrap(True)
+        layout.addWidget(self.help_text)
         controls = QtWidgets.QHBoxLayout()
         self.start_time = self.time_control(controls, "Start")
         self.end_time = self.time_control(controls, "End")
@@ -88,6 +91,9 @@ class WaveformView(QtWidgets.QWidget):
             self.plot_layout.removeWidget(plot)
             plot.deleteLater()
         self.channel_plots, self.curves, self.regions, self.playheads = [], [], [], []
+        self.section_items = []
+        self.clipping_items = []
+        self.clipping_markers = []
         self.index = index
         self.sample_rate = sample_rate
         duration = len(index.audio) / sample_rate
@@ -162,6 +168,7 @@ class WaveformView(QtWidgets.QWidget):
                     np.column_stack((low[:, channel], high[:, channel])).ravel(),
                     connect="pairs",
                 )
+        self.redraw_clipping(left, right, budget)
 
     def select_seconds(self, start, end):
         if self.index is not None:
@@ -251,3 +258,99 @@ class WaveformView(QtWidgets.QWidget):
     def set_position(self, samples):
         for line in self.playheads:
             line.setValue(samples / self.sample_rate)
+
+    def set_sections(self, sections, transitions, colors):
+        for plot, item in self.section_items:
+            plot.removeItem(item)
+        self.section_items = []
+        for channel, plot in enumerate(self.channel_plots):
+            for index, section in enumerate(sections):
+                color = colors[index % len(colors)]
+                shade = pg.mkColor(color)
+                shade.setAlpha(24)
+                region = pg.LinearRegionItem(
+                    values=(
+                        section.region.start / self.sample_rate,
+                        section.region.end / self.sample_rate,
+                    ),
+                    movable=False,
+                    brush=pg.mkBrush(shade),
+                    pen=pg.mkPen(color),
+                )
+                region.setZValue(-5)
+                region.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                for line in region.lines:
+                    line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(region, ignoreBounds=True)
+                label = pg.TextItem(section.name, color=color, anchor=(0.5, 0))
+                label.setPos(
+                    (section.region.start + section.region.end) / (2 * self.sample_rate),
+                    max(1.0, float(self.index.peak[channel])),
+                )
+                label.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(label, ignoreBounds=True)
+                self.section_items.extend(((plot, region), (plot, label)))
+            for transition in transitions:
+                region = pg.LinearRegionItem(
+                    values=(transition.start / self.sample_rate, transition.end / self.sample_rate),
+                    movable=False,
+                    brush=pg.mkBrush(234, 187, 107, 24),
+                    pen=pg.mkPen("#eabb6b", style=QtCore.Qt.PenStyle.DashLine),
+                )
+                region.setZValue(-4)
+                region.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                for line in region.lines:
+                    line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(region, ignoreBounds=True)
+                self.section_items.append((plot, region))
+
+    def set_clipping(self, report):
+        for plot, item in self.clipping_items:
+            plot.removeItem(item)
+        self.clipping_items = []
+        self.clipping_markers = []
+        if report is None:
+            return
+        for stats in report.stats:
+            plot = self.channel_plots[stats.channel]
+            for intervals, color in ((report.candidates, "#ff6b6b"), (report.overloads, "#ffb45c")):
+                channel_intervals = sorted(
+                    (item for item in intervals if item.channel == stats.channel),
+                    key=lambda item: item.start,
+                )
+                if not channel_intervals:
+                    continue
+                centers = np.asarray(
+                    [
+                        (item.start + item.end - 1) / (2 * self.sample_rate)
+                        for item in channel_intervals
+                    ]
+                )
+                levels = np.asarray([item.level for item in channel_intervals])
+                marker = pg.ScatterPlotItem(
+                    size=7, pen=pg.mkPen(color), brush=pg.mkBrush(color), symbol="o"
+                )
+                marker.setZValue(15)
+                marker.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(marker, ignoreBounds=True)
+                self.clipping_items.append((plot, marker))
+                self.clipping_markers.append((marker, centers, levels))
+            for threshold in (report.settings.positive, report.settings.negative):
+                line = pg.InfiniteLine(
+                    pos=threshold,
+                    angle=0,
+                    pen=pg.mkPen("#ff6b6b", style=QtCore.Qt.PenStyle.DashLine),
+                )
+                line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(line, ignoreBounds=True)
+                self.clipping_items.append((plot, line))
+        left, right = self.channel_plots[0].viewRange()[0]
+        self.redraw_clipping(left, right, max(100, min(2000, self.channel_plots[0].width())))
+
+    def redraw_clipping(self, left, right, budget):
+        for marker, times, levels in self.clipping_markers:
+            first, last = np.searchsorted(times, (left, right))
+            # Bound GUI work on dense clipped passages. The inspector totals
+            # include every interval; zooming reveals the individual markers.
+            stride = max(1, int(np.ceil((last - first) / budget)))
+            marker.setData(times[first:last:stride], levels[first:last:stride])

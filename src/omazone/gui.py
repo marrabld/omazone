@@ -8,6 +8,7 @@ import pyqtgraph as pg
 import soundfile as sf
 from PySide6 import QtCore, QtWidgets
 
+from .clipping_view import ClippingInspector
 from .engine import (
     MatchSettings,
     analyse,
@@ -18,6 +19,7 @@ from .engine import (
     rms_db,
 )
 from .playback import PlaybackCursor
+from .section_view import SectionWorkbench
 from .waveform import PeakIndex
 from .waveform_view import WaveformView
 
@@ -94,6 +96,7 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowTitle("Omazone | spectral matching playground")
         self.resize(1120, 800)
         self.source = self.reference = self.output = None
+        self.section_result = None
         self.worker = None
         self.stream = None
         self.preview = None
@@ -138,8 +141,16 @@ class Window(QtWidgets.QMainWindow):
         self.selection_timer.setInterval(150)
         self.selection_timer.timeout.connect(self.finish_selection_edit)
         self.views.addTab(self.waveform, "Waveform / selection")
+        self.section_workbench = SectionWorkbench(self)
+        self.views.addTab(self.section_workbench.reference_page, "Reference targets")
+        self.views.addTab(self.section_workbench, "Mix sections")
+        self.clipping_inspector = ClippingInspector(self)
+        self.views.addTab(self.clipping_inspector, "Clipping inspection")
         layout.addWidget(self.views, 1)
 
+        layout.addWidget(
+            QtWidgets.QLabel("Whole-song matching controls; mix sections have their own settings.")
+        )
         controls = QtWidgets.QHBoxLayout()
         self.amount = self.control(controls, "Match amount", 0, 100, 50, "%", 0)
         self.smoothing = self.control(controls, "Smoothing", 0.02, 2, 0.33, " oct", 2)
@@ -246,7 +257,16 @@ class Window(QtWidgets.QMainWindow):
         self.ab_button.setEnabled(self.output is not None)
         self.seek_slider.setEnabled(not busy and self.source is not None)
         self.waveform.setEnabled(not busy and self.source is not None)
+        self.section_workbench.setEnabled(not busy)
+        self.section_workbench.reference_page.setEnabled(not busy)
+        self.clipping_inspector.setEnabled(not busy and self.source is not None)
+        self.section_workbench.capture_button.setEnabled(not busy and self.reference is not None)
+        self.section_workbench.render_button.setEnabled(
+            not busy and self.source is not None and bool(self.section_workbench.sections)
+        )
         has_selection = self.source is not None and self.waveform.selection is not None
+        self.clipping_inspector.analyse_button.setEnabled(not busy and has_selection)
+        self.clipping_inspector.suggest_button.setEnabled(not busy and has_selection)
         self.play_selection_button.setEnabled(not busy and has_selection)
         self.loop_selection.setEnabled(not busy and has_selection)
         self.whole_song_button.setEnabled(not busy and self.source is not None)
@@ -291,11 +311,16 @@ class Window(QtWidgets.QMainWindow):
             self.position = 0
             index = data[4] if len(data) > 4 else PeakIndex(data[0])
             self.waveform.set_audio(index, data[1])
+            self.section_workbench.reset_mix()
+            self.clipping_inspector.reset_source()
             self.views.setCurrentWidget(self.waveform)
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
                 self.seek_slider.setPageStep(data[1] * 10)
+        else:
+            self.section_workbench.set_reference(data)
+            self.views.setCurrentWidget(self.section_workbench.reference_page)
         self.update_transport()
         mix = self.source[3] if self.source else "none"
         reference = self.reference[3] if self.reference else "none"
@@ -306,6 +331,7 @@ class Window(QtWidgets.QMainWindow):
     def invalidate(self):
         self.stop()
         self.output = None
+        self.section_result = None
         self.preview = None
         self.listen_processed = False
         self.ab_button.setText("Listening: original")
@@ -319,6 +345,7 @@ class Window(QtWidgets.QMainWindow):
         self.status.setText("Settings changed. Click Analyse + process to render.")
 
     def plot_spectra(self):
+        self.spectrum_plot.setTitle("Whole-song spectra")
         self.spectrum_plot.clear()
         for data, name, color in (
             (self.source, "Mix", "#73a8ff"),
@@ -357,13 +384,30 @@ class Window(QtWidgets.QMainWindow):
             output = render(source, spec)
             return output, analyse(output, rate), spec, audition_pair(source, output)
 
+        self.invalidate()
         self.start_job(calculate, self.processed, "Designing filter and rendering blocks…")
 
     def processed(self, result):
         self.output = result[:3]
         self.preview = result[3]
+        self.views.setCurrentIndex(0)
         self.plot_spectra()
         spec = self.output[2]
+        self.eq_plot.setTitle("Whole-song correction")
+        self.draw_filter(spec)
+
+        source = self.source[0]
+        output = self.output[0]
+        self.meters.setText(
+            f"Input RMS: {rms_db(source):.1f} dBFS  |  Output RMS: {rms_db(output):.1f} dBFS"
+            f"  |  Output sample peak: {peak_db(output):.1f} dBFS"
+        )
+        self.status.setText(
+            f"Rendered. FIR delay: {spec.latency_samples} samples "
+            f"({1000 * spec.latency_samples / spec.sample_rate:.1f} ms), compensated in file."
+        )
+
+    def draw_filter(self, spec):
         self.eq_plot.clear()
         self.eq_plot.plot(
             spec.frequency[1:],
@@ -375,15 +419,33 @@ class Window(QtWidgets.QMainWindow):
         self.eq_plot.plot(
             frequency[1:], response[1:], pen=pg.mkPen("#63dfc0", width=2), name="Actual FIR"
         )
-        source = self.source[0]
-        output = self.output[0]
-        self.meters.setText(
-            f"Input RMS: {rms_db(source):.1f} dBFS  |  Output RMS: {rms_db(output):.1f} dBFS"
-            f"  |  Output sample peak: {peak_db(output):.1f} dBFS"
+
+    def sections_rendered(self, payload):
+        result, spectrum, previews = payload
+        self.processed((result.audio, spectrum, result.curves[0].filter, previews))
+        self.section_result = result
+        section = self.section_workbench.selected_section()
+        curve = next(
+            (item for item in result.curves if section and item.section.id == section.id),
+            result.curves[0],
         )
+        self.show_section_curve(curve)
         self.status.setText(
-            f"Rendered. FIR delay: {spec.latency_samples} samples "
-            f"({1000 * spec.latency_samples / spec.sample_rate:.1f} ms), compensated in file."
+            f"Rendered {len(result.curves)} sections with {len(result.transitions)} aligned transition windows. Ready for A/B and export."
+        )
+
+    def show_section_curve(self, curve, switch_view=True):
+        profile = self.section_workbench.targets[curve.section.target_id]
+        self.spectrum_plot.clear()
+        self.spectrum_plot.setTitle(f"Section: {curve.section.name} | Target: {profile.name}")
+        self.draw_spectrum(curve.source, "Mix section", "#73a8ff")
+        self.draw_spectrum(profile.spectrum, "Target", "#eabb6b")
+        self.eq_plot.setTitle(f"Correction for {curve.section.name}")
+        self.draw_filter(curve.filter)
+        if switch_view:
+            self.views.setCurrentIndex(0)
+        self.status.setText(
+            f"Showing section correction: {curve.section.name}. Render sections for the full-song preview."
         )
 
     def play(self):
@@ -537,6 +599,7 @@ class Window(QtWidgets.QMainWindow):
             self.play()
 
     def selection_changed(self, region):
+        self.clipping_inspector.selection_changed(region)
         if self.transport.region is not None and self.transport.region != region:
             resume = self.playing or self.resume_after_selection_edit
             self.stop()

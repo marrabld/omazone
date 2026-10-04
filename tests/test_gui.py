@@ -314,3 +314,185 @@ def test_selection_playback_looping_edits_and_mode_changes(monkeypatch):
         assert not window.playing
     finally:
         window.close()
+
+
+def test_reference_targets_two_sections_render_edit_and_export(tmp_path, monkeypatch):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    mix = np.random.default_rng(21).normal(0, 0.1, (rate * 2, 2))
+    reference = mix.copy()
+    reference[rate:] = signal.sosfilt(
+        signal.butter(2, 1200, fs=rate, output="sos"), mix[rate:], axis=0
+    )
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (mix, rate, analyse(mix, rate), "mix"))
+        window.waveform.set_selection(SampleRegion(0, rate))
+        window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
+        workbench = window.section_workbench
+        workbench.reference_waveform.set_selection(SampleRegion(0, rate))
+        workbench.target_name.setText("Metal")
+        workbench.capture_button.click()
+        wait()
+        workbench.reference_waveform.set_selection(SampleRegion(rate, len(reference)))
+        workbench.target_name.setText("Clean")
+        workbench.capture_button.click()
+        wait()
+        assert len(workbench.targets) == 2
+        assert window.waveform.selection == SampleRegion(0, rate)
+
+        workbench.use_mix_selection()
+        workbench.name.setText("Metal intro")
+        workbench.target_choice.setCurrentIndex(0)
+        workbench.add_section()
+        assert len(workbench.sections) == 1
+        window.waveform.set_selection(SampleRegion(rate, len(mix)))
+        workbench.use_mix_selection()
+        workbench.name.setText("Clean outro")
+        workbench.target_choice.setCurrentIndex(1)
+        workbench.amount.setValue(100)
+        workbench.add_section()
+        assert len(workbench.sections) == 2
+        assert len(window.waveform.section_items) > 0
+        workbench.render_button.click()
+        wait()
+        assert len(window.section_result.curves) == 2
+        assert window.output[0].shape == mix.shape
+        assert window.export_button.isEnabled()
+
+        window.views.setCurrentWidget(workbench)
+        workbench.table.selectRow(0)
+        assert window.views.currentWidget() is workbench
+        assert window.waveform.selection == SampleRegion(0, rate)
+        assert "Metal intro" in window.eq_plot.plotItem.titleLabel.text
+        export = tmp_path / "sections.wav"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(export), "")
+        )
+        window.export()
+        wait()
+        result, saved_rate = sf.read(export, always_2d=True)
+        assert saved_rate == rate
+        np.testing.assert_allclose(result, window.output[0], atol=1e-7)
+
+        workbench.amount.setValue(25)
+        assert window.output is None
+        assert workbench.draft_dirty
+        workbench.update_section()
+        assert window.output is None
+        assert window.section_result is None
+        assert not window.export_button.isEnabled()
+        assert workbench.sections[0].settings.amount == 0.25
+
+        workbench.amount.setValue(30)
+        workbench.render_all()  # Rendering applies valid pending edits.
+        wait()
+        assert workbench.sections[0].settings.amount == 0.3
+        assert window.section_result is not None
+
+        workbench.end.setValue(1.5)  # Overlaps the second section.
+        workbench.update_section()
+        assert errors and "overlap" in errors.pop()
+        assert workbench.sections[0].region.end == rate
+
+        profiles = tmp_path / "profiles.json"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(profiles), "")
+        )
+        workbench.save_library()
+        wait()
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (str(profiles), "")
+        )
+        workbench.load_library()
+        wait()
+        assert len(workbench.targets) == 4
+        assert len(workbench.sections) == 2
+        window.loaded("source", (mix[:rate], rate, analyse(mix[:rate], rate), "short"))
+        assert workbench.sections == []
+        assert len(workbench.targets) == 4
+        assert not window.waveform.section_items
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_clipping_inspection_markers_navigation_and_stale_results():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    audio = np.zeros((rate, 2))
+    audio[100:110, 0] = 0.6
+    audio[150:165, 0] = -0.4
+    audio[200:210, 1] = 1.2
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "test"))
+        window.waveform.set_selection(SampleRegion(50, 300))
+        inspector = window.clipping_inspector
+        inspector.positive.setValue(0.6)
+        inspector.negative.setValue(-0.4)
+        output = audio * 0.5
+        window.output = (output, analyse(output, rate), None)
+        window.update_buttons()
+        inspector.analyse_button.click()
+        wait()
+        assert len(inspector.report.candidates) == 2
+        assert len(inspector.report.overloads) == 1
+        assert window.output[0] is output  # Inspection never modifies render/export audio.
+        assert len(window.waveform.clipping_markers) == 2
+        inspector.table.selectRow(0)
+        inspector.show_interval()
+        app.processEvents()
+        window.waveform.redraw()
+        assert window.position == 100
+        assert window.waveform.selection == SampleRegion(50, 300)
+        assert window.views.currentWidget() is window.waveform
+        assert any(len(marker.points()) > 0 for marker, _, _ in window.waveform.clipping_markers)
+        inspector.tolerance.setValue(0.0001)
+        assert inspector.report is None
+        assert not window.waveform.clipping_items
+        inspector.analyse()
+        wait()
+        window.waveform.set_selection(SampleRegion(50, 250))
+        assert inspector.report is None
+        inspector.channel.setCurrentIndex(1)  # Left only.
+        inspector.suggest()
+        wait()
+        assert inspector.positive.value() == 0.6
+        assert inspector.negative.value() == -0.4
+        window.loaded("source", (audio[:, :1], rate, analyse(audio[:, :1], rate), "mono"))
+        assert inspector.channel.currentData() == 0
+        assert inspector.positive.value() == 1
+        assert inspector.report is None
+        assert not inspector.analyse_button.isEnabled()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()

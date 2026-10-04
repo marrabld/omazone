@@ -21,6 +21,9 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Click-and-drag seeking, elapsed/total time, and pause/resume.
 - Linked mono/stereo waveform views with peak-preserving zoom and region selection.
 - One-shot selection playback and sample-aligned loops with shared original/processed A/B.
+- Named targets captured from reference passages, with JSON profile save/load.
+- Per-section matching settings and full-song rendering with aligned EQ transitions.
+- Selected-region clipping inspection with editable rails, channel diagnostics, and waveform markers.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
 
@@ -126,6 +129,110 @@ zoom to sample level when inspecting an exact boundary. Peak-index construction
 runs alongside file analysis in the loading worker, while redraws use a bounded
 number of display points.
 
+## Match metal and clean sections separately
+
+Use different targets when a song contains passages with different tonal goals.
+Each mix section is analysed independently against its assigned target; the
+whole-song spectrum is not used to design its correction.
+
+![Two mix sections assigned to separate Metal and Clean spectral targets](docs/images/omazone-section-matching.png)
+
+1. Load a reference and open **Reference targets**. Shift+drag its metal passage,
+   enter a target name such as `Metal`, and click **Capture target**.
+2. Select its clean passage and capture `Clean`. You can also capture targets
+   from different reference files; earlier targets remain in the library.
+3. Load your mix. In **Waveform / selection**, select the mix's metal passage.
+4. Open **Mix sections**, click **Use mix selection**, name the section, choose
+   `Metal`, set its amount/smoothing/gain limits, and click **Add section**.
+5. Repeat for the clean passage with the `Clean` target. Assignments cannot overlap.
+6. Choose a **Transition** duration and click **Render sections**. This produces
+   one complete preview and exportable file, keeping the original duration.
+7. Select a table row and use **Inspect EQ** to view its requested and actual
+   correction. **Audition section** uses the existing transport; enable
+   **Loop selection** and switch original/processed to compare it repeatedly.
+
+To change an assignment, select its row, edit the fields, and click **Apply to
+selected**. **Inspect EQ** and **Render sections** also apply pending edits to the
+selected row. Edits invalidate the old preview and export until you render again.
+The controls below the tabs and **Analyse + process** still perform whole-song
+matching; section settings live in the section table and editor.
+
+Coloured named regions appear on the mix waveform. Dashed yellow windows show
+where neighbouring filtered signals, or a filter and the original audio, blend.
+Unassigned samples outside these windows stay unchanged.
+
+The transition setting is the requested full window duration, centred on each
+boundary. Windows shorten automatically when neighbouring sections or gaps are
+small, so they cannot overlap. The summary lists their effective durations.
+At file edges no transition is added. Setting the duration to zero gives a hard
+switch; even a nonzero fade can produce an audible tonal change.
+
+Rendering uses surrounding audio context for each linear-phase FIR, compensates
+delay before mixing paths, and uses complementary raised-cosine amplitude weights.
+Identical paths therefore do not receive an equal-power crossfade gain boost.
+
+**Save targets / Load targets** store versioned JSON spectral profiles and passage
+metadata, not the recordings. Imports merge into the library; colliding IDs become
+new targets so existing assignments are preserved. References may use a different
+sample rate from the mix. Choose at least 0.1 seconds of non-silent material;
+longer representative passages generally make better tonal targets.
+
+In this first version, section assignments remain in memory and must be recreated
+after restarting the app. Loading a new mix clears them but retains captured
+targets. Preview level matching uses whole-file RMS, not separate per-section
+loudness normalisation. Section matching controls tonal balance, not dynamics or
+vocal/instrument balance.
+
+## Inspect suspected clipping in a selected passage
+
+Select the affected passage in **Waveform / selection**, then open **Clipping
+inspection** and click **Analyse selection**. Analysis reads the original loaded
+audio only; it does not alter samples, an existing render, or exported audio.
+
+![Clipping inspection showing separate positive and negative rails, per-channel statistics, and suspected intervals](docs/images/omazone-clipping-inspection.png)
+
+- **Channel** scans both stereo channels or a single channel. Mono files have one option.
+- **+ threshold / - threshold** are independent linear sample amplitudes, not dB.
+  Defaults are +1 and -1; scaled-down recordings may have lower clipping levels.
+- **Tolerance** controls how close samples must be to a rail and how little
+  variation is allowed across a plateau. The default 0.00005 includes common
+  near-full-scale PCM rails. **Min run** excludes isolated threshold hits.
+- **Suggest levels** looks for high-amplitude flat-run evidence. It leaves a
+  polarity unchanged when it finds no evidence. If stereo levels disagree,
+  select Left/Right and inspect them separately rather than assuming a common rail.
+- Select a table row and click **Show interval**, or double-click it, to zoom
+  into its samples and seek there. **Show selection** fits the analysed passage.
+- Changing settings, changing the mix selection, or loading a new mix clears
+  stale diagnostics. **Clear markers** removes the results without changing audio.
+
+![Red suspected-plateau markers on a clipped left channel and an orange over-range marker on the right](docs/images/omazone-clipping-markers.png)
+
+Red markers identify suspected flat threshold runs, with dashed red lines showing
+the chosen rails. Orange markers identify samples above full scale. The screenshots
+use generated stereo audio to illustrate the distinction: the left signal was
+deliberately hard-clipped below full scale, while the right contains an over-range
+floating-point passage.
+
+An over-range float sample can retain its original waveform; reducing gain before
+playback or conversion may address that overload. A flattened recorded peak has
+lost information even after it is turned down. Neither condition is diagnosed
+solely by the other one's marker.
+
+Results use half-open absolute sample bounds. The table shows up to 500 intervals;
+counts include all detected intervals. Wide waveform views thin dense markers to
+keep redraws bounded; zoom in to inspect individual runs.
+
+This is a heuristic, not proof of clipping. Clean low-frequency extrema, quantised
+or synthesised waveforms can look flat. Very short damage, soft/analogue distortion,
+or a clipped instrument mixed with other sources can evade detection. Absence of
+markers does not mean the recording is clean. For the acoustic-guitar repair,
+analyse the isolated recording or stem when available. Nearly constant selections
+provide insufficient waveform context and are not marked as clipping.
+
+Actual reconstruction and original/repaired A/B remain planned under
+[issue #5](https://github.com/marrabld/omazone/issues/5). Detection candidates are
+not automatically applied as a repair mask.
+
 ## Current limitations
 
 The interface shows RMS and sample peaks, not LUFS or true peaks. Preview is
@@ -169,11 +276,17 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/waveform.py`: peak index and GUI-independent sample-region model.
 - `src/omazone/waveform_view.py`: linked waveform plots, selection, zoom, and seeking.
 - `src/omazone/playback.py`: GUI-independent sample cursor and selected-region buffer filling.
+- `src/omazone/sections.py`: named profiles, validation, transition planning, and contextual rendering.
+- `src/omazone/section_view.py`: reference capture, profile library, and section-assignment editor.
+- `src/omazone/clipping.py`: per-channel plateau candidates, over-range intervals, and threshold hints.
+- `src/omazone/clipping_view.py`: diagnostics controls, results table, and interval navigation.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.
 - `tests/test_waveform.py`: preserved peaks, raw-sample zoom, and region bounds.
 - `tests/test_playback.py`: exact loop wraps, short regions, one-shot endings, and A/B alignment.
+- `tests/test_sections.py`: profile validation, section context, dry gaps, stereo, and transition alignment.
+- `tests/test_clipping.py`: asymmetric/scaled clipping, rails, overloads, and documented detection limits.
 - `roadmap.md`: planned processing modules, priorities, and contribution ideas.
 
 The GUI uses PySide6 and pyqtgraph. The engine uses NumPy and SciPy; SoundFile
@@ -181,6 +294,9 @@ handles audio files, and sounddevice handles preview playback. Analysis and
 rendering run in a worker thread to keep the interface responsive.
 
 ## Contributing
+
+Use feature branches and pull requests for new work. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the branch/review workflow and checks.
 
 Start with the [roadmap](roadmap.md), then browse or open an
 [issue](https://github.com/marrabld/omazone/issues). For a new processing module,

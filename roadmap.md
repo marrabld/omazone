@@ -31,6 +31,9 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#12](https://github.com/marrabld/omazone/issues/12) | Readable log-frequency labels | Good first issue |
 | [#13](https://github.com/marrabld/omazone/issues/13) | Generated-signal matching tutorial | Good first issue |
 | [#14](https://github.com/marrabld/omazone/issues/14) | Windows/macOS setup and playback validation | Good first issue |
+| [#16](https://github.com/marrabld/omazone/issues/16) | Named reference-passage targets and profile files | #2 |
+| [#17](https://github.com/marrabld/omazone/issues/17) | Mix-section assignments and independent correction curves | #16 |
+| [#18](https://github.com/marrabld/omazone/issues/18) | Contextual section rendering and aligned transitions | #16, #17 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -46,6 +49,9 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Scrubbing, elapsed/total time, and pause/resume.
 - [x] Linked waveform plots, peak-preserving overview, and sample-accurate selection.
 - [x] One-shot selected-region playback and shared-cursor A/B looping.
+- [x] Independent reference selection, named spectral targets, and profile JSON save/load.
+- [x] Section assignments, individual matching controls, and context-aware transition rendering.
+- [x] Selected-region hard-clipping candidates, editable rail hints, and per-channel waveform markers.
 - [x] Float-WAV export and automated DSP/GUI checks.
 
 ## 1. Inspection and selected-region repair
@@ -53,7 +59,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 Make it possible to identify a damaged passage and judge a repair locally.
 
 - [x] Zoomable waveform with a region-selection tool.
-- [ ] Mark suspected clipped samples and runs of flattened peaks.
+- [x] Mark suspected clipped samples and runs of flattened peaks.
 - [ ] Input/output peak indicators to distinguish source damage from processing overload.
 - [x] Audition and loop a selected section with the existing A/B comparison.
 - [ ] Inspect an actual clipped recording before choosing a reconstruction method.
@@ -64,7 +70,7 @@ Declipping is an offline repair operation. It estimates missing waveform peaks;
 it does not recover the original recording with certainty. Gain reduction alone
 can address overload in a floating-point signal, but cannot undo baked-in clipping.
 
-- [ ] Adjustable positive/negative clipping thresholds and a preview of detected intervals.
+- [x] Adjustable positive/negative clipping thresholds and a preview of detected intervals.
 - [ ] An interpolation baseline for short damaged intervals.
 - [ ] Evaluate iterative band-limited or sparse reconstruction against that baseline.
 - [ ] Preserve samples outside the selected repair region and detected damage.
@@ -140,13 +146,22 @@ A limiter prevents new overload; declipping treats existing damage. Evaluate
 them separately. Check metering against known reference results and inspect
 limiter overshoot, transient distortion, and reported latency.
 
-## 6. Better matching experiments
+## 6. Section matching and further experiments
 
-- [ ] Select which passage contributes to source/reference analysis.
+- [x] Capture named targets from independent reference passages.
+- [x] Assign targets to non-overlapping mix sections, each analysed independently.
+- [x] Inspect per-section curves and audition them with the existing A/B transport.
+- [x] Render aligned filtered paths with complementary, bounded transition windows.
+- [ ] Save/load complete section plans and settings for a particular mix.
+- [ ] Rename/update captured targets without disturbing assignments.
+- [ ] Evaluate transition placement/duration on real metal-to-clean arrangements.
+
+- [x] Select which passage contributes to source/reference analysis for section matching.
 - [ ] Compare spectral normalisation and frequency-weighting strategies.
 - [ ] Offer longer FIR filters and show the latency/resolution tradeoff.
 - [ ] Explore minimum-phase matching as an alternative to linear phase.
-- [ ] Save reference profiles and reproducible processing settings.
+- [x] Save reference spectral profiles.
+- [ ] Save reproducible whole-song processing settings.
 - [ ] Profile memory and render time on full-length songs.
 
 ## 7. Route to real-time
