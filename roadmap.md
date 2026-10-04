@@ -34,6 +34,7 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#16](https://github.com/marrabld/omazone/issues/16) | Named reference-passage targets and profile files | #2 |
 | [#17](https://github.com/marrabld/omazone/issues/17) | Mix-section assignments and independent correction curves | #16 |
 | [#18](https://github.com/marrabld/omazone/issues/18) | Contextual section rendering and aligned transitions | #16, #17 |
+| [#21](https://github.com/marrabld/omazone/issues/21) | Guided clipping repair with advanced controls hidden | Repair PR #20 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -53,6 +54,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Section assignments, individual matching controls, and context-aware transition rendering.
 - [x] Selected-region hard-clipping candidates, editable rail hints, and per-channel waveform markers.
 - [x] Checked-candidate short-gap Hermite repair, original/repaired audition, reset, and full-precision export.
+- [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
 
 ## 1. Inspection and selected-region repair

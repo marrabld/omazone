@@ -340,7 +340,8 @@ class WaveformView(QtWidgets.QWidget):
                 plot.addItem(marker, ignoreBounds=True)
                 self.clipping_items.append((plot, marker))
                 self.clipping_markers.append((marker, centers, levels))
-            for threshold in (report.settings.positive, report.settings.negative):
+            settings = report.settings_for(stats.channel)
+            for threshold in (settings.positive, settings.negative):
                 line = pg.InfiniteLine(
                     pos=threshold,
                     angle=0,

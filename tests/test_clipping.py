@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from omazone.clipping import DetectionSettings, detect_clipping, suggest_thresholds
+from omazone.clipping import DetectionSettings, detect_clipping, find_clipping, suggest_thresholds
 from omazone.waveform import SampleRegion
 
 
@@ -114,3 +114,27 @@ def test_clean_low_frequency_extrema_can_be_false_positives_at_manual_rails():
 def test_invalid_controls_rejected(settings):
     with pytest.raises(ValueError):
         detect_clipping(np.zeros((10, 2)), SampleRegion(0, 10), settings)
+
+
+def test_automatic_scan_uses_distinct_channel_rails():
+    time = np.arange(4800) / 48000
+    audio = np.column_stack(
+        (
+            np.clip(0.9 * np.sin(2 * np.pi * 440 * time), -0.45, 0.6),
+            np.clip(0.7 * np.sin(2 * np.pi * 660 * time), -0.25, 0.4),
+        )
+    )
+    report = find_clipping(audio, SampleRegion(0, len(audio)))
+    assert report.settings_for(0).positive == pytest.approx(0.6)
+    assert report.settings_for(0).negative == pytest.approx(-0.45)
+    assert report.settings_for(1).positive == pytest.approx(0.4)
+    assert report.settings_for(1).negative == pytest.approx(-0.25)
+    assert {item.channel for item in report.candidates} == {0, 1}
+
+
+def test_automatic_over_range_only_remains_separate():
+    audio = np.zeros((100, 1))
+    audio[40:50] = 1.2
+    report = find_clipping(audio, SampleRegion(0, len(audio)))
+    assert not report.candidates
+    assert len(report.overloads) == 1

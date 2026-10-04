@@ -603,7 +603,7 @@ def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypat
         wait()
         assert window.repair_result is repaired
         assert window.output is previous_output
-        assert "Skipped" in inspector.repair_summary.text()
+        assert "kept unchanged" in inspector.repair_summary.text()
 
         window.preview_mode.setCurrentIndex(1)
         assert window.preview is window.repair_preview
@@ -632,4 +632,124 @@ def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypat
         if window.worker is not None:
             window.worker.wait()
             app.processEvents()
+        window.close()
+
+
+def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(monkeypatch):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    t = np.arange(4800) / rate
+    audio = np.column_stack(
+        (
+            np.clip(0.9 * np.sin(2 * np.pi * 440 * t), -0.45, 0.6),
+            np.clip(0.7 * np.sin(2 * np.pi * 660 * t), -0.25, 0.4),
+        )
+    )
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "stereo"))
+        window.waveform.set_selection(SampleRegion(0, len(audio)))
+        inspector = window.clipping_inspector
+        # Even with a prior master, entering repair inspection auditions raw source.
+        window.output = (audio * 0.5, analyse(audio * 0.5, rate), None)
+        window.views.setCurrentWidget(inspector)
+        app.processEvents()
+        assert window.audition_mode == "original"
+        assert window.mastering_controls.isHidden()
+        assert window.load_ref.isHidden()
+        assert window.preview_mode.isHidden()
+        assert inspector.advanced_panel.isHidden()
+        assert inspector.review_panel.isHidden()
+        window.play_selection()
+        block = np.empty((32, 2), dtype=np.float32)
+        window.stream.callback(block, 32, None, None)
+        np.testing.assert_array_equal(block, audio[:32].astype(np.float32))
+        window.stop()
+        inspector.analyse_button.click()
+        wait()
+        assert {item.channel for item in inspector.report.candidates} == {0, 1}
+        assert "dBFS" not in inspector.summary.text()
+        assert not inspector.repair_button.isEnabled()
+        inspector.review_button.click()
+        assert not inspector.review_panel.isHidden()
+        assert inspector.table.isColumnHidden(6)
+        inspector.check_shown(True)
+        inspector.repair_button.click()
+        wait()
+        assert window.views.currentWidget() is inspector
+        assert inspector.result_heading.text() == "Repair preview ready"
+        assert not inspector.result_actions.isHidden()
+        inspector.listen_button.click()
+        assert window.playing and window.transport.loop
+        window.stream.callback(block, 32, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[0][:32])
+        window.toggle_ab()
+        window.stream.callback(block, 32, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[1][32:64])
+        window.stop()
+        inspector.advanced_toggle.setChecked(True)
+        assert not inspector.advanced_panel.isHidden()
+        assert not inspector.table.isColumnHidden(6)
+        inspector.channel.setCurrentIndex(1)
+        inspector.positive.setValue(0.6)
+        inspector.negative.setValue(-0.45)
+        inspector.manual_analyse_button.click()
+        wait()
+        assert len(inspector.report.stats) == 1
+        assert inspector.report.stats[0].channel == 0
+        window.views.setCurrentIndex(0)
+        assert not window.mastering_controls.isHidden()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_guided_no_results_message_does_not_offer_repair():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 48000
+    audio = (0.8 * np.sin(2 * np.pi * 440 * np.arange(4800) / rate))[:, None]
+    try:
+        window.loaded("source", (audio, rate, analyse(audio, rate), "clean"))
+        window.waveform.set_selection(SampleRegion(0, len(audio)))
+        from omazone.clipping import find_clipping
+
+        inspector = window.clipping_inspector
+        inspector.analysed(find_clipping(audio, window.waveform.selection))
+        assert inspector.result_heading.text() == "No clear clipped peaks found"
+        assert "isolated recording" in inspector.summary.text()
+        assert not inspector.review_button.isEnabled()
+        assert not inspector.repair_button.isEnabled()
+    finally:
+        app.processEvents()
         window.close()

@@ -184,83 +184,56 @@ targets. Preview level matching uses whole-file RMS, not separate per-section
 loudness normalisation. Section matching controls tonal balance, not dynamics or
 vocal/instrument balance.
 
-## Inspect suspected clipping in a selected passage
+## Try clipping repair
 
-Select the affected passage in **Waveform / selection**, then open **Clipping
-inspection** and click **Analyse selection**. Analysis reads the original loaded
-audio only; it does not alter samples, an existing render, or exported audio.
+The clipping screen starts with a guided workflow. Numerical controls are hidden
+under **Advanced settings and measurements**, and unrelated mastering controls
+are hidden while you inspect or audition a repair.
 
-![Clipping inspection showing separate positive and negative rails, per-channel statistics, and suspected intervals](docs/images/omazone-clipping-inspection.png)
+![Guided clipping workflow with Find, Review, and Try repair actions](docs/images/omazone-clipping-guided.png)
 
-- **Channel** scans both stereo channels or a single channel. Mono files have one option.
-- **+ threshold / - threshold** are independent linear sample amplitudes, not dB.
-  Defaults are +1 and -1; scaled-down recordings may have lower clipping levels.
-- **Tolerance** controls how close samples must be to a rail and how little
-  variation is allowed across a plateau. The default 0.00005 includes common
-  near-full-scale PCM rails. **Min run** excludes isolated threshold hits.
-- **Suggest levels** looks for high-amplitude flat-run evidence. It leaves a
-  polarity unchanged when it finds no evidence. If stereo levels disagree,
-  select Left/Right and inspect them separately rather than assuming a common rail.
-- Select a table row and click **Show interval**, or double-click it, to zoom
-  into its samples and seek there. **Show selection** fits the analysed passage.
-- Changing settings, changing the mix selection, or loading a new mix clears
-  stale diagnostics. **Clear markers** removes the results without changing audio.
+1. Select the affected passage in **Waveform / selection** and open **Clipping inspection**.
+2. Click **Find clipped peaks**. Left/right channels are scanned with separate
+   suggested levels; scanning does not change your recording.
+3. Click **Review peaks**. Inspect a peak if unsure, then check the ones you want
+   to try repairing. **Include shown peaks** checks the displayed candidates.
+4. Click **Try repair**. Peaks the algorithm cannot reconstruct are kept unchanged.
+5. Click **Listen to repair** to loop the selected passage, then use the listening
+   button below to switch between original and repaired audio.
+6. **Undo repair** restores the original input. **Save repaired audio** exports
+   the raw repaired signal without preview gain matching or subsequent EQ.
 
-![Red suspected-plateau markers on a clipped left channel and an orange over-range marker on the right](docs/images/omazone-clipping-markers.png)
+![Compact review list with selectable peaks and friendly positions](docs/images/omazone-clipping-review.png)
 
-Red markers identify suspected flat threshold runs, with dashed red lines showing
-the chosen rails. Orange markers identify samples above full scale. The screenshots
-use generated stereo audio to illustrate the distinction: the left signal was
-deliberately hard-clipped below full scale, while the right contains an over-range
-floating-point passage.
-
-An over-range float sample can retain its original waveform; reducing gain before
-playback or conversion may address that overload. A flattened recorded peak has
-lost information even after it is turned down. Neither condition is diagnosed
-solely by the other one's marker.
-
-Results use half-open absolute sample bounds. The table shows up to 500 intervals;
-counts include all detected intervals. Wide waveform views thin dense markers to
-keep redraws bounded; zoom in to inspect individual runs.
-
-This is a heuristic, not proof of clipping. Clean low-frequency extrema, quantised
-or synthesised waveforms can look flat. Very short damage, soft/analogue distortion,
-or a clipped instrument mixed with other sources can evade detection. Absence of
-markers does not mean the recording is clean. For the acoustic-guitar repair,
-analyse the isolated recording or stem when available. Nearly constant selections
-provide insufficient waveform context and are not marked as clipping.
-
-Detection candidates are not automatically applied as a repair mask. Check the
-intervals you want to try reconstructing using the workflow below.
-
-## Reconstruct short clipped peaks
-
-In **Clipping inspection**, analyse a passage and inspect its candidates, then:
-
-1. Check individual **Repair?** boxes, or **Check shown** to include the displayed
-   plateau candidates. Over-range-only rows are not eligible.
-2. Set **Max gap**, **Context / side**, and **Peak bound**. Defaults are 1 ms,
-   eight intact samples per side, and four times the applicable clipping rail.
-3. Click **Repair checked**. The result column reports repaired intervals and
-   skipped intervals with reasons; hover over an elided reason to read it.
-4. The waveform shows the original signal with a green reconstruction overlay.
-   Use **Original / repaired** audition mode, looping, and the listening button
-   to compare the same passage at RMS-matched levels.
-5. **Export repaired WAV** saves the raw repaired signal as 64-bit floating-point
-   WAV, retaining sample precision outside the repaired mask. It does not include
-   preview gain matching or subsequent matching EQ.
-6. **Reset repair** restores the original processing input and invalidates any
-   mastering render based on the repair.
-
-![Checked repair candidates with reconstruction controls and repaired/skipped results](docs/images/omazone-declipping-controls.png)
+Red waveform markers show possible flattened peaks; orange markers show values
+above full scale. Green overlays show reconstructed samples. These generated-audio
+screenshots illustrate a clipped left channel and an over-range right channel.
 
 ![Green reconstructed peaks over the original flattened waveform](docs/images/omazone-declipping-waveform.png)
+
+If no clear peaks are found, the screen says so and leaves repair unavailable.
+A clipped instrument mixed with other sounds may no longer have visible flat
+peaks. Use the isolated recording when available. A float signal above full scale
+can instead be a volume-level problem, so those samples are not automatically
+treated as missing peaks.
+
+The recording stays unchanged until you explicitly try a repair. Guessed levels
+and flat-looking peaks are not proof of damage; clean low-frequency or synthesised
+signals can produce false positives. Compare by listening and undo a poor result.
+
+For manual scanning, channel/threshold controls, exact measurements, and repair
+parameters, expand **Advanced settings and measurements**. See
+[the inspection guide](docs/clipping-inspection.md) and
+[the reconstruction algorithm](docs/declipping.md).
+
+### Repair behaviour
 
 The original recording stays in memory unchanged. Whole-song matching and section
 matching use the repaired input after a successful repair, and their previous
 renders become stale. Mastering audition uses **Input / mastered**; when repair is
 active, its input side is the repaired signal. **Original / repaired** remains a
 separate comparison. Standard mastering export stays 32-bit float.
+Repair saving uses 64-bit float WAV to retain the internal sample precision.
 
 Repair is an offline cubic-Hermite baseline using the intact endpoint samples and
 slopes fitted to surrounding audio. Only checked intervals that pass the checks
@@ -270,10 +243,10 @@ skipped. Samples outside successful intervals remain exactly unchanged internall
 Restored peaks may exceed full scale; repair export preserves them rather than
 silently limiting or normalising.
 
-Each successful **Repair checked** creates a fresh result from the original and
+Each successful **Try repair** creates a fresh result from the original and
 replaces the previous repair, rather than accumulating repairs from different
 selections. If no interval passes, the previous repair remains active. The table
-shows at most 500 intervals, so **Check shown** covers only displayed candidates.
+shows at most 500 intervals, so **Include shown peaks** covers only displayed candidates.
 Use a short representative passage for this first version. Loading a new mix
 clears repair state; repair sessions are not yet saved across app restarts.
 
@@ -289,7 +262,7 @@ RMS-matched, with common attenuation to provide headroom. That is an approximate
 level comparison, not perceptual loudness matching. Abrupt A/B switches can click;
 crossfaded switching is a follow-up improvement.
 
-Exports are 32-bit floating-point WAVs containing the raw EQ result, without
+Mastering exports are 32-bit floating-point WAVs containing the raw EQ result, without
 preview attenuation. Samples can exceed 0 dBFS; there is no limiter yet. Delay is
 compensated and the output retains the input length. The complete convolution
 tail is available through the processor API, but file rendering trims it.

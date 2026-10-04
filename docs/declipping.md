@@ -33,6 +33,9 @@ The accepted set must be a subset of the current plateau report. A fresh scan
 checks that candidates are still present in the input. Duplicates, stale masks,
 and over-range-only intervals are rejected as invalid requests.
 
+Automatic reports retain separate rails for each channel. Validation and context
+checks use that channel's actual scan settings, rather than a shared stereo rail.
+
 Individual candidates are skipped when:
 
 - Their duration exceeds the chosen limit, initially 1 ms.
@@ -46,6 +49,10 @@ These checks bound the estimate; they do not prove it is musically correct.
 There is no general crossfade or amplitude normalisation applied to the source.
 Repair export uses 64-bit float WAV to preserve the internal samples. Audition
 uses separate RMS matching and common headroom, so its gain is not exported.
+
+The basic UI exposes Find, Review, Try repair, and Listen. Manual thresholds,
+reconstruction parameters, and numerical diagnostics are under Advanced; see
+[the inspection guide](clipping-inspection.md).
 
 ## Reproducible experiment
 

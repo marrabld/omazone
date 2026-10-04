@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from omazone.clipping import DetectionSettings, detect_clipping
+from omazone.clipping import DetectionSettings, detect_clipping, find_clipping
 from omazone.declipping import RepairSettings, repair_clipping
 from omazone.waveform import SampleRegion
 
@@ -134,3 +134,21 @@ def test_invalid_repair_parameters(settings):
     rate, _, clipped, report = clipped_tone()
     with pytest.raises(ValueError):
         repair_clipping(clipped, rate, report, report.candidates, settings)
+
+
+def test_automatic_per_channel_reports_can_be_repaired():
+    rate = 48000
+    t = np.arange(4800) / rate
+    audio = np.column_stack(
+        (
+            np.clip(0.9 * np.sin(2 * np.pi * 440 * t), -0.45, 0.6),
+            np.clip(0.7 * np.sin(2 * np.pi * 660 * t), -0.25, 0.4),
+        )
+    )
+    report = find_clipping(audio, SampleRegion(0, len(audio)))
+    result = repair_clipping(audio, rate, report, report.candidates)
+    assert {item.channel for item in result.repaired} == {0, 1}
+    mask = np.zeros(audio.shape, dtype=bool)
+    for item in result.repaired:
+        mask[item.start : item.end, item.channel] = True
+    np.testing.assert_array_equal(result.audio[~mask], audio[~mask])

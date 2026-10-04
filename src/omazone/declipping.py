@@ -65,7 +65,11 @@ def repair_clipping(audio, sample_rate, report: ClipReport, accepted, settings=N
     # Validate both the candidate origin and its continued presence in the source.
     # Over-range samples alone are deliberately ineligible.
     allowed = set(report.candidates)
-    current = set(detect_clipping(original, report.region, report.settings).candidates)
+    current = set()
+    for stats in report.stats:
+        current.update(
+            detect_clipping(original, report.region, report.settings_for(stats.channel)).candidates
+        )
     if len(set(accepted)) != len(accepted):
         raise ValueError("Repair intervals must not be duplicated.")
     if not set(accepted) <= allowed or not set(accepted) <= current:
@@ -74,8 +78,8 @@ def repair_clipping(audio, sample_rate, report: ClipReport, accepted, settings=N
     repaired, rejected = [], []
     maximum = max(1, int(np.floor(sample_rate * settings.max_run_ms / 1000)))
     context = settings.context_samples
-    rails = report.settings
     for interval in sorted(accepted, key=lambda item: (item.channel, item.start)):
+        rails = report.settings_for(interval.channel)
         start, end = interval.start, interval.end
         reason = None
         if end - start > maximum:

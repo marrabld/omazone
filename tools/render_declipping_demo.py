@@ -25,7 +25,7 @@ def main():
     app = QtWidgets.QApplication([])
     app.setStyle("Fusion")
     window = Window()
-    window.resize(1360, 1120)
+    window.resize(1120, 850)
     errors = []
     window.error = errors.append
     rate = 48000
@@ -50,10 +50,23 @@ def main():
         )
         window.waveform.set_selection(SampleRegion(2400, 4320))
         inspector = window.clipping_inspector
-        inspector.positive.setValue(0.6)
-        inspector.negative.setValue(-0.45)
-        inspector.analyse()
+        window.views.setCurrentWidget(inspector)
+        window.show()
+        app.processEvents()
+        window.grab().save(str(directory / "omazone-clipping-guided.png"))
+        inspector.find_peaks()
         wait()
+        inspector.review_button.click()
+        app.processEvents()
+        window.grab().save(str(directory / "omazone-clipping-review.png"))
+        window.waveform.channel_plots[0].setXRange(0.061, 0.072, padding=0)
+        window.seek(3120)
+        window.views.setCurrentWidget(window.waveform)
+        app.processEvents()
+        window.waveform.redraw()
+        app.processEvents()
+        window.grab().save(str(directory / "omazone-clipping-markers.png"))
+        window.views.setCurrentWidget(inspector)
         inspector.check_shown(True)
         inspector.repair_button.click()
         wait()
@@ -70,6 +83,11 @@ def main():
         window.waveform.redraw()
         app.processEvents()
         window.grab().save(str(directory / "omazone-declipping-waveform.png"))
+        window.views.setCurrentWidget(inspector)
+        inspector.advanced_toggle.setChecked(True)
+        window.resize(1360, 1300)
+        app.processEvents()
+        window.grab().save(str(directory / "omazone-clipping-inspection.png"))
         mask = np.zeros(len(audio), dtype=bool)
         for interval in window.repair_result.repaired:
             mask[interval.start : interval.end] = True

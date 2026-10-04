@@ -5,7 +5,7 @@ above full scale are reported separately: floating-point overload is not proof
 that waveform peaks have been lost. Threshold estimates are hints from plateaus.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -47,6 +47,13 @@ class ClipReport:
     candidates: tuple[ClipInterval, ...]
     overloads: tuple[ClipInterval, ...]
     stats: tuple[ChannelStats, ...]
+    channel_settings: tuple[DetectionSettings, ...] = ()
+
+    def settings_for(self, channel):
+        return next(
+            (item for item in self.channel_settings if item.channel == channel),
+            replace(self.settings, channel=channel),
+        )
 
 
 @dataclass(frozen=True)
@@ -176,3 +183,33 @@ def suggest_thresholds(audio, region, settings=None):
             )
         )
     return tuple(hints)
+
+
+def find_clipping(audio, region, settings=None):
+    """Scan using separate supported plateau levels for each channel.
+
+    Automatic hints are limited to rails within nominal full scale; values above
+    it remain overload diagnostics unless a manual scan deliberately chooses them.
+    Candidates still require review and are never automatically repaired.
+    """
+    settings = settings if settings is not None else DetectionSettings()
+    hints = suggest_thresholds(audio, region, settings)
+    candidates, overloads, stats, per_channel = [], [], [], []
+    for hint in hints:
+        positive = (
+            hint.positive if hint.positive is not None and hint.positive <= 1 else settings.positive
+        )
+        negative = (
+            hint.negative
+            if hint.negative is not None and hint.negative >= -1
+            else settings.negative
+        )
+        chosen = replace(settings, positive=positive, negative=negative, channel=hint.channel)
+        report = detect_clipping(audio, region, chosen)
+        candidates.extend(report.candidates)
+        overloads.extend(report.overloads)
+        stats.extend(report.stats)
+        per_channel.append(chosen)
+    return ClipReport(
+        region, settings, tuple(candidates), tuple(overloads), tuple(stats), tuple(per_channel)
+    )

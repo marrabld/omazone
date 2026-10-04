@@ -6,7 +6,7 @@ from itertools import chain
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from .clipping import DetectionSettings, detect_clipping, suggest_thresholds
+from .clipping import DetectionSettings, detect_clipping, find_clipping, suggest_thresholds
 from .declipping import RepairSettings, repair_clipping
 from .engine import analyse, audition_pair
 
@@ -17,17 +17,89 @@ class ClippingInspector(QtWidgets.QWidget):
         self.owner = owner
         self.report = None
         self.rows = []
+        self.last_attempt = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         description = QtWidgets.QLabel(
-            "Select a passage in Waveform / selection, then analyse the original audio. "
-            "Red: suspected flat peaks. Orange: samples above full scale. "
-            "Review candidates before checking them for short-interval repair. This does not isolate a clipped instrument from a mix."
+            "Find possible damage in your selected passage, review the peaks, then compare a repair with the original."
         )
         description.setWordWrap(True)
         layout.addWidget(description)
         self.scope = QtWidgets.QLabel("Select a mix passage first.")
         layout.addWidget(self.scope)
+        primary = QtWidgets.QHBoxLayout()
+        self.analyse_button = self.button(primary, "1. Find clipped peaks", self.find_peaks)
+        self.analyse_button.setStyleSheet(
+            "QPushButton { background: #63dfc0; color: #10151e; font-weight: bold; } QPushButton:disabled { background: #253246; color: #647085; }"
+        )
+        self.review_button = self.button(primary, "2. Review peaks", self.toggle_review)
+        self.repair_button = self.button(primary, "3. Try repair", self.repair)
+        layout.addLayout(primary)
+        self.result_heading = QtWidgets.QLabel("Ready to scan")
+        self.result_heading.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(self.result_heading)
+        self.summary = QtWidgets.QLabel(
+            "Scanning leaves your recording unchanged. Both channels are handled automatically."
+        )
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.repair_summary = QtWidgets.QLabel("Original audio is unchanged.")
+        self.repair_summary.setWordWrap(True)
+        self.repair_summary.hide()
+        layout.addWidget(self.repair_summary)
+        self.result_actions = QtWidgets.QWidget()
+        repair_actions = QtWidgets.QHBoxLayout(self.result_actions)
+        repair_actions.setContentsMargins(0, 0, 0, 0)
+        self.listen_button = self.button(repair_actions, "Listen to repair", self.listen)
+        self.reset_repair_button = self.button(
+            repair_actions, "Undo repair", self.owner.reset_repair
+        )
+        self.export_repair_button = self.button(
+            repair_actions, "Save repaired audio", self.owner.export_repair
+        )
+        self.result_actions.hide()
+        layout.addWidget(self.result_actions)
+
+        self.review_panel = QtWidgets.QGroupBox("Choose peaks to try repairing")
+        review_layout = QtWidgets.QVBoxLayout(self.review_panel)
+        review_layout.addWidget(
+            QtWidgets.QLabel(
+                "Only checked peaks will be changed. Inspect a peak in the waveform if unsure."
+            )
+        )
+        review_actions = QtWidgets.QHBoxLayout()
+        self.button(review_actions, "Inspect selected peak", self.show_interval)
+        self.button(review_actions, "Include shown peaks", lambda: self.check_shown(True))
+        self.button(review_actions, "Exclude shown peaks", lambda: self.check_shown(False))
+        review_layout.addLayout(review_actions)
+        self.table = QtWidgets.QTableWidget(0, 8)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.table.cellDoubleClicked.connect(lambda *args: self.show_interval())
+        self.table.itemChanged.connect(lambda *args: self.owner.update_buttons())
+        review_layout.addWidget(self.table)
+        self.review_panel.hide()
+        layout.addWidget(self.review_panel)
+
+        self.advanced_toggle = QtWidgets.QToolButton()
+        self.advanced_toggle.setText("Advanced settings and measurements")
+        self.advanced_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.advanced_toggle.toggled.connect(self.toggle_advanced)
+        layout.addWidget(self.advanced_toggle)
+        self.advanced_panel = QtWidgets.QWidget()
+        advanced = QtWidgets.QVBoxLayout(self.advanced_panel)
+        advanced.setContentsMargins(0, 0, 0, 0)
+        self.scope_details = QtWidgets.QLabel()
+        advanced.addWidget(self.scope_details)
+        manual_note = QtWidgets.QLabel(
+            "Manual scan settings. The primary Find button estimates separate levels for each channel."
+        )
+        manual_note.setWordWrap(True)
+        advanced.addWidget(manual_note)
         controls = QtWidgets.QHBoxLayout()
         controls.addWidget(QtWidgets.QLabel("Channel"))
         self.channel = QtWidgets.QComboBox()
@@ -42,14 +114,13 @@ class ClippingInspector(QtWidgets.QWidget):
         self.minimum_run.setValue(3)
         self.minimum_run.setSuffix(" samples")
         controls.addWidget(self.minimum_run)
-        layout.addLayout(controls)
+        advanced.addLayout(controls)
         row = QtWidgets.QHBoxLayout()
-        self.analyse_button = self.button(row, "Analyse selection", self.analyse)
+        self.manual_analyse_button = self.button(row, "Scan with these settings", self.analyse)
         self.suggest_button = self.button(row, "Suggest levels", self.suggest)
-        self.button(row, "Show interval", self.show_interval)
         self.button(row, "Show selection", self.show_selection)
         self.button(row, "Clear markers", self.clear)
-        layout.addLayout(row)
+        advanced.addLayout(row)
         repair_controls = QtWidgets.QHBoxLayout()
         self.max_run_ms = self.spin(repair_controls, "Max gap (ms)", 0.01, 10, 1, 2)
         repair_controls.addWidget(QtWidgets.QLabel("Context / side"))
@@ -59,46 +130,13 @@ class ClippingInspector(QtWidgets.QWidget):
         self.context_samples.setSuffix(" samples")
         repair_controls.addWidget(self.context_samples)
         self.max_peak_ratio = self.spin(repair_controls, "Peak bound (x rail)", 1, 10, 4, 1)
-        self.button(repair_controls, "Check shown", lambda: self.check_shown(True))
-        self.button(repair_controls, "Uncheck shown", lambda: self.check_shown(False))
-        layout.addLayout(repair_controls)
-        repair_actions = QtWidgets.QHBoxLayout()
-        self.repair_button = self.button(repair_actions, "Repair checked", self.repair)
-        self.reset_repair_button = self.button(
-            repair_actions, "Reset repair", self.owner.reset_repair
-        )
-        self.export_repair_button = self.button(
-            repair_actions, "Export repaired WAV", self.owner.export_repair
-        )
-        layout.addLayout(repair_actions)
-        self.repair_summary = QtWidgets.QLabel("No active repair. Original audio is retained.")
-        self.repair_summary.setWordWrap(True)
-        layout.addWidget(self.repair_summary)
-        self.summary = QtWidgets.QLabel(
-            "No analysis yet. Detection does not change the mix or export."
-        )
-        self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
-        self.table = QtWidgets.QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(
-            (
-                "Repair?",
-                "Channel",
-                "Type",
-                "Start (s)",
-                "End (s)",
-                "Samples",
-                "Level",
-                "Repair result",
-            )
-        )
-        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.table.cellDoubleClicked.connect(lambda *args: self.show_interval())
-        self.table.itemChanged.connect(lambda *args: self.owner.update_buttons())
-        layout.addWidget(self.table, 1)
+        advanced.addLayout(repair_controls)
+        self.detailed_summary = QtWidgets.QLabel()
+        self.detailed_summary.setWordWrap(True)
+        advanced.addWidget(self.detailed_summary)
+        self.detailed_repair_summary = QtWidgets.QLabel()
+        self.detailed_repair_summary.setWordWrap(True)
+        advanced.addWidget(self.detailed_repair_summary)
         self.hint = QtWidgets.QLabel(
             "Thresholds are linear sample amplitudes, not dB. Defaults include near-full-scale PCM rails. "
             "Suggestions look for flat runs and can mistake clean extrema or synthesised signals for clipping. "
@@ -106,10 +144,14 @@ class ClippingInspector(QtWidgets.QWidget):
             " Repair checked replaces the current repair preview using the original recording."
         )
         self.hint.setWordWrap(True)
-        layout.addWidget(self.hint)
+        advanced.addWidget(self.hint)
+        self.advanced_panel.hide()
+        layout.addWidget(self.advanced_panel)
+        layout.addStretch(1)
         for control in (self.positive, self.negative, self.tolerance, self.minimum_run):
             control.valueChanged.connect(self.controls_changed)
         self.channel.currentIndexChanged.connect(self.controls_changed)
+        self.update_table_view()
 
     def spin(self, row, name, low, high, value, decimals):
         row.addWidget(QtWidgets.QLabel(name))
@@ -127,6 +169,104 @@ class ClippingInspector(QtWidgets.QWidget):
         row.addWidget(button)
         return button
 
+    def toggle_review(self):
+        self.review_panel.setVisible(self.review_panel.isHidden())
+
+    def toggle_advanced(self, expanded):
+        self.advanced_panel.setVisible(expanded)
+        self.advanced_toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if expanded else QtCore.Qt.ArrowType.RightArrow
+        )
+        if expanded and self.rows:
+            self.review_panel.show()
+        self.update_table_view()
+        self.owner.tab_changed()
+
+    def update_table_view(self):
+        advanced = self.advanced_toggle.isChecked()
+        self.table.setHorizontalHeaderLabels(
+            (
+                "Include",
+                "Channel",
+                "Type",
+                "Start (s)" if advanced else "Position",
+                "End (s)",
+                "Samples",
+                "Level",
+                "Result",
+            )
+        )
+        for column in range(8):
+            self.table.setColumnHidden(column, not advanced and column not in (0, 1, 3, 7))
+        self.table.setColumnHidden(7, not advanced and self.last_attempt is None)
+        self.table.setMaximumHeight(16777215 if advanced else 240)
+        for row, (interval, kind) in enumerate(self.rows):
+            self.table.setRowHidden(row, not advanced and not kind.startswith("Suspected"))
+            self.table.item(row, 3).setText(
+                f"{interval.start / self.owner.source[1]:.6f}"
+                if advanced
+                else self.timestamp(interval.start, 3)
+            )
+            result = self.table.item(row, 7)
+            full = result.data(QtCore.Qt.ItemDataRole.UserRole) or ""
+            result.setText(
+                full if advanced or not full.startswith("Skipped:") else "Kept unchanged"
+            )
+
+    def timestamp(self, samples, precision=1):
+        scale = 10**precision
+        minutes, remainder = divmod(round(samples / self.owner.source[1] * scale), 60 * scale)
+        seconds, fraction = divmod(remainder, scale)
+        return f"{minutes}:{seconds:02d}.{fraction:0{precision}d}"
+
+    def refresh_actions(self):
+        active = self.owner.repair_result is not None
+        self.result_actions.setVisible(active)
+        self.repair_summary.setVisible(active or self.last_attempt is not None)
+        if active and self.last_attempt is None:
+            self.repair_summary.setText(
+                "A repair preview is available. Listen to it or undo it below."
+            )
+        next_action = self.analyse_button
+        if self.report is not None and self.report.candidates:
+            next_action = self.repair_button if self.checked_intervals() else self.review_button
+        if active and self.last_attempt is not None and self.last_attempt.repaired:
+            next_action = self.listen_button
+        for button in (
+            self.analyse_button,
+            self.review_button,
+            self.repair_button,
+            self.listen_button,
+        ):
+            emphasized = button is next_action
+            if button.property("nextAction") != emphasized:
+                button.setProperty("nextAction", emphasized)
+                button.setStyleSheet(
+                    "QPushButton { background: #63dfc0; color: #10151e; font-weight: bold; } QPushButton:disabled { background: #253246; color: #647085; }"
+                    if emphasized
+                    else ""
+                )
+
+    def reset_repair_status(self):
+        self.last_attempt = None
+        self.repair_summary.setText("Original audio is unchanged.")
+        self.repair_summary.hide()
+        self.detailed_repair_summary.clear()
+        if self.report is not None and self.report.candidates:
+            self.result_heading.setText(
+                f"{len(self.report.candidates)} possible clipped peaks found"
+            )
+            self.summary.setText("Original input restored. Choose peaks to try a new repair.")
+        else:
+            self.result_heading.setText("Ready to scan")
+        self.update_table_view()
+
+    def listen(self):
+        if self.owner.repair_preview is not None and self.owner.waveform.selection is not None:
+            self.owner.preview_mode.setCurrentIndex(1)
+            self.owner.loop_selection.setChecked(True)
+            self.owner.play_selection()
+
     def settings(self):
         return DetectionSettings(
             self.positive.value(),
@@ -138,6 +278,7 @@ class ClippingInspector(QtWidgets.QWidget):
 
     def reset_source(self):
         self.clear()
+        self.advanced_toggle.setChecked(False)
         with QtCore.QSignalBlocker(self.channel):
             self.channel.clear()
             if self.owner.source[0].shape[1] == 1:
@@ -155,29 +296,45 @@ class ClippingInspector(QtWidgets.QWidget):
             with QtCore.QSignalBlocker(control):
                 control.setValue(value)
         self.selection_changed(self.owner.waveform.selection)
-        self.repair_summary.setText("No active repair. Original audio is retained.")
+        self.reset_repair_status()
 
     def selection_changed(self, region):
         if self.report is not None and region != self.report.region:
             self.clear()
         if region is None or self.owner.source is None:
             self.scope.setText("Select a mix passage first.")
+            self.scope_details.clear()
         else:
             rate = self.owner.source[1]
+            duration = (region.end - region.start) / rate
+            precision = 3 if duration < 1 else 1
+
             self.scope.setText(
-                f"Original mix | {region.start / rate:.6f}-{region.end / rate:.6f} s | Samples [{region.start}, {region.end})"
+                f"Selected passage: {self.timestamp(region.start, precision)} to {self.timestamp(region.end, precision)} ({duration:.{precision}f} seconds)"
+            )
+            self.scope_details.setText(
+                f"Original recording | Samples [{region.start}, {region.end}) | {rate} Hz"
             )
 
     def controls_changed(self, *args):
         self.clear()
-        self.summary.setText("Detection controls changed. Analyse selection to refresh candidates.")
+        self.summary.setText(
+            "Settings changed. Find peaks again, or run a manual scan under Advanced."
+        )
 
     def clear(self):
         self.report = None
         self.rows = []
         self.table.setRowCount(0)
         self.owner.waveform.set_clipping(None)
-        self.summary.setText("No analysis yet. Detection does not change the mix or export.")
+        self.review_panel.hide()
+        self.result_heading.setText("Ready to scan")
+        self.summary.setText(
+            "Scanning leaves your recording unchanged. Both channels are handled automatically."
+        )
+        self.detailed_summary.clear()
+        self.last_attempt = None
+        self.update_table_view()
         self.owner.update_buttons()
 
     def inputs(self):
@@ -195,6 +352,23 @@ class ClippingInspector(QtWidgets.QWidget):
                 "Scanning selected original audio for suspected hard clipping…",
             )
 
+    def find_peaks(self):
+        inputs = self.inputs()
+        if inputs is None:
+            return
+        original, region, _ = inputs
+        settings = DetectionSettings(
+            tolerance=self.tolerance.value(), minimum_run=self.minimum_run.value()
+        )
+        self.clear()
+        self.result_heading.setText("Finding possible clipped peaks…")
+        self.summary.setText("Checking each channel separately. Your audio is unchanged.")
+        self.owner.start_job(
+            lambda: find_clipping(original, region, settings),
+            self.analysed,
+            "Finding possible clipped peaks…",
+        )
+
     def analysed(self, report):
         self.report = report
         self.owner.waveform.set_clipping(report)
@@ -206,7 +380,27 @@ class ClippingInspector(QtWidgets.QWidget):
                 f"{self.channel_name(stats.channel)}: peak {peak_db:.1f} dBFS, {stats.candidate_samples} candidate samples, "
                 f"{stats.above_full_scale_samples} above full scale, {stats.near_full_scale_samples} at/near full scale"
             )
-        self.summary.setText(f"{count} suspected plateau runs | {' | '.join(details)}")
+        self.detailed_summary.setText(f"{count} suspected plateau runs | {' | '.join(details)}")
+        rails = [
+            f"{self.channel_name(item.channel)} rails: +{report.settings_for(item.channel).positive:.6f} / {report.settings_for(item.channel).negative:.6f}"
+            for item in report.stats
+        ]
+        self.detailed_summary.setText(self.detailed_summary.text() + " | " + " | ".join(rails))
+        if count:
+            self.result_heading.setText(f"{count} possible clipped peaks found")
+            self.summary.setText(
+                "Review the marked peaks, then choose which ones to try repairing."
+            )
+        elif report.overloads:
+            self.result_heading.setText("Above-full-scale audio found")
+            self.summary.setText(
+                "This may be a volume-level problem rather than flattened peaks. No flat peaks were found to reconstruct."
+            )
+        else:
+            self.result_heading.setText("No clear clipped peaks found")
+            self.summary.setText(
+                "A mixed track can hide clipping in one instrument. Try its isolated recording when available; absence of markers does not prove it is clean."
+            )
         entries = chain(
             ((item, "Suspected " + item.polarity + " plateau") for item in report.candidates),
             ((item, "Above full scale") for item in report.overloads),
@@ -217,6 +411,9 @@ class ClippingInspector(QtWidgets.QWidget):
         rate = self.owner.source[1]
         for row, (interval, kind) in enumerate(self.rows):
             checkbox = QtWidgets.QTableWidgetItem()
+            checkbox.setToolTip(
+                f"{kind} | Samples [{interval.start}, {interval.end}) | Level {interval.level:.6f}"
+            )
             if kind.startswith("Suspected"):
                 checkbox.setFlags(checkbox.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
                 checkbox.setCheckState(QtCore.Qt.CheckState.Unchecked)
@@ -241,13 +438,13 @@ class ClippingInspector(QtWidgets.QWidget):
         del blocker
         entry_count = len(report.candidates) + len(report.overloads)
         if entry_count > 500:
-            self.summary.setText(
-                self.summary.text()
+            self.detailed_summary.setText(
+                self.detailed_summary.text()
                 + f" | Table shows first 500 of {entry_count} intervals; totals include all."
             )
-        self.owner.status.setText(
-            "Clipping analysis complete. Inspect candidates and check the intervals you want to try repairing."
-        )
+        self.owner.status.setText("Scan complete. Review possible peaks before trying a repair.")
+        self.last_attempt = None
+        self.update_table_view()
         self.owner.update_buttons()
 
     def channel_name(self, channel):
@@ -275,9 +472,12 @@ class ClippingInspector(QtWidgets.QWidget):
             else:
                 control.setValue(float(np.median(values)))
                 messages.append(f"Suggested {name} level {control.value():.6f}")
-        self.summary.setText(
+        self.detailed_summary.setText(
             ". ".join(messages)
             + ". Review and Analyse selection; these are hints, not confirmed clipping thresholds."
+        )
+        self.summary.setText(
+            "Level suggestions are shown under Advanced. Use Scan with these settings to inspect them."
         )
 
     def show_selection(self):
@@ -341,6 +541,7 @@ class ClippingInspector(QtWidgets.QWidget):
         )
 
     def repair_reported(self, result):
+        self.last_attempt = result
         repaired = set(result.repaired)
         rejected = {item.interval: item.reason for item in result.rejected}
         with QtCore.QSignalBlocker(self.table):
@@ -352,12 +553,32 @@ class ClippingInspector(QtWidgets.QWidget):
                 )
                 self.table.item(row, 7).setText(text)
                 self.table.item(row, 7).setToolTip(text)
+                self.table.item(row, 7).setData(QtCore.Qt.ItemDataRole.UserRole, text)
         reasons = "; ".join(sorted({item.reason for item in result.rejected}))
-        self.repair_summary.setText(
+        self.detailed_repair_summary.setText(
             f"Reconstructed {len(result.repaired)} intervals / {result.changed_samples} samples. "
             f"Skipped {len(result.rejected)}. {reasons}"
         )
-        if not result.repaired and self.owner.repair_result is not None:
-            self.repair_summary.setText(
-                self.repair_summary.text() + " Previous repair remains active."
+        self.repair_summary.setText(
+            f"{len(result.repaired)} peaks repaired."
+            + (
+                f" {len(result.rejected)} kept unchanged."
+                if result.rejected
+                else " Listen and compare with the original."
             )
+        )
+        if not result.repaired:
+            self.result_heading.setText("No repair applied")
+            self.summary.setText(
+                "These peaks could not be reconstructed with the current method. Details are available under Advanced."
+            )
+            if self.owner.repair_result is not None:
+                self.repair_summary.setText(
+                    self.repair_summary.text() + " Previous repair remains active."
+                )
+        else:
+            self.result_heading.setText("Repair preview ready")
+            self.summary.setText(
+                "Listen to the repair and switch to the original below. Undo restores the original input."
+            )
+        self.update_table_view()
