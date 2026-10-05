@@ -1,7 +1,9 @@
 """Selected-original-audio diagnostics and navigation of suspected clipping."""
 
+from dataclasses import replace
 from heapq import nsmallest
 from itertools import chain
+from uuid import uuid4
 
 import numpy as np
 from PySide6 import QtCore, QtWidgets
@@ -9,6 +11,7 @@ from PySide6 import QtCore, QtWidgets
 from .clipping import DetectionSettings, detect_clipping, find_clipping, suggest_thresholds
 from .declipping import RepairSettings, repair_clipping
 from .engine import analyse, audition_pair
+from .project import RepairOperation, replay_repairs
 
 
 class ClippingInspector(QtWidgets.QWidget):
@@ -532,7 +535,23 @@ class ClippingInspector(QtWidgets.QWidget):
             result = repair_clipping(original, rate, report, accepted, settings)
             if not result.repaired:
                 return result, None, None
-            return result, analyse(result.audio, rate), audition_pair(original, result.audio)
+            operation = RepairOperation(
+                uuid4().hex,
+                report.region,
+                report.settings,
+                report.channel_settings,
+                result.repaired,
+                settings,
+            )
+            operations = self.owner.add_repair_recipe(operation)
+            combined = replay_repairs(original, rate, operations)
+            combined = replace(combined, rejected=result.rejected)
+            return (
+                combined,
+                analyse(combined.audio, rate),
+                audition_pair(original, combined.audio),
+                operations,
+            )
 
         self.owner.start_job(
             calculate,

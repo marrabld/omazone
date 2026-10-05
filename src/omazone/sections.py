@@ -60,12 +60,12 @@ class SectionResult:
     transitions: tuple[Transition, ...]
 
 
-def check_region(region, length, rate):
+def check_region(region, length, rate, minimum_seconds=0.1):
     if not all(type(value) is int for value in (region.start, region.end, rate)):
         raise ValueError("Region bounds and sample rate must be integers.")
     if not 0 <= region.start < region.end <= length or rate <= 0:
         raise ValueError("Region must be nonempty and inside the audio.")
-    if region.end - region.start < max(2, round(rate * 0.1)):
+    if region.end - region.start < max(2, round(rate * minimum_seconds)):
         raise ValueError("Choose at least 0.1 seconds of representative audio for analysis.")
 
 
@@ -77,7 +77,7 @@ def capture_target(audio, rate, region, name, target_id, source_name):
     return TargetProfile(target_id, name.strip(), spectrum, rate, region, source_name)
 
 
-def validate_profile(profile):
+def validate_profile(profile, minimum_seconds=0.1):
     if (
         not isinstance(profile.id, str)
         or not profile.id
@@ -87,7 +87,7 @@ def validate_profile(profile):
         raise ValueError("Invalid target name or identifier.")
     if not isinstance(profile.source_name, str):
         raise TypeError("Invalid target source metadata.")
-    check_region(profile.region, profile.region.end, profile.sample_rate)
+    check_region(profile.region, profile.region.end, profile.sample_rate, minimum_seconds)
     frequency, power = profile.spectrum.frequency, profile.spectrum.power
     if frequency.ndim != 1 or power.shape != frequency.shape or len(frequency) < 2:
         raise ValueError("Invalid target spectrum dimensions.")
@@ -229,15 +229,33 @@ def section_curve(audio, rate, section, targets):
     return SectionCurve(section, source, spec)
 
 
-def render_sections(audio, rate, sections, targets, transition_ms=75.0, block_size=4096):
+def render_sections(
+    audio, rate, sections, targets, transition_ms=75.0, block_size=4096, learned_curves=None
+):
     audio = validate_audio(audio)
     ordered = validate_sections(sections, targets, len(audio), rate)
     transitions = transition_plan(ordered, len(audio), rate, transition_ms)
     output = audio.copy()
     rendered = {}
     curves = []
+    saved = (
+        {item.section.id: item for item in learned_curves} if learned_curves is not None else None
+    )
+    if saved is not None and set(saved) != {item.id for item in ordered}:
+        raise ValueError("Saved section curves do not match the current assignment IDs.")
     for section in ordered:
-        curve = section_curve(audio, rate, section, targets)
+        if saved is None:
+            curve = section_curve(audio, rate, section, targets)
+        else:
+            previous = saved[section.id]
+            if (
+                previous.filter.sample_rate != rate
+                or previous.section.region != section.region
+                or previous.section.settings != section.settings
+                or previous.section.target_id != section.target_id
+            ):
+                raise ValueError("Saved section curve settings or source format differ.")
+            curve = SectionCurve(section, previous.source, previous.filter)
         curves.append(curve)
         start, end = section.region.start, section.region.end
         cover_start, cover_end = start, end

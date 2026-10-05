@@ -753,3 +753,163 @@ def test_guided_no_results_message_does_not_offer_repair():
     finally:
         app.processEvents()
         window.close()
+
+
+def test_saved_project_restores_recipe_and_renders_without_relearning(tmp_path, monkeypatch):
+    from omazone.gui import load_audio
+    from omazone.sections import capture_target
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    t = np.arange(12000) / rate
+    clean = (0.9 * np.sin(2 * np.pi * 440 * t))[:, None]
+    clipped = np.clip(clean, -0.45, 0.6)
+    source_path, reference_path = tmp_path / "source.wav", tmp_path / "reference.wav"
+    sf.write(source_path, clipped, rate, subtype="DOUBLE")
+    sf.write(reference_path, clean, rate, subtype="DOUBLE")
+    project_path = tmp_path / "session.omazone.json"
+
+    def wait():
+        deadline = time.monotonic() + 20
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.loaded("source", load_audio(source_path))
+        window.waveform.set_selection(SampleRegion(0, len(clipped)))
+        inspector = window.clipping_inspector
+        inspector.find_peaks()
+        wait()
+        inspector.check_shown(True)
+        inspector.repair()
+        wait()
+        assert window.project.repairs
+        window.loaded("reference", load_audio(reference_path))
+        workbench = window.section_workbench
+        workbench.target_captured(
+            capture_target(clean, rate, SampleRegion(0, len(clean)), "Clean", "clean", "generated")
+        )
+        workbench.use_mix_selection()
+        workbench.name.setText("Verse")
+        workbench.add_section()
+        workbench.render_all()
+        wait()
+        expected = window.output[0].copy()
+        section_id = workbench.sections[0].id
+        coefficients = window.project.calibration.sections[0].filter.coefficients.copy()
+        window.project.stages["eq"].parameters = {"band": {"region_id": section_id, "gain_db": -2}}
+        window.waveform.set_selection(SampleRegion(2000, 8000))
+        window.waveform.channel_plots[0].setXRange(0.03, 0.2, padding=0)
+        window.position = 4000
+        window.loop_selection.setChecked(True)
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(project_path), "")
+        )
+        window.save_current_project()
+        wait()
+        assert not window.project.dirty
+        window.new_project()
+        assert window.source is None
+        window.open_project_path(project_path)
+        wait()
+        assert workbench.sections[0].id == section_id
+        assert window.project.stages["eq"].parameters["band"]["gain_db"] == -2
+        assert window.repair_result is not None
+        assert window.waveform.selection == SampleRegion(2000, 8000)
+        assert window.position == 4000 and window.transport.loop
+        np.testing.assert_allclose(window.waveform.channel_plots[0].viewRange()[0], [0.03, 0.2])
+        assert window.output is None and window.project.can_render_saved_match
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_allclose(window.output[0], expected, atol=1e-12)
+        np.testing.assert_array_equal(
+            window.project.calibration.sections[0].filter.coefficients, coefficients
+        )
+        window.set_stage_bypass("repair", True)
+        assert window.processing_source() is window.source
+        assert window.project.needs_reanalysis and window.project.can_render_saved_match
+        assert window.project.repairs and workbench.sections
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_array_equal(
+            window.project.calibration.sections[0].filter.coefficients, coefficients
+        )
+        assert window.project.needs_reanalysis  # Saved rendering did not silently relearn.
+
+        # Missing files retain the recipe and opaque future-stage settings.
+        source_path.rename(tmp_path / "moved.wav")
+        window.open_project_path(project_path)
+        wait()
+        assert window.source is None
+        assert window.project.sections[0].id == section_id
+        assert workbench.sections[0].id == section_id
+        assert window.project.stages["eq"].parameters
+        assert any("missing" in item for item in window.asset_messages)
+        assert not window.render_saved_action.isEnabled()
+        window.project.relink("source", tmp_path / "moved.wav")
+        from omazone.project import hydrate_project
+
+        window.install_project(hydrate_project(window.project), project_path)
+        assert window.source is not None
+        assert window.project.sections[0].id == section_id
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_project_open_preserves_hidden_matching_precision_and_rejects_invalid_view(tmp_path):
+    from omazone.engine import MatchSettings
+    from omazone.project import AudioReference, Project, save_project
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    audio = np.random.default_rng(77).normal(0, 0.1, (16000, 1))
+    path = tmp_path / "source.wav"
+    sf.write(path, audio, 16000, subtype="DOUBLE")
+    project = Project(
+        source=AudioReference.from_path(path),
+        matching=MatchSettings(
+            amount=0.555555, smoothing_octaves=0, max_boost_db=20.123, taps=4097
+        ),
+    )
+    file = tmp_path / "precise.omazone.json"
+    save_project(file, project)
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+
+    try:
+        window.open_project_path(file)
+        wait()
+        assert not errors
+        window.sync_project()
+        assert window.project.matching == project.matching
+        original = window.project
+        import json
+
+        data = json.loads(file.read_text())
+        data["view"]["active_tool"] = "not a tool"
+        file.write_text(json.dumps(data))
+        window.open_project_path(file)
+        wait()
+        assert errors and "tool" in errors[0]
+        assert window.project is original
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()

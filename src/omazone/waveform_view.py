@@ -149,6 +149,19 @@ class WaveformView(QtWidgets.QWidget):
         self.fit_song()
         self.redraw()
 
+    def clear_audio(self):
+        self.redraw_timer.stop()
+        for plot in self.channel_plots:
+            plot.hide()
+            self.plot_layout.removeWidget(plot)
+            plot.deleteLater()
+        self.channel_plots, self.curves, self.regions, self.playheads = [], [], [], []
+        self.section_items, self.clipping_items, self.clipping_markers = [], [], []
+        self.repair_items, self.repair_data = [], []
+        self.index = None
+        self.set_selection(None)
+        self.setEnabled(False)
+
     def schedule_redraw(self, *args):
         self.redraw_timer.start()
 

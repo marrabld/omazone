@@ -119,6 +119,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Checked-candidate short-gap Hermite repair, original/repaired audition, reset, and full-precision export.
 - [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
+- [x] Versioned saved project, stable regions/assignments, repair replay, retained calibration, and source relinking.
 
 ## 1. Inspection and selected-region repair
 
@@ -141,7 +142,7 @@ can address overload in a floating-point signal, but cannot undo baked-in clippi
 - [ ] Evaluate iterative band-limited or sparse reconstruction against that baseline.
 - [x] Preserve samples outside the selected repair region and accepted damage mask.
 - [x] A/B the repaired section with the original, retaining a resettable source.
-- [ ] Accumulate repairs across regions and save/load repair sessions.
+- [x] Accumulate repairs across regions and save/load their operation recipes.
 
 Verify using known clean signals and recordings deliberately clipped at several
 levels. Measure reconstruction error and listen for boundary artefacts. Include
@@ -152,10 +153,10 @@ a different approach from hard-clipped plateaus.
 
 Keep one application, with independently usable and testable processing modules.
 
-- [ ] Versioned project recipe with original source references, regions, target
+- [x] Versioned project recipe with original source references, regions, target
   profiles, repair operations, processing settings, and bypass/skip state.
-- [ ] Save/load and revisit earlier choices without discarding other stages.
-- [ ] Identify dependent renders/analyses as stale; keep explicit target relearning
+- [x] Save/load and revisit earlier choices without discarding other stages.
+- [x] Identify dependent renders/analyses as stale; keep explicit target relearning
   separate from rendering the existing choices.
 - [ ] Define a common processor contract for preparation, state reset, block
   processing, latency, and tail handling. Extend the existing FIR contract.
@@ -228,7 +229,7 @@ limiter overshoot, transient distortion, and reported latency.
 - [x] Assign targets to non-overlapping mix sections, each analysed independently.
 - [x] Inspect per-section curves and audition them with the existing A/B transport.
 - [x] Render aligned filtered paths with complementary, bounded transition windows.
-- [ ] Save/load complete section plans and settings for a particular mix.
+- [x] Save/load section plans and settings in a versioned project recipe.
 - [ ] Rename/update captured targets without disturbing assignments.
 - [ ] Evaluate transition placement/duration on real metal-to-clean arrangements.
 
