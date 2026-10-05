@@ -28,8 +28,10 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
 
-Filtering, compression, dynamic EQ, and declipping are planned. See the
-[roadmap](roadmap.md) for the proposed modules and places to contribute.
+Next priorities are a saved non-destructive project, a persistent song viewer,
+guided navigation, and manual section EQ. Compression, dynamic EQ, and output
+checks follow. See the [approved workflow](docs/workflow.md) and
+[roadmap](roadmap.md) for the implementation priorities and contribution tasks.
 
 ## Quick start
 
