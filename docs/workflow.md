@@ -25,20 +25,20 @@ The song stays in the workspace. Tools change around the viewer:
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ Listen → Repair → Match → EQ → Dynamics → Output             │
+│ Listen → Repair → Match → EQ → Dynamics → Output            │
 ├─────────────────────────────────────────────────────────────┤
-│ Whole-song overview: named regions, selection, playback      │
+│ Whole-song overview: named regions, selection, playback     │
 ├─────────────────────────────────────────────────────────────┤
-│ Signal/scope label                     Waveform Spectrum Both│
+│ Signal/scope label                    Waveform Spectrum Both│
 │                                                             │
 │             Shared detailed song viewer                     │
 │             Optional labelled reference pane                │
 │                                                             │
 ├─────────────────────────────────────────────────────────────┤
-│ Current-step controls, one primary action, Advanced          │
+│ Current-step controls, one primary action, Advanced         │
 │ Back                         Skip                 Continue  │
 ├─────────────────────────────────────────────────────────────┤
-│ Play / pause       Loop selection       Compare this step    │
+│ Play / pause       Loop selection       Compare this step   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
