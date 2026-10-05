@@ -70,6 +70,9 @@ uv sync --python 3.13
 uv run omazone
 ```
 
+To try the matching engine without recordings or a GUI, follow the
+[generated-signal example](examples/README.md).
+
 The desktop app is developed on Linux. Windows users should prefer the packaged
 build above; the packaged build is smoke-tested on the CI runner only, so
 playback quality still needs real-hardware validation (#14). Qt supplies
