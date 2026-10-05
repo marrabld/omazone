@@ -10,3 +10,6 @@ outputs/
 *.aiff
 *.mp3
 *.omazone.json
+build/
+dist/
+SHA256SUMS.txt

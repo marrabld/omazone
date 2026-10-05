@@ -7,7 +7,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=2.0", "scipy>=1.14", "soundfile>=0.13",
-  "PySide6>=6.8", "pyqtgraph>=0.13", "sounddevice>=0.5",
+  "PySide6-Essentials>=6.8", "pyqtgraph>=0.13", "sounddevice>=0.5",
 ]
 
 [project.scripts]
@@ -18,7 +18,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.9"]
+dev = ["pytest>=8", "ruff>=0.9", "pyinstaller>=6.10"]
 
 [tool.ruff]
 line-length = 100
