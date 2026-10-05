@@ -1,12 +1,13 @@
 """Qt desktop workbench. DSP and file loading run outside the UI thread."""
 
+import math
 import sys
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
 import soundfile as sf
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from .clipping_view import ClippingInspector
 from .engine import (
@@ -97,6 +98,58 @@ def load_audio(path):
         PeakIndex(audio),
         AudioReference.from_path(path),
     )
+
+
+class FrequencyAxis(pg.AxisItem):
+    """Label a log-frequency grid in Hz and kHz without crowding the axis."""
+
+    def tickValues(self, minVal, maxVal, size):
+        low, high = sorted((minVal, maxVal))
+        if low == high:
+            return []
+
+        ticks = [
+            exponent + math.log10(multiplier)
+            for exponent in range(math.floor(low), math.ceil(high) + 1)
+            for multiplier in range(1, 10)
+            if low <= exponent + math.log10(multiplier) <= high
+        ]
+        preferred = [
+            value for value in ticks if round(10 ** (value - math.floor(value))) in (1, 2, 5)
+        ]
+        metrics = QtGui.QFontMetricsF(self.style["tickFont"] or QtWidgets.QApplication.font())
+        labelled = []
+
+        def add_if_clear(value):
+            position = (value - low) / (high - low) * size
+            width = metrics.horizontalAdvance(self._frequency_label(value))
+            if all(
+                abs(position - other) >= (width + other_width) / 2 + 10
+                for other, other_width, _ in labelled
+            ):
+                labelled.append((position, width, value))
+
+        for value in preferred:
+            add_if_clear(value)
+        if len(labelled) < 3:
+            for value in ticks:
+                add_if_clear(value)
+
+        major = sorted(value for _, _, value in labelled)
+        minor = [value for value in ticks if not any(abs(value - tick) < 1e-9 for tick in major)]
+        return [(1, major), (None, minor)]
+
+    def tickStrings(self, values, scale, spacing):
+        if spacing is None:
+            return [""] * len(values)
+        return [self._frequency_label(value) for value in values]
+
+    @staticmethod
+    def _frequency_label(value):
+        frequency = round(10**value, 6)
+        if frequency >= 1000:
+            return f"{frequency / 1000:g} kHz"
+        return f"{frequency:g} Hz"
 
 
 class Window(ProjectController, QtWidgets.QMainWindow):
@@ -271,9 +324,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         return control
 
     def plot(self, label, units, layout):
-        plot = pg.PlotWidget()
+        plot = pg.PlotWidget(axisItems={"bottom": FrequencyAxis(orientation="bottom")})
         plot.setLogMode(x=True)
-        plot.setLabel("bottom", "Frequency", units="Hz")
+        plot.setLabel("bottom", "Frequency")
         plot.setLabel("left", label, units=units)
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.setXRange(np.log10(20), np.log10(20000))
