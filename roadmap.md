@@ -29,16 +29,16 @@ The song must stay visible while tools change around it. Reference targets,
 mix-section assignments, and clipping controls must not replace the viewer with
 a table or settings form.
 
-- [ ] A persistent song overview shows named regions, selection, and playhead.
-- [ ] The detailed viewer offers Waveform, Spectrum, and Both, preserving the user's choice.
-- [ ] Moving between steps preserves mix selection, zoom/pan, cursor, and loop bounds.
-- [ ] The viewer identifies the signal and scope: original, current-stage input,
+- [x] A persistent song overview shows named regions, selection, and playhead.
+- [x] The detailed viewer offers Waveform, Spectrum, and Both, preserving the user's choice.
+- [x] Moving between current tools preserves mix selection, zoom/pan, cursor, and loop bounds.
+- [x] The viewer identifies the signal and scope: original, current-stage input,
   or rendered output for the selected passage.
-- [ ] Visual processing signals are distinct from preview-only gain matching.
-- [ ] Reference capture adds a labelled reference pane beside the mix context,
+- [x] Visual processing signals are distinct from preview-only gain matching.
+- [x] Reference capture adds a labelled reference pane beside the mix context,
   with independent selection and time axes. Saved spectrum-only targets show
   their curve and metadata without making the mix disappear.
-- [ ] Pending or stale output is labelled; previously rendered audio is not
+- [x] Pending or stale output is labelled; previously rendered audio is not
   silently presented as the result of new settings.
 
 The time-domain overview remains useful even when the detailed view is a
@@ -120,6 +120,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
 - [x] Versioned saved project, stable regions/assignments, repair replay, retained calibration, and source relinking.
+- [x] Shared song viewer/overview, independent reference pane, and selection-scoped background spectrum analysis.
 
 ## 1. Inspection and selected-region repair
 

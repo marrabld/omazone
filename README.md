@@ -27,8 +27,10 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Checked-candidate short-gap declipping, original/repaired A/B, reset, and full-precision repair export.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
+- Versioned saved project recipes, verified source relinking, and retained learned curves.
+- Persistent song overview and shared waveform/spectrum viewer across tool pages.
 
-Next priorities are a persistent song viewer, a complete prefix-processing chain,
+Next priorities are a complete prefix-processing chain,
 guided navigation, and manual section EQ. Compression, dynamic EQ, and output
 checks follow. See the [approved workflow](docs/workflow.md) and
 [roadmap](roadmap.md) for the implementation priorities and contribution tasks.
@@ -91,6 +93,44 @@ are not overwritten by saving projects. Session JSON files are ignored by Git.
 
 ## Try it on a song
 
+### Keep the song in view
+
+The workspace stays above the tool controls. Use **Waveform**, **Spectrum**, or
+**Both** to inspect the same passage while working in Matching, Regions, Reference
+targets, Mix sections, or Clipping inspection. Drag the splitter between the
+viewer and controls to give either more space; controls scroll rather than hiding
+the song. In Both mode, waveform and spectra are shown side by side.
+
+![Section controls below the persistent waveform and spectral viewer](docs/images/omazone-shared-sections.png)
+
+The overview always shows the whole song, named passages, your selection, and
+playback cursor. Selection, zoom, position, and loop survive tool changes.
+**Step input**, **Step output**, and **Original recording** identify the visible
+signal and coordinate the audition side. Waveforms use raw processing levels;
+RMS-matched playback does not change the displayed/exported samples.
+
+If output needs rendering, a yellow message says so and the input remains visible
+for context. Spectrum analysis follows the selected passage, runs in a background
+worker, and excludes very short selections below 0.1 seconds. Spectrum mode still
+keeps the time-domain overview. The label identifies input/output and scope;
+the spectrum overlays show before/after tonal balance and the reference target.
+
+![Independent reference waveform beside the retained mix context](docs/images/omazone-shared-reference.png)
+
+Reference capture retains your mix view and selection. The reference has an
+independent waveform/time base. Selecting a library target shows its saved
+spectrum; **Show loaded reference for capture** returns to the loaded reference.
+Targets without their original audio remain usable. Projects save viewer mode,
+signal preference, panel sizes, and the existing selection/zoom/loop context.
+
+![Clipping controls with the selected waveform still visible](docs/images/omazone-shared-clipping.png)
+
+This implements the shared visual context, not the full numbered wizard or all
+stage-prefix processing. The current steps are repair and matching; later EQ,
+dynamics, and output stages will use the same workspace.
+
+### First matching experiment
+
 1. Load a mix and a broadly similar reference track.
 2. Start with 50% amount, 0.33-octave smoothing, and 6 dB boost/cut limits.
 3. Click **Analyse + process** to render the result.
@@ -110,9 +150,9 @@ are supported. Different reference and mix sample rates are supported.
 
 ## Inspect a waveform and select a region
 
-Loading a mix opens the **Waveform / selection** tab. It shows the original mix,
-with separate linked plots for left and right channels, or one plot for mono.
-The existing spectrum and correction plots are under **Spectrum / EQ**.
+Loading a mix opens **Regions** with the shared waveform visible. It has linked
+left/right plots, or one for mono. Choose Spectrum/Both without leaving your tool.
+Matching controls are on **Matching**; the response stays in the shared spectrum view.
 
 ![Omazone showing a full-song stereo waveform, selected region, exact sample bounds, and the A/B playback cursor](docs/images/omazone-waveform-selection.png)
 
@@ -176,7 +216,7 @@ whole-song spectrum is not used to design its correction.
    enter a target name such as `Metal`, and click **Capture target**.
 2. Select its clean passage and capture `Clean`. You can also capture targets
    from different reference files; earlier targets remain in the library.
-3. Load your mix. In **Waveform / selection**, select the mix's metal passage.
+3. Load your mix. In **Regions** or the shared waveform, select the metal passage.
 4. Open **Mix sections**, click **Use mix selection**, name the section, choose
    `Metal`, set its amount/smoothing/gain limits, and click **Add section**.
 5. Repeat for the clean passage with the `Clean` target. Assignments cannot overlap.
@@ -226,7 +266,7 @@ are hidden while you inspect or audition a repair.
 
 ![Guided clipping workflow with Find, Review, and Try repair actions](docs/images/omazone-clipping-guided.png)
 
-1. Select the affected passage in **Waveform / selection** and open **Clipping inspection**.
+1. Select the affected passage in the shared waveform and open **Clipping inspection**.
 2. Click **Find clipped peaks**. Left/right channels are scanned with separate
    suggested levels; scanning does not change your recording.
 3. Click **Review peaks**. Inspect a peak if unsure, then check the ones you want
@@ -340,6 +380,7 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/declipping.py`: selective Hermite reconstruction, intact-context checks, and rejected intervals.
 - `src/omazone/project.py`: versioned recipes, source verification, calibration signatures, and repair replay.
 - `src/omazone/project_controller.py`: project menus, save/load/relink, stage bypass, and saved rendering.
+- `src/omazone/workspace.py`: persistent viewer/overview, reference companion, signal labels, and background spectra.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.

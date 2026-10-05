@@ -472,7 +472,8 @@ def test_clipping_inspection_markers_navigation_and_stale_results():
         window.waveform.redraw()
         assert window.position == 100
         assert window.waveform.selection == SampleRegion(50, 300)
-        assert window.views.currentWidget() is window.waveform
+        assert window.views.currentWidget() is window.region_page
+        assert window.waveform.isVisible()
         assert any(len(marker.points()) > 0 for marker, _, _ in window.waveform.clipping_markers)
         inspector.tolerance.setValue(0.0001)
         assert inspector.report is None
@@ -586,6 +587,7 @@ def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypat
         np.testing.assert_allclose(window.output[2].coefficients, expected.coefficients)
         assert window.audition_mode == "mastering"
         assert window.ab_button.text() == "Listening: repaired input"
+        assert window.workspace.signal.currentData() == "input"
         workbench = window.section_workbench
         workbench.target_captured(
             capture_target(clean, rate, SampleRegion(0, len(clean)), "Clean", "clean", "generated")

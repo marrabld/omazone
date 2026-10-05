@@ -455,6 +455,14 @@ def validate_project(project):
     ):
         if key in project.view and project.view[key] not in allowed:
             raise ValueError("Unknown saved viewer preference.")
+    for key in ("viewer_split", "reference_split"):
+        sizes = project.view.get(key)
+        if sizes is not None and (
+            not isinstance(sizes, list)
+            or len(sizes) != 2
+            or any(type(item) is not int or item < 0 for item in sizes)
+        ):
+            raise ValueError("Invalid saved viewer panel sizes.")
     reference_rate = (
         project.reference.sample_rate
         if project.reference

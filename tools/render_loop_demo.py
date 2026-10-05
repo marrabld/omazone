@@ -65,7 +65,7 @@ def main():
     processed = render(audio, spec)
     window.processed((processed, analyse(processed, rate), spec, audition_pair(audio, processed)))
     window.update_buttons()
-    window.views.setCurrentWidget(window.waveform)
+    window.show_waveform()
     window.waveform.set_selection(SampleRegion(rate, int(rate * 2.5)))
     window.waveform.channel_plots[0].setXRange(0.5, 3.0, padding=0)
     window.loop_selection.setChecked(True)

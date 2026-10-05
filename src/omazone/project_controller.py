@@ -155,6 +155,9 @@ class ProjectController:
             item.triggered.connect(
                 lambda checked=False, selected=region: self.waveform.set_selection(selected.bounds)
             )
+        if hasattr(self, "workspace"):
+            self.workspace.refresh()
+            self.section_workbench.refresh_overlays()
 
     def name_selection(self):
         region = self.waveform.selection

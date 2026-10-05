@@ -24,6 +24,7 @@ from .section_view import SectionWorkbench
 from .sections import TargetProfile
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
+from .workspace import SongWorkspace
 
 
 class Worker(QtCore.QThread):
@@ -151,7 +152,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_plot = self.plot("Filter gain", "dB", spectra_layout)
         self.eq_plot.addLegend()
         self.eq_plot.setYRange(-8, 8)
-        self.views.addTab(spectra, "Spectrum / EQ")
+        self.match_page = QtWidgets.QWidget()
+        match_layout = QtWidgets.QVBoxLayout(self.match_page)
+        match_layout.setContentsMargins(0, 0, 0, 0)
+        self.views.addTab(self.match_page, "Matching")
         self.waveform = WaveformView()
         self.waveform.seek_requested.connect(self.seek)
         self.waveform.selection_changed.connect(self.selection_changed)
@@ -159,13 +163,41 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.selection_timer.setSingleShot(True)
         self.selection_timer.setInterval(150)
         self.selection_timer.timeout.connect(self.finish_selection_edit)
-        self.views.addTab(self.waveform, "Waveform / selection")
+        self.region_page = QtWidgets.QWidget()
+        region_layout = QtWidgets.QVBoxLayout(self.region_page)
+        region_layout.setContentsMargins(0, 0, 0, 0)
+        region_layout.addWidget(
+            QtWidgets.QLabel(
+                "Select in the shared waveform or overview. Name a passage to retain it independently of effects."
+            )
+        )
+        self.name_region_button = QtWidgets.QPushButton("Name current selection…")
+        self.name_region_button.clicked.connect(self.name_selection)
+        region_layout.addWidget(self.name_region_button)
+        region_layout.addWidget(self.waveform.selection_controls)
+        region_layout.addWidget(self.waveform.selection_label)
+        region_layout.addStretch(1)
+        self.views.addTab(self.region_page, "Regions")
         self.section_workbench = SectionWorkbench(self)
         self.views.addTab(self.section_workbench.reference_page, "Reference targets")
         self.views.addTab(self.section_workbench, "Mix sections")
         self.clipping_inspector = ClippingInspector(self)
         self.views.addTab(self.clipping_inspector, "Clipping inspection")
-        layout.addWidget(self.views, 1)
+        reference_waveform = self.section_workbench.reference_waveform
+        reference_layout = self.section_workbench.reference_page.layout()
+        reference_layout.removeWidget(reference_waveform)
+        reference_layout.addWidget(reference_waveform.selection_controls)
+        reference_layout.addWidget(reference_waveform.selection_label)
+        self.workspace = SongWorkspace(self, self.waveform, spectra, reference_waveform)
+        self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.workspace_split.addWidget(self.workspace)
+        self.tool_scroll = QtWidgets.QScrollArea()
+        self.tool_scroll.setWidgetResizable(True)
+        self.tool_scroll.setMinimumHeight(130)
+        self.tool_scroll.setWidget(self.views)
+        self.workspace_split.addWidget(self.tool_scroll)
+        self.workspace_split.setSizes([450, 260])
+        layout.addWidget(self.workspace_split, 1)
 
         self.mastering_controls = QtWidgets.QWidget()
         mastering_layout = QtWidgets.QVBoxLayout(self.mastering_controls)
@@ -182,7 +214,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         process_row = QtWidgets.QHBoxLayout()
         self.process_button = self.button(process_row, "Analyse + process", self.process)
         mastering_layout.addLayout(process_row)
-        layout.addWidget(self.mastering_controls)
+        match_layout.addWidget(self.mastering_controls)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.valueChanged.connect(self.settings_changed)
 
@@ -304,6 +336,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.preview_mode.model().item(1).setEnabled(self.repair_preview is not None)
         self.seek_slider.setEnabled(not busy and self.source is not None)
         self.waveform.setEnabled(not busy and self.source is not None)
+        self.region_page.setEnabled(not busy and self.source is not None)
+        self.section_workbench.reference_waveform.selection_controls.setEnabled(
+            not busy and self.reference is not None
+        )
         self.section_workbench.setEnabled(not busy)
         self.section_workbench.reference_page.setEnabled(not busy)
         self.clipping_inspector.setEnabled(not busy and self.source is not None)
@@ -339,10 +375,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             control.setEnabled(not busy)
         self.clipping_inspector.refresh_actions()
         self.update_project_actions()
+        self.workspace.refresh()
 
     def refresh_file_labels(self):
         if self.views.currentWidget() is self.clipping_inspector or (
-            self.views.currentWidget() is self.waveform
+            self.views.currentWidget() is self.region_page
             and self.audition_mode in ("original", "repair")
         ):
             self.files.setText(
@@ -359,7 +396,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def tab_changed(self, *args):
         clipping = self.views.currentWidget() is self.clipping_inspector
-        reviewing = self.views.currentWidget() is self.waveform and self.audition_mode in (
+        reviewing = self.views.currentWidget() is self.region_page and self.audition_mode in (
             "original",
             "repair",
         )
@@ -377,8 +414,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
         self.whole_song_button.setText("Whole recording" if repair_workflow else "Whole song")
         self.refresh_file_labels()
-        if clipping and self.source is not None:
-            self.preview_mode.setCurrentIndex(1 if self.repair_preview is not None else 2)
+        if self.source is not None:
+            self.workspace.sync_audio()
+        self.workspace.refresh()
 
     def start_job(self, function, callback, message):
         self.stop()
@@ -441,7 +479,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.waveform.set_audio(index, data[1])
             self.section_workbench.reset_mix()
             self.clipping_inspector.reset_source()
-            self.views.setCurrentWidget(self.waveform)
+            self.views.setCurrentWidget(self.region_page)
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
@@ -478,6 +516,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.status.setText("Settings changed. Click Analyse + process to render.")
 
     def plot_spectra(self):
+        self.workspace.completed_key = None
         self.spectrum_plot.setTitle("Whole-song spectra")
         self.spectrum_plot.clear()
         for data, name, color in (
@@ -540,7 +579,6 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.preview_mode.setCurrentIndex(0)
         self.listen_processed = False
         self.update_ab_label()
-        self.views.setCurrentIndex(0)
         self.plot_spectra()
         spec = self.output[2]
         if learn:
@@ -560,6 +598,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             f"Rendered. FIR delay: {spec.latency_samples} samples "
             f"({1000 * spec.latency_samples / spec.sample_rate:.1f} ms), compensated in file."
         )
+        self.workspace.render_completed()
 
     def draw_filter(self, spec):
         self.eq_plot.clear()
@@ -586,7 +625,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             (item for item in result.curves if section and item.section.id == section.id),
             result.curves[0],
         )
-        self.show_section_curve(curve)
+        self.show_section_curve(curve, switch_view=False)
+        self.workspace.refresh()
         self.status.setText(
             f"Rendered {len(result.curves)} sections with {len(result.transitions)} aligned transition windows. Ready for A/B and export."
         )
@@ -600,7 +640,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_plot.setTitle(f"Correction for {curve.section.name}")
         self.draw_filter(curve.filter)
         if switch_view:
-            self.views.setCurrentIndex(0)
+            self.workspace.mode.setCurrentIndex(self.workspace.mode.findData("spectrum"))
         self.status.setText(
             f"Showing section correction: {curve.section.name}. Render sections for the full-song preview."
         )
@@ -698,10 +738,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
         self.time_label.setText(f"{timestamp(self.position)} / {timestamp(length)}")
         self.waveform.set_position(self.position)
+        self.workspace.update_cursor()
 
     def toggle_ab(self):
         self.listen_processed = not self.listen_processed
         self.update_ab_label()
+        self.workspace.follow_audition()
 
     def update_ab_label(self):
         if self.audition_mode == "original":
@@ -721,11 +763,14 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         self.audition_mode = self.preview_mode.currentData()
         self.preview = (
-            self.repair_preview if self.audition_mode == "repair" else self.mastering_preview
+            self.repair_preview
+            if self.audition_mode == "repair"
+            else (self.mastering_preview if self.audition_mode == "mastering" else None)
         )
         self.listen_processed = False
         self.update_ab_label()
         self.update_buttons()
+        self.workspace.follow_audition()
         if resume:
             self.play()
 
@@ -772,6 +817,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             f"Reconstructed {len(result.repaired)} intervals. Original/repaired A/B is ready; matching will use the repaired input."
         )
         self.update_buttons()
+        self.workspace.render_completed()
 
     def reset_repair(self):
         if self.repair_result is None:
@@ -910,7 +956,14 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             event.ignore()
             return
         self.stop()
+        self.workspace.close_jobs()
         event.accept()
+
+    def show_waveform(self, signal=None):
+        self.views.setCurrentWidget(self.region_page)
+        self.workspace.mode.setCurrentIndex(self.workspace.mode.findData("waveform"))
+        if signal is not None:
+            self.workspace.signal.setCurrentIndex(self.workspace.signal.findData(signal))
 
 
 def main():

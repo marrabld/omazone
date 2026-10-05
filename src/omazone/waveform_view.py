@@ -49,7 +49,9 @@ class WaveformView(QtWidgets.QWidget):
         )
         self.help_text.setWordWrap(True)
         layout.addWidget(self.help_text)
-        controls = QtWidgets.QHBoxLayout()
+        self.selection_controls = QtWidgets.QWidget()
+        controls = QtWidgets.QHBoxLayout(self.selection_controls)
+        controls.setContentsMargins(0, 0, 0, 0)
         self.start_time = self.time_control(controls, "Start")
         self.end_time = self.time_control(controls, "End")
         self.start_time.valueChanged.connect(self.edit_times)
@@ -66,7 +68,7 @@ class WaveformView(QtWidgets.QWidget):
             button.clicked.connect(action)
             controls.addWidget(button)
             self.buttons.append(button)
-        layout.addLayout(controls)
+        layout.addWidget(self.selection_controls)
         self.selection_label = QtWidgets.QLabel("No region selected.")
         self.selection_label.setWordWrap(True)
         layout.addWidget(self.selection_label)
@@ -283,13 +285,14 @@ class WaveformView(QtWidgets.QWidget):
         self.section_items = []
         for channel, plot in enumerate(self.channel_plots):
             for index, section in enumerate(sections):
+                bounds = section.region if hasattr(section, "region") else section.bounds
                 color = colors[index % len(colors)]
                 shade = pg.mkColor(color)
                 shade.setAlpha(24)
                 region = pg.LinearRegionItem(
                     values=(
-                        section.region.start / self.sample_rate,
-                        section.region.end / self.sample_rate,
+                        bounds.start / self.sample_rate,
+                        bounds.end / self.sample_rate,
                     ),
                     movable=False,
                     brush=pg.mkBrush(shade),
@@ -302,7 +305,7 @@ class WaveformView(QtWidgets.QWidget):
                 plot.addItem(region, ignoreBounds=True)
                 label = pg.TextItem(section.name, color=color, anchor=(0.5, 0))
                 label.setPos(
-                    (section.region.start + section.region.end) / (2 * self.sample_rate),
+                    (bounds.start + bounds.end) / (2 * self.sample_rate),
                     max(1.0, float(self.index.peak[channel])),
                 )
                 label.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
