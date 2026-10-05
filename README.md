@@ -28,7 +28,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
 - 32-bit floating-point WAV export.
 
-Next priorities are a saved non-destructive project, a persistent song viewer,
+Next priorities are a persistent song viewer, a complete prefix-processing chain,
 guided navigation, and manual section EQ. Compression, dynamic EQ, and output
 checks follow. See the [approved workflow](docs/workflow.md) and
 [roadmap](roadmap.md) for the implementation priorities and contribution tasks.
@@ -56,6 +56,38 @@ The desktop app has been exercised on Linux. Qt supplies cross-platform GUI
 support, but Windows and macOS installation and playback still need validation.
 Playback uses the default audio output device through PortAudio. If a platform
 reports a missing PortAudio library, install it using that system's package manager.
+
+## Save and reopen your work
+
+Use the **Project** menu:
+
+- **Save project** (`Ctrl+S`) writes a versioned `.omazone.json` recipe.
+- **Open project** (`Ctrl+O`) restores the recording references, targets, named
+  regions, section assignments, accepted repairs, matching settings, stage bypass,
+  selection, zoom, position, and loop context.
+- **Render saved recipe** replays repairs from the original and uses stored
+  matching curves, without silently relearning. Rendered audio is not stored in
+  the project file. **Analyse + process** and section analysis explicitly learn
+  new matching curves.
+- **Stage bypass** skips repair or matching while retaining their choices.
+- **Name current selection** adds a stable region independent of matching; the
+  **Named regions** submenu returns to it.
+- **Relink source/reference** locates a moved original. Sample format and a byte
+  fingerprint are checked. Missing/changed recordings leave the recipe intact
+  rather than quietly applying it to different audio.
+
+Paths are relative to the project where possible. A cached reference spectrum
+can still be used when its reference recording is unavailable. Moving an earlier
+processing choice marks later calibration as needing analysis, but stored curves
+remain available when their configuration still matches. Updating EQ settings or
+assignments requires explicit analysis before those newly requested curves are
+available.
+
+This is the project foundation, not the full processor chain. Reserved manual EQ,
+dynamics, and output settings are preserved in the schema; enabled unsupported
+stages cannot be silently rendered as though implemented. Save explicitly before
+closing; loading a new recording/New project starts a new session. Audio originals
+are not overwritten by saving projects. Session JSON files are ignored by Git.
 
 ## Try it on a song
 
@@ -180,9 +212,9 @@ new targets so existing assignments are preserved. References may use a differen
 sample rate from the mix. Choose at least 0.1 seconds of non-silent material;
 longer representative passages generally make better tonal targets.
 
-In this first version, section assignments remain in memory and must be recreated
-after restarting the app. Loading a new mix clears them but retains captured
-targets. Preview level matching uses whole-file RMS, not separate per-section
+Section assignments and settings are saved in the project recipe. Loading a new
+mix starts a new session but retains the captured target library. Preview level
+matching uses whole-file RMS, not separate per-section
 loudness normalisation. Section matching controls tonal balance, not dynamics or
 vocal/instrument balance.
 
@@ -245,12 +277,13 @@ skipped. Samples outside successful intervals remain exactly unchanged internall
 Restored peaks may exceed full scale; repair export preserves them rather than
 silently limiting or normalising.
 
-Each successful **Try repair** creates a fresh result from the original and
-replaces the previous repair, rather than accumulating repairs from different
-selections. If no interval passes, the previous repair remains active. The table
+Each successful **Try repair** is computed from the original. It updates repairs
+inside that selection while retaining repairs elsewhere. A selection that cuts an
+existing repaired interval must be expanded to include it. If no interval passes,
+the previous repair remains active. The table
 shows at most 500 intervals, so **Include shown peaks** covers only displayed candidates.
 Use a short representative passage for this first version. Loading a new mix
-clears repair state; repair sessions are not yet saved across app restarts.
+clears repair state; save the project to retain the operation recipe across restarts.
 
 This does not guarantee recovery. Tests show improvement on deliberately clipped
 sine/harmonic examples, but an intentionally flat-topped waveform can be made worse.
@@ -305,6 +338,8 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/clipping.py`: per-channel plateau candidates, over-range intervals, and threshold hints.
 - `src/omazone/clipping_view.py`: diagnostics controls, results table, and interval navigation.
 - `src/omazone/declipping.py`: selective Hermite reconstruction, intact-context checks, and rejected intervals.
+- `src/omazone/project.py`: versioned recipes, source verification, calibration signatures, and repair replay.
+- `src/omazone/project_controller.py`: project menus, save/load/relink, stage bypass, and saved rendering.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.

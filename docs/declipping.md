@@ -50,6 +50,13 @@ There is no general crossfade or amplitude normalisation applied to the source.
 Repair export uses 64-bit float WAV to preserve the internal samples. Audition
 uses separate RMS matching and common headroom, so its gain is not exported.
 
+Projects store accepted interval operations and their detector/reconstruction
+settings, not repaired audio. On reopening, every operation is reconstructed
+against the retained original. Repairs outside a newly edited selection are
+preserved; overlapping old intervals fully inside it are replaced. Partial cuts
+through existing repaired intervals are rejected so edits cannot silently undo
+samples outside the new selection. Repair-stage bypass retains the operation list.
+
 The basic UI exposes Find, Review, Try repair, and Listen. Manual thresholds,
 reconstruction parameters, and numerical diagnostics are under Advanced; see
 [the inspection guide](clipping-inspection.md).

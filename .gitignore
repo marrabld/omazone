@@ -9,3 +9,4 @@ outputs/
 *.flac
 *.aiff
 *.mp3
+*.omazone.json

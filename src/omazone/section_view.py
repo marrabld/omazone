@@ -184,6 +184,7 @@ class SectionWorkbench(QtWidgets.QWidget):
         if self.selected_section() is None:
             self.target_choice.setCurrentIndex(self.target_choice.findData(profile.id))
         self.owner.status.setText(f"Captured target: {profile.name}")
+        self.owner.project_changed(processing=False)
 
     def save_library(self):
         if not self.targets:
@@ -220,6 +221,7 @@ class SectionWorkbench(QtWidgets.QWidget):
         self.owner.status.setText(
             f"Imported {len(profiles)} targets. Existing assignments preserved."
         )
+        self.owner.project_changed(processing=False)
 
     def remove_target(self):
         item = self.target_list.currentItem()
@@ -231,21 +233,26 @@ class SectionWorkbench(QtWidgets.QWidget):
             return
         del self.targets[target_id]
         self.refresh_targets()
+        self.owner.project_changed(processing=False)
 
     def form_section(self, section_id):
         if self.owner.source is None:
             raise ValueError("Load a mix first.")
         rate = self.owner.source[1]
+        old = next(
+            (item.settings for item in self.sections if item.id == section_id), MatchSettings()
+        )
         return SectionAssignment(
             section_id,
             self.name.text().strip(),
             SampleRegion(round(self.start.value() * rate), round(self.end.value() * rate)),
             self.target_choice.currentData(),
             MatchSettings(
-                self.amount.value() / 100,
-                self.smoothing.value(),
-                self.boost.value(),
-                self.cut.value(),
+                self.owner.retained_number(self.amount, old.amount, 100),
+                self.owner.retained_number(self.smoothing, old.smoothing_octaves),
+                self.owner.retained_number(self.boost, old.max_boost_db),
+                self.owner.retained_number(self.cut, old.max_cut_db),
+                old.taps,
             ),
         )
 
@@ -269,6 +276,7 @@ class SectionWorkbench(QtWidgets.QWidget):
             self.owner.error(str(error))
             return False
         self.sections = ordered
+        self.owner.project.match_mode = "sections" if ordered else "none"
         self.owner.invalidate()
         self.owner.plot_spectra()
         self.refresh(selected_id)
@@ -314,7 +322,11 @@ class SectionWorkbench(QtWidgets.QWidget):
         with QtCore.QSignalBlocker(self.table):
             self.table.setRowCount(len(self.sections))
             for row, section in enumerate(self.sections):
-                rate = self.owner.source[1]
+                rate = (
+                    self.owner.source[1]
+                    if self.owner.source
+                    else self.owner.project.source.sample_rate
+                )
                 values = (
                     section.name,
                     f"{section.region.start / rate:.6f}",
@@ -332,6 +344,7 @@ class SectionWorkbench(QtWidgets.QWidget):
                     self.table.selectRow(row)
         self.refresh_overlays()
         self.owner.update_buttons()
+        self.owner.refresh_named_regions()
         if selected_id is not None:
             self.select_row()
 
@@ -341,9 +354,17 @@ class SectionWorkbench(QtWidgets.QWidget):
             return
         self.form_loading = True
         self.name.setText(section.name)
-        self.start.setValue(section.region.start / self.owner.source[1])
-        self.end.setValue(section.region.end / self.owner.source[1])
+        rate = self.owner.source[1] if self.owner.source else self.owner.project.source.sample_rate
+        self.start.setValue(section.region.start / rate)
+        self.end.setValue(section.region.end / rate)
         self.target_choice.setCurrentIndex(self.target_choice.findData(section.target_id))
+        for control, value in (
+            (self.amount, section.settings.amount * 100),
+            (self.smoothing, section.settings.smoothing_octaves),
+            (self.boost, section.settings.max_boost_db),
+            (self.cut, section.settings.max_cut_db),
+        ):
+            control.setRange(min(control.minimum(), value), max(control.maximum(), value))
         self.amount.setValue(section.settings.amount * 100)
         self.smoothing.setValue(section.settings.smoothing_octaves)
         self.boost.setValue(section.settings.max_boost_db)
@@ -378,6 +399,8 @@ class SectionWorkbench(QtWidgets.QWidget):
         self.refresh_overlays()
 
     def inspect(self):
+        if not self.owner.ensure_processing_ready():
+            return
         if self.draft_dirty and not self.update_section():
             return
         section = self.selected_section()
@@ -398,6 +421,8 @@ class SectionWorkbench(QtWidgets.QWidget):
             self.owner.play_selection()
 
     def render_all(self):
+        if not self.owner.ensure_processing_ready():
+            return
         if self.draft_dirty and not self.update_section():
             return
         if self.owner.source is None or not self.sections:
@@ -405,11 +430,15 @@ class SectionWorkbench(QtWidgets.QWidget):
             return
         source = self.owner.processing_source()
         sections, targets = tuple(self.sections), dict(self.targets)
-        transition_ms = self.transition_ms.value()
+        self.owner.sync_project()
+        transition_ms = self.owner.project.transition_ms
+        self.owner.project.match_mode = "sections"
         self.owner.invalidate()
 
         def calculate():
             result = render_sections(source[0], source[1], sections, targets, transition_ms)
+            if self.owner.project.stages["match"].bypassed:
+                result = replace(result, audio=source[0].copy())
             return result, analyse(result.audio, source[1]), audition_pair(source[0], result.audio)
 
         self.owner.start_job(
@@ -422,4 +451,6 @@ class SectionWorkbench(QtWidgets.QWidget):
         if not self.form_loading and self.selected_section() is not None:
             self.draft_dirty = True
             self.owner.invalidate()
-            self.owner.status.setText("Section edits invalidate the preview. Apply to selected, Inspect EQ, or Render sections to apply them.")
+            self.owner.status.setText(
+                "Section edits invalidate the preview. Apply to selected, Inspect EQ, or Render sections to apply them."
+            )
