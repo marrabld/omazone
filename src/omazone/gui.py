@@ -8,6 +8,7 @@ import pyqtgraph as pg
 import soundfile as sf
 from PySide6 import QtCore, QtWidgets
 
+from .clipping_view import ClippingInspector
 from .engine import (
     MatchSettings,
     analyse,
@@ -18,6 +19,7 @@ from .engine import (
     rms_db,
 )
 from .playback import PlaybackCursor
+from .section_view import SectionWorkbench
 from .waveform import PeakIndex
 from .waveform_view import WaveformView
 
@@ -94,6 +96,12 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowTitle("Omazone | spectral matching playground")
         self.resize(1120, 800)
         self.source = self.reference = self.output = None
+        self.section_result = None
+        self.repair_result = None
+        self.repaired_source = None
+        self.repair_preview = None
+        self.mastering_preview = None
+        self.audition_mode = "mastering"
         self.worker = None
         self.stream = None
         self.preview = None
@@ -138,22 +146,42 @@ class Window(QtWidgets.QMainWindow):
         self.selection_timer.setInterval(150)
         self.selection_timer.timeout.connect(self.finish_selection_edit)
         self.views.addTab(self.waveform, "Waveform / selection")
+        self.section_workbench = SectionWorkbench(self)
+        self.views.addTab(self.section_workbench.reference_page, "Reference targets")
+        self.views.addTab(self.section_workbench, "Mix sections")
+        self.clipping_inspector = ClippingInspector(self)
+        self.views.addTab(self.clipping_inspector, "Clipping inspection")
         layout.addWidget(self.views, 1)
 
+        self.mastering_controls = QtWidgets.QWidget()
+        mastering_layout = QtWidgets.QVBoxLayout(self.mastering_controls)
+        mastering_layout.setContentsMargins(0, 0, 0, 0)
+        mastering_layout.addWidget(
+            QtWidgets.QLabel("Whole-song matching controls; mix sections have their own settings.")
+        )
         controls = QtWidgets.QHBoxLayout()
         self.amount = self.control(controls, "Match amount", 0, 100, 50, "%", 0)
         self.smoothing = self.control(controls, "Smoothing", 0.02, 2, 0.33, " oct", 2)
         self.boost = self.control(controls, "Maximum boost", 0, 18, 6, " dB", 1)
         self.cut = self.control(controls, "Maximum cut", 0, 18, 6, " dB", 1)
-        layout.addLayout(controls)
+        mastering_layout.addLayout(controls)
+        process_row = QtWidgets.QHBoxLayout()
+        self.process_button = self.button(process_row, "Analyse + process", self.process)
+        mastering_layout.addLayout(process_row)
+        layout.addWidget(self.mastering_controls)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.valueChanged.connect(self.settings_changed)
 
         row = QtWidgets.QHBoxLayout()
-        self.process_button = self.button(row, "Analyse + process", self.process)
         self.play_button = self.button(row, "Play", self.play)
         self.button(row, "Stop", self.stop)
         self.ab_button = self.button(row, "Listening: original", self.toggle_ab)
+        self.preview_mode = QtWidgets.QComboBox()
+        self.preview_mode.addItem("Input / mastered", "mastering")
+        self.preview_mode.addItem("Original / repaired", "repair")
+        self.preview_mode.addItem("Original recording", "original")
+        self.preview_mode.currentIndexChanged.connect(self.preview_mode_changed)
+        row.addWidget(self.preview_mode)
         layout.addLayout(row)
         selection_controls = QtWidgets.QHBoxLayout()
         self.play_selection_button = self.button(
@@ -181,7 +209,7 @@ class Window(QtWidgets.QMainWindow):
         self.meters = QtWidgets.QLabel("RMS and sample-peak measurements appear after processing.")
         layout.addWidget(self.meters)
         self.note = QtWidgets.QLabel(
-            "Preview uses RMS-matched levels and shared headroom. Export keeps the raw EQ result."
+            "Preview uses RMS-matched levels and shared headroom. Exports omit preview gain matching."
         )
         self.note.setWordWrap(True)
         layout.addWidget(self.note)
@@ -204,6 +232,8 @@ class Window(QtWidgets.QMainWindow):
                                          margin: -5px 0; border-radius: 7px; }
         """)
         self.update_buttons()
+        self.views.currentChanged.connect(self.tab_changed)
+        self.tab_changed()
 
     def button(self, layout, title, callback):
         button = QtWidgets.QPushButton(title)
@@ -243,15 +273,93 @@ class Window(QtWidgets.QMainWindow):
         )
         self.export_button.setEnabled(not busy and self.output is not None)
         self.play_button.setEnabled(not busy and self.source is not None)
-        self.ab_button.setEnabled(self.output is not None)
+        self.ab_button.setEnabled(
+            not busy
+            and self.audition_mode != "original"
+            and (
+                self.repair_preview is not None
+                if self.audition_mode == "repair"
+                else self.output is not None
+            )
+        )
+        self.preview_mode.setEnabled(not busy and self.source is not None)
+        self.preview_mode.model().item(1).setEnabled(self.repair_preview is not None)
         self.seek_slider.setEnabled(not busy and self.source is not None)
         self.waveform.setEnabled(not busy and self.source is not None)
+        self.section_workbench.setEnabled(not busy)
+        self.section_workbench.reference_page.setEnabled(not busy)
+        self.clipping_inspector.setEnabled(not busy and self.source is not None)
+        self.section_workbench.capture_button.setEnabled(not busy and self.reference is not None)
+        self.section_workbench.render_button.setEnabled(
+            not busy and self.source is not None and bool(self.section_workbench.sections)
+        )
         has_selection = self.source is not None and self.waveform.selection is not None
+        self.clipping_inspector.analyse_button.setEnabled(not busy and has_selection)
+        self.clipping_inspector.suggest_button.setEnabled(not busy and has_selection)
+        self.clipping_inspector.manual_analyse_button.setEnabled(not busy and has_selection)
+        self.clipping_inspector.review_button.setEnabled(
+            not busy
+            and self.clipping_inspector.report is not None
+            and bool(self.clipping_inspector.report.candidates)
+        )
+        self.clipping_inspector.listen_button.setEnabled(
+            not busy and has_selection and self.repair_result is not None
+        )
+        self.clipping_inspector.repair_button.setEnabled(
+            not busy and bool(self.clipping_inspector.checked_intervals())
+        )
+        self.clipping_inspector.reset_repair_button.setEnabled(
+            not busy and self.repair_result is not None
+        )
+        self.clipping_inspector.export_repair_button.setEnabled(
+            not busy and self.repair_result is not None
+        )
         self.play_selection_button.setEnabled(not busy and has_selection)
         self.loop_selection.setEnabled(not busy and has_selection)
         self.whole_song_button.setEnabled(not busy and self.source is not None)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.setEnabled(not busy)
+        self.clipping_inspector.refresh_actions()
+
+    def refresh_file_labels(self):
+        if self.views.currentWidget() is self.clipping_inspector or (
+            self.views.currentWidget() is self.waveform
+            and self.audition_mode in ("original", "repair")
+        ):
+            self.files.setText(
+                f"Recording: {self.source[3]}"
+                if self.source
+                else "Load a recording and select a passage."
+            )
+        elif self.source is None and self.reference is None:
+            self.files.setText("Load a mix and a reference to begin.")
+        else:
+            mix = self.source[3] if self.source else "none"
+            reference = self.reference[3] if self.reference else "none"
+            self.files.setText(f"Mix: {mix}    |    Reference: {reference}")
+
+    def tab_changed(self, *args):
+        clipping = self.views.currentWidget() is self.clipping_inspector
+        reviewing = self.views.currentWidget() is self.waveform and self.audition_mode in (
+            "original",
+            "repair",
+        )
+        repair_workflow = clipping or reviewing
+        self.load_mix.setText("Load recording" if repair_workflow else "Load mix")
+        self.mastering_controls.setVisible(not repair_workflow)
+        self.load_ref.setVisible(not repair_workflow)
+        self.export_button.setVisible(not repair_workflow)
+        self.preview_mode.setVisible(not repair_workflow)
+        self.meters.setVisible(not repair_workflow)
+        self.note.setVisible(not repair_workflow)
+        self.status.setVisible(
+            not repair_workflow
+            or (clipping and self.clipping_inspector.advanced_toggle.isChecked())
+        )
+        self.whole_song_button.setText("Whole recording" if repair_workflow else "Whole song")
+        self.refresh_file_labels()
+        if clipping and self.source is not None:
+            self.preview_mode.setCurrentIndex(1 if self.repair_preview is not None else 2)
 
     def start_job(self, function, callback, message):
         self.stop()
@@ -285,30 +393,41 @@ class Window(QtWidgets.QMainWindow):
 
     def loaded(self, target, data):
         setattr(self, target, data)
+        if target == "source":
+            self.repair_result = self.repaired_source = self.repair_preview = None
+            self.audition_mode = "mastering"
+            with QtCore.QSignalBlocker(self.preview_mode):
+                self.preview_mode.setCurrentIndex(0)
         self.invalidate()
         if target == "source":
             self.reset_playback_mode()
             self.position = 0
             index = data[4] if len(data) > 4 else PeakIndex(data[0])
             self.waveform.set_audio(index, data[1])
+            self.section_workbench.reset_mix()
+            self.clipping_inspector.reset_source()
             self.views.setCurrentWidget(self.waveform)
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
                 self.seek_slider.setPageStep(data[1] * 10)
+        else:
+            self.section_workbench.set_reference(data)
+            self.views.setCurrentWidget(self.section_workbench.reference_page)
         self.update_transport()
-        mix = self.source[3] if self.source else "none"
-        reference = self.reference[3] if self.reference else "none"
-        self.files.setText(f"Mix: {mix}    |    Reference: {reference}")
+        self.refresh_file_labels()
         self.plot_spectra()
         self.status.setText("Loaded. Reference sample rate may differ from the mix.")
+        self.tab_changed()
 
     def invalidate(self):
         self.stop()
         self.output = None
-        self.preview = None
+        self.section_result = None
+        self.mastering_preview = None
+        self.preview = self.repair_preview if self.audition_mode == "repair" else None
         self.listen_processed = False
-        self.ab_button.setText("Listening: original")
+        self.update_ab_label()
         self.eq_plot.clear()
         self.meters.setText("Process to update measurements.")
         self.update_buttons()
@@ -319,9 +438,14 @@ class Window(QtWidgets.QMainWindow):
         self.status.setText("Settings changed. Click Analyse + process to render.")
 
     def plot_spectra(self):
+        self.spectrum_plot.setTitle("Whole-song spectra")
         self.spectrum_plot.clear()
         for data, name, color in (
-            (self.source, "Mix", "#73a8ff"),
+            (
+                self.processing_source(),
+                "Repaired input" if self.repaired_source is not None else "Mix",
+                "#73a8ff",
+            ),
             (self.reference, "Reference", "#eabb6b"),
         ):
             if data:
@@ -349,7 +473,7 @@ class Window(QtWidgets.QMainWindow):
             max_boost_db=self.boost.value(),
             max_cut_db=self.cut.value(),
         )
-        source, rate, spectrum = self.source[:3]
+        source, rate, spectrum = self.processing_source()[:3]
         reference = self.reference[2]
 
         def calculate():
@@ -357,13 +481,35 @@ class Window(QtWidgets.QMainWindow):
             output = render(source, spec)
             return output, analyse(output, rate), spec, audition_pair(source, output)
 
+        self.invalidate()
         self.start_job(calculate, self.processed, "Designing filter and rendering blocks…")
 
     def processed(self, result):
         self.output = result[:3]
-        self.preview = result[3]
+        self.mastering_preview = self.preview = result[3]
+        self.audition_mode = "mastering"
+        with QtCore.QSignalBlocker(self.preview_mode):
+            self.preview_mode.setCurrentIndex(0)
+        self.listen_processed = False
+        self.update_ab_label()
+        self.views.setCurrentIndex(0)
         self.plot_spectra()
         spec = self.output[2]
+        self.eq_plot.setTitle("Whole-song correction")
+        self.draw_filter(spec)
+
+        source = self.processing_source()[0]
+        output = self.output[0]
+        self.meters.setText(
+            f"Input RMS: {rms_db(source):.1f} dBFS  |  Output RMS: {rms_db(output):.1f} dBFS"
+            f"  |  Output sample peak: {peak_db(output):.1f} dBFS"
+        )
+        self.status.setText(
+            f"Rendered. FIR delay: {spec.latency_samples} samples "
+            f"({1000 * spec.latency_samples / spec.sample_rate:.1f} ms), compensated in file."
+        )
+
+    def draw_filter(self, spec):
         self.eq_plot.clear()
         self.eq_plot.plot(
             spec.frequency[1:],
@@ -375,15 +521,33 @@ class Window(QtWidgets.QMainWindow):
         self.eq_plot.plot(
             frequency[1:], response[1:], pen=pg.mkPen("#63dfc0", width=2), name="Actual FIR"
         )
-        source = self.source[0]
-        output = self.output[0]
-        self.meters.setText(
-            f"Input RMS: {rms_db(source):.1f} dBFS  |  Output RMS: {rms_db(output):.1f} dBFS"
-            f"  |  Output sample peak: {peak_db(output):.1f} dBFS"
+
+    def sections_rendered(self, payload):
+        result, spectrum, previews = payload
+        self.processed((result.audio, spectrum, result.curves[0].filter, previews))
+        self.section_result = result
+        section = self.section_workbench.selected_section()
+        curve = next(
+            (item for item in result.curves if section and item.section.id == section.id),
+            result.curves[0],
         )
+        self.show_section_curve(curve)
         self.status.setText(
-            f"Rendered. FIR delay: {spec.latency_samples} samples "
-            f"({1000 * spec.latency_samples / spec.sample_rate:.1f} ms), compensated in file."
+            f"Rendered {len(result.curves)} sections with {len(result.transitions)} aligned transition windows. Ready for A/B and export."
+        )
+
+    def show_section_curve(self, curve, switch_view=True):
+        profile = self.section_workbench.targets[curve.section.target_id]
+        self.spectrum_plot.clear()
+        self.spectrum_plot.setTitle(f"Section: {curve.section.name} | Target: {profile.name}")
+        self.draw_spectrum(curve.source, "Mix section", "#73a8ff")
+        self.draw_spectrum(profile.spectrum, "Target", "#eabb6b")
+        self.eq_plot.setTitle(f"Correction for {curve.section.name}")
+        self.draw_filter(curve.filter)
+        if switch_view:
+            self.views.setCurrentIndex(0)
+        self.status.setText(
+            f"Showing section correction: {curve.section.name}. Render sections for the full-song preview."
         )
 
     def play(self):
@@ -392,7 +556,9 @@ class Window(QtWidgets.QMainWindow):
             return
         self.stop()
         if self.preview is None:
-            source = self.source[0]
+            source = (
+                self.processing_source()[0] if self.audition_mode == "mastering" else self.source[0]
+            )
             self.preview = audition_pair(source, source)
         if self.transport.region is not None:
             region = self.transport.region
@@ -479,8 +645,109 @@ class Window(QtWidgets.QMainWindow):
 
     def toggle_ab(self):
         self.listen_processed = not self.listen_processed
-        self.ab_button.setText(
-            "Listening: processed" if self.listen_processed else "Listening: original"
+        self.update_ab_label()
+
+    def update_ab_label(self):
+        if self.audition_mode == "original":
+            label = "original"
+        elif self.audition_mode == "repair":
+            label = "repaired" if self.listen_processed else "original"
+        else:
+            label = (
+                "processed"
+                if self.listen_processed
+                else ("repaired input" if self.repaired_source is not None else "original")
+            )
+        self.ab_button.setText(f"Listening: {label}")
+
+    def preview_mode_changed(self):
+        resume = self.playing
+        self.stop()
+        self.audition_mode = self.preview_mode.currentData()
+        self.preview = (
+            self.repair_preview if self.audition_mode == "repair" else self.mastering_preview
+        )
+        self.listen_processed = False
+        self.update_ab_label()
+        self.update_buttons()
+        if resume:
+            self.play()
+
+    def processing_source(self):
+        return self.repaired_source if self.repaired_source is not None else self.source
+
+    def repair_applied(self, payload):
+        result, spectrum, previews = payload
+        self.clipping_inspector.repair_reported(result)
+        if not result.repaired:
+            self.status.setText(
+                "No intervals passed reconstruction checks. Current audio is unchanged."
+            )
+            return
+        self.repair_result = result
+        self.repaired_source = (
+            result.audio,
+            self.source[1],
+            spectrum,
+            self.source[3] + " (repaired)",
+        )
+        self.repair_preview = previews
+        self.invalidate()
+        with QtCore.QSignalBlocker(self.preview_mode):
+            self.preview_mode.setCurrentIndex(1)
+        self.audition_mode = "repair"
+        self.preview = previews
+        self.listen_processed = False
+        self.update_ab_label()
+        self.waveform.set_repair(result)
+        self.plot_spectra()
+        self.views.setCurrentWidget(self.clipping_inspector)
+        self.meters.setText(
+            f"Original RMS: {rms_db(self.source[0]):.1f} dBFS | Repaired RMS: {rms_db(result.audio):.1f} dBFS | Repaired sample peak: {peak_db(result.audio):.1f} dBFS"
+        )
+        self.status.setText(
+            f"Reconstructed {len(result.repaired)} intervals. Original/repaired A/B is ready; matching will use the repaired input."
+        )
+        self.update_buttons()
+
+    def reset_repair(self):
+        if self.repair_result is None:
+            return
+        self.stop()
+        self.repair_result = self.repaired_source = self.repair_preview = None
+        self.audition_mode = "mastering"
+        with QtCore.QSignalBlocker(self.preview_mode):
+            self.preview_mode.setCurrentIndex(0)
+        self.invalidate()
+        self.waveform.set_repair(None)
+        self.clipping_inspector.reset_repair_status()
+        with QtCore.QSignalBlocker(self.clipping_inspector.table):
+            for row in range(len(self.clipping_inspector.rows)):
+                self.clipping_inspector.table.item(row, 7).setText("")
+                self.clipping_inspector.table.item(row, 7).setToolTip("")
+                self.clipping_inspector.table.item(row, 7).setData(
+                    QtCore.Qt.ItemDataRole.UserRole, None
+                )
+        self.plot_spectra()
+        self.status.setText("Repair reset. Subsequent matching uses the original input.")
+        if self.views.currentWidget() is self.clipping_inspector:
+            self.preview_mode.setCurrentIndex(2)
+
+    def export_repair(self):
+        if self.repair_result is None:
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export repaired audio", "repaired.wav", "WAV (*.wav)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".wav"):
+            path += ".wav"
+        audio, rate = self.repair_result.audio, self.source[1]
+        self.start_job(
+            lambda: sf.write(path, audio, rate, subtype="DOUBLE"),
+            lambda _: self.status.setText(f"Exported repaired 64-bit float WAV: {path}"),
+            "Exporting repaired audio…",
         )
 
     @property
@@ -537,6 +804,7 @@ class Window(QtWidgets.QMainWindow):
             self.play()
 
     def selection_changed(self, region):
+        self.clipping_inspector.selection_changed(region)
         if self.transport.region is not None and self.transport.region != region:
             resume = self.playing or self.resume_after_selection_edit
             self.stop()

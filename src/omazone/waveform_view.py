@@ -37,13 +37,18 @@ class WaveformView(QtWidgets.QWidget):
         self.curves = []
         self.regions = []
         self.playheads = []
+        self.section_items = []
+        self.clipping_items = []
+        self.clipping_markers = []
+        self.repair_items = []
+        self.repair_data = []
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        help_text = QtWidgets.QLabel(
+        self.help_text = QtWidgets.QLabel(
             "Wheel: zoom | Drag: pan | Shift+drag: select | Drag green edges: adjust | Click: seek"
         )
-        help_text.setWordWrap(True)
-        layout.addWidget(help_text)
+        self.help_text.setWordWrap(True)
+        layout.addWidget(self.help_text)
         controls = QtWidgets.QHBoxLayout()
         self.start_time = self.time_control(controls, "Start")
         self.end_time = self.time_control(controls, "End")
@@ -88,6 +93,11 @@ class WaveformView(QtWidgets.QWidget):
             self.plot_layout.removeWidget(plot)
             plot.deleteLater()
         self.channel_plots, self.curves, self.regions, self.playheads = [], [], [], []
+        self.section_items = []
+        self.clipping_items = []
+        self.clipping_markers = []
+        self.repair_items = []
+        self.repair_data = []
         self.index = index
         self.sample_rate = sample_rate
         duration = len(index.audio) / sample_rate
@@ -162,6 +172,8 @@ class WaveformView(QtWidgets.QWidget):
                     np.column_stack((low[:, channel], high[:, channel])).ravel(),
                     connect="pairs",
                 )
+        self.redraw_clipping(left, right, budget)
+        self.redraw_repair(left, right, budget)
 
     def select_seconds(self, start, end):
         if self.index is not None:
@@ -251,3 +263,156 @@ class WaveformView(QtWidgets.QWidget):
     def set_position(self, samples):
         for line in self.playheads:
             line.setValue(samples / self.sample_rate)
+
+    def set_sections(self, sections, transitions, colors):
+        for plot, item in self.section_items:
+            plot.removeItem(item)
+        self.section_items = []
+        for channel, plot in enumerate(self.channel_plots):
+            for index, section in enumerate(sections):
+                color = colors[index % len(colors)]
+                shade = pg.mkColor(color)
+                shade.setAlpha(24)
+                region = pg.LinearRegionItem(
+                    values=(
+                        section.region.start / self.sample_rate,
+                        section.region.end / self.sample_rate,
+                    ),
+                    movable=False,
+                    brush=pg.mkBrush(shade),
+                    pen=pg.mkPen(color),
+                )
+                region.setZValue(-5)
+                region.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                for line in region.lines:
+                    line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(region, ignoreBounds=True)
+                label = pg.TextItem(section.name, color=color, anchor=(0.5, 0))
+                label.setPos(
+                    (section.region.start + section.region.end) / (2 * self.sample_rate),
+                    max(1.0, float(self.index.peak[channel])),
+                )
+                label.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(label, ignoreBounds=True)
+                self.section_items.extend(((plot, region), (plot, label)))
+            for transition in transitions:
+                region = pg.LinearRegionItem(
+                    values=(transition.start / self.sample_rate, transition.end / self.sample_rate),
+                    movable=False,
+                    brush=pg.mkBrush(234, 187, 107, 24),
+                    pen=pg.mkPen("#eabb6b", style=QtCore.Qt.PenStyle.DashLine),
+                )
+                region.setZValue(-4)
+                region.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                for line in region.lines:
+                    line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(region, ignoreBounds=True)
+                self.section_items.append((plot, region))
+
+    def set_clipping(self, report):
+        for plot, item in self.clipping_items:
+            plot.removeItem(item)
+        self.clipping_items = []
+        self.clipping_markers = []
+        if report is None:
+            return
+        for stats in report.stats:
+            plot = self.channel_plots[stats.channel]
+            for intervals, color in ((report.candidates, "#ff6b6b"), (report.overloads, "#ffb45c")):
+                channel_intervals = sorted(
+                    (item for item in intervals if item.channel == stats.channel),
+                    key=lambda item: item.start,
+                )
+                if not channel_intervals:
+                    continue
+                centers = np.asarray(
+                    [
+                        (item.start + item.end - 1) / (2 * self.sample_rate)
+                        for item in channel_intervals
+                    ]
+                )
+                levels = np.asarray([item.level for item in channel_intervals])
+                marker = pg.ScatterPlotItem(
+                    size=7, pen=pg.mkPen(color), brush=pg.mkBrush(color), symbol="o"
+                )
+                marker.setZValue(15)
+                marker.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(marker, ignoreBounds=True)
+                self.clipping_items.append((plot, marker))
+                self.clipping_markers.append((marker, centers, levels))
+            settings = report.settings_for(stats.channel)
+            for threshold in (settings.positive, settings.negative):
+                line = pg.InfiniteLine(
+                    pos=threshold,
+                    angle=0,
+                    pen=pg.mkPen("#ff6b6b", style=QtCore.Qt.PenStyle.DashLine),
+                )
+                line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(line, ignoreBounds=True)
+                self.clipping_items.append((plot, line))
+        left, right = self.channel_plots[0].viewRange()[0]
+        self.redraw_clipping(left, right, max(100, min(2000, self.channel_plots[0].width())))
+
+    def redraw_clipping(self, left, right, budget):
+        for marker, times, levels in self.clipping_markers:
+            first, last = np.searchsorted(times, (left, right))
+            # Bound GUI work on dense clipped passages. The inspector totals
+            # include every interval; zooming reveals the individual markers.
+            stride = max(1, int(np.ceil((last - first) / budget)))
+            marker.setData(times[first:last:stride], levels[first:last:stride])
+
+    def set_repair(self, result):
+        for plot, curve in self.repair_items:
+            plot.removeItem(curve)
+        self.repair_items = []
+        self.repair_data = []
+        for channel, plot in enumerate(self.channel_plots):
+            peak = max(1.0, float(self.index.peak[channel]))
+            if result is not None:
+                intervals = sorted(
+                    (item for item in result.repaired if item.channel == channel),
+                    key=lambda item: item.start,
+                )
+                if intervals:
+                    peak = max(
+                        peak,
+                        max(
+                            float(np.max(np.abs(result.audio[item.start : item.end, channel])))
+                            for item in intervals
+                        ),
+                    )
+                    curve = plot.plot(pen=pg.mkPen("#63dfc0", width=2), connect="finite")
+                    curve.setZValue(12)
+                    self.repair_items.append((plot, curve))
+                    starts = np.asarray([item.start for item in intervals])
+                    ends = np.asarray([item.end for item in intervals])
+                    self.repair_data.append((curve, channel, starts, ends, result.audio))
+            plot.setYRange(-peak * 1.05, peak * 1.05, padding=0)
+        if self.channel_plots:
+            left, right = self.channel_plots[0].viewRange()[0]
+            self.redraw_repair(left, right, max(100, min(2000, self.channel_plots[0].width())))
+
+    def redraw_repair(self, left, right, budget):
+        sample_left, sample_right = left * self.sample_rate, right * self.sample_rate
+        for curve, channel, starts, ends, audio in self.repair_data:
+            first = np.searchsorted(ends, sample_left, side="right")
+            last = np.searchsorted(starts, sample_right)
+            interval_stride = max(1, int(np.ceil((last - first) / max(1, budget // 3))))
+            chosen = list(range(first, last, interval_stride))
+            per_interval = max(2, budget // max(1, len(chosen)))
+            times, values = [], []
+            for index in chosen:
+                start = max(int(starts[index]), int(np.floor(sample_left)))
+                end = min(int(ends[index]), int(np.ceil(sample_right)))
+                if end <= start:
+                    continue
+                samples = np.unique(
+                    np.linspace(start, end - 1, min(end - start, per_interval), dtype=int)
+                )
+                times.append(np.concatenate((samples / self.sample_rate, [np.nan])))
+                values.append(np.concatenate((audio[samples, channel], [np.nan])))
+            curve.setData(
+                np.concatenate(times) if times else [],
+                np.concatenate(values) if values else [],
+                connect="finite",
+            )

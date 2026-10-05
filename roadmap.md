@@ -1,12 +1,70 @@
 # Omazone roadmap
 
-Omazone is a workbench for learning music DSP through measurements and listening.
-The first working tool is reference-matching EQ. The next goal is a modular
-offline processing chain with filtering, compression, dynamic EQ, and audio repair.
+Omazone is a guided, non-destructive offline mastering workbench for learning
+through measurements and listening. Its approved direction is a saved project
+and logical processing workflow, with the song visible throughout.
 
-This is a proposed development order, not a release schedule. Priorities can
-change as we investigate real recordings and contributors bring experiments.
-Checked items work in the current application; unchecked items are planned.
+Checked items are implemented and tested; unchecked items are planned. Some
+implemented work remains in feature PRs rather than `main`: see
+[PR #19](https://github.com/marrabld/omazone/pull/19),
+[PR #20](https://github.com/marrabld/omazone/pull/20), and
+[PR #22](https://github.com/marrabld/omazone/pull/22).
+This document describes development priorities, not a release schedule.
+
+## Approved user workflow
+
+```text
+Load and listen → Mark sections → Repair → Match → Manual EQ
+               → Dynamics → Output check → Export
+```
+
+Region marking remains available throughout and is shared annotation, not an
+effect. Repair, matching, EQ, and dynamics can be skipped. Each step should state
+its purpose, offer one obvious next action, and keep numerical controls optional.
+Continue moves through the workflow without baking audio or locking earlier work.
+
+### Persistent visual context
+
+The song must stay visible while tools change around it. Reference targets,
+mix-section assignments, and clipping controls must not replace the viewer with
+a table or settings form.
+
+- [ ] A persistent song overview shows named regions, selection, and playhead.
+- [ ] The detailed viewer offers Waveform, Spectrum, and Both, preserving the user's choice.
+- [ ] Moving between steps preserves mix selection, zoom/pan, cursor, and loop bounds.
+- [ ] The viewer identifies the signal and scope: original, current-stage input,
+  or rendered output for the selected passage.
+- [ ] Visual processing signals are distinct from preview-only gain matching.
+- [ ] Reference capture adds a labelled reference pane beside the mix context,
+  with independent selection and time axes. Saved spectrum-only targets show
+  their curve and metadata without making the mix disappear.
+- [ ] Pending or stale output is labelled; previously rendered audio is not
+  silently presented as the result of new settings.
+
+The time-domain overview remains useful even when the detailed view is a
+spectrum: it tells the user which part of the song they are editing. See
+[the workflow and layout specification](docs/workflow.md).
+
+## Next development milestones
+
+1. **Saved project model, #23.** Retain source references, regions, target profiles,
+   repairs, and every stage's settings. Bring persistence together rather than
+   implement unrelated save formats for each tool.
+2. **Fixed-order chain, #1.** Render from the retained original and saved recipe,
+   with bypass/skip, latency/tails, and dependency-aware caches. Earlier edits
+   preserve later choices; rerendering is distinct from explicitly relearning a target.
+3. **Shared viewer and navigation, #24/#25.** Keep the song visible, reuse the
+   transport/regions, and add Back/Continue/Skip over the existing tools. Viewer
+   prototyping can proceed alongside the project model.
+4. **Step comparisons, #27.** Compare aligned input/output of the current step
+   with preview-only level matching. Preserve whole-chain comparison as an option.
+5. **Manual section EQ, #26.** First new effect: bell bands with fixed frequency/Q
+   and region-limited, smoothly automated gain after matching. Preserve all earlier work.
+6. **Dynamics and output.** Add the broadband compressor, LUFS/true-peak metering,
+   output gain, and limiter. Dynamic EQ follows the simpler EQ/detector foundation.
+
+Initial processing order is fixed. Advanced reordering, multiband dynamics, and
+real-time/plugin integration follow once this workflow is stable and understandable.
 
 ## Contributor issue backlog
 
@@ -17,7 +75,7 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 
 | Issue | Task | Depends on |
 | --- | --- | --- |
-| [#1](https://github.com/marrabld/omazone/issues/1) | Common processor contract and offline chain | Foundation |
+| [#1](https://github.com/marrabld/omazone/issues/1) | Fixed-order chain and prefix renderer | Project #23 |
 | [#2](https://github.com/marrabld/omazone/issues/2) | Zoomable waveform and region selection | Foundation |
 | [#3](https://github.com/marrabld/omazone/issues/3) | Suspected hard-clipping detection | #2 for waveform overlay |
 | [#4](https://github.com/marrabld/omazone/issues/4) | Selected-region looping with shared A/B cursor | #2 |
@@ -31,6 +89,15 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#12](https://github.com/marrabld/omazone/issues/12) | Readable log-frequency labels | Good first issue |
 | [#13](https://github.com/marrabld/omazone/issues/13) | Generated-signal matching tutorial | Good first issue |
 | [#14](https://github.com/marrabld/omazone/issues/14) | Windows/macOS setup and playback validation | Good first issue |
+| [#16](https://github.com/marrabld/omazone/issues/16) | Named reference-passage targets and profile files | #2 |
+| [#17](https://github.com/marrabld/omazone/issues/17) | Mix-section assignments and independent correction curves | #16 |
+| [#18](https://github.com/marrabld/omazone/issues/18) | Contextual section rendering and aligned transitions | #16, #17 |
+| [#21](https://github.com/marrabld/omazone/issues/21) | Guided clipping repair with advanced controls hidden | Repair PR #20 |
+| [#23](https://github.com/marrabld/omazone/issues/23) | Saved non-destructive project and stable region/settings model | Coordinates with #1 |
+| [#24](https://github.com/marrabld/omazone/issues/24) | Persistent shared waveform/spectrum viewer | #23, #1; UI prototype can start earlier |
+| [#25](https://github.com/marrabld/omazone/issues/25) | Guided workflow navigation and skipped-stage handling | #23, #24, #1 |
+| [#26](https://github.com/marrabld/omazone/issues/26) | Manual parametric EQ limited to named regions | #23, #1, #6; #24/#27 for integration |
+| [#27](https://github.com/marrabld/omazone/issues/27) | Aligned before/after-this-step comparison | #23, #1, #24 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -46,6 +113,11 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Scrubbing, elapsed/total time, and pause/resume.
 - [x] Linked waveform plots, peak-preserving overview, and sample-accurate selection.
 - [x] One-shot selected-region playback and shared-cursor A/B looping.
+- [x] Independent reference selection, named spectral targets, and profile JSON save/load.
+- [x] Section assignments, individual matching controls, and context-aware transition rendering.
+- [x] Selected-region hard-clipping candidates, editable rail hints, and per-channel waveform markers.
+- [x] Checked-candidate short-gap Hermite repair, original/repaired audition, reset, and full-precision export.
+- [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
 
 ## 1. Inspection and selected-region repair
@@ -53,7 +125,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 Make it possible to identify a damaged passage and judge a repair locally.
 
 - [x] Zoomable waveform with a region-selection tool.
-- [ ] Mark suspected clipped samples and runs of flattened peaks.
+- [x] Mark suspected clipped samples and runs of flattened peaks.
 - [ ] Input/output peak indicators to distinguish source damage from processing overload.
 - [x] Audition and loop a selected section with the existing A/B comparison.
 - [ ] Inspect an actual clipped recording before choosing a reconstruction method.
@@ -64,21 +136,27 @@ Declipping is an offline repair operation. It estimates missing waveform peaks;
 it does not recover the original recording with certainty. Gain reduction alone
 can address overload in a floating-point signal, but cannot undo baked-in clipping.
 
-- [ ] Adjustable positive/negative clipping thresholds and a preview of detected intervals.
-- [ ] An interpolation baseline for short damaged intervals.
+- [x] Adjustable positive/negative clipping thresholds and a preview of detected intervals.
+- [x] An interpolation baseline for short damaged intervals.
 - [ ] Evaluate iterative band-limited or sparse reconstruction against that baseline.
-- [ ] Preserve samples outside the selected repair region and detected damage.
-- [ ] A/B the repaired section with the original, retaining an undoable source.
+- [x] Preserve samples outside the selected repair region and accepted damage mask.
+- [x] A/B the repaired section with the original, retaining a resettable source.
+- [ ] Accumulate repairs across regions and save/load repair sessions.
 
 Verify using known clean signals and recordings deliberately clipped at several
 levels. Measure reconstruction error and listen for boundary artefacts. Include
 asymmetric clipping and stereo examples. Soft or analogue distortion may require
 a different approach from hard-clipped plateaus.
 
-## 2. Modular chain and filtering
+## 2. Saved project, modular chain, and manual filtering
 
 Keep one application, with independently usable and testable processing modules.
 
+- [ ] Versioned project recipe with original source references, regions, target
+  profiles, repair operations, processing settings, and bypass/skip state.
+- [ ] Save/load and revisit earlier choices without discarding other stages.
+- [ ] Identify dependent renders/analyses as stale; keep explicit target relearning
+  separate from rendering the existing choices.
 - [ ] Define a common processor contract for preparation, state reset, block
   processing, latency, and tail handling. Extend the existing FIR contract.
 - [ ] Add per-module controls and bypass alongside whole-chain A/B.
@@ -86,15 +164,19 @@ Keep one application, with independently usable and testable processing modules.
 - [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
 - [ ] Add parametric bell and shelving EQ bands.
+- [ ] Region-limited manual bell EQ after matching, with smooth gain automation.
 
-An initial chain could be:
+The approved initial processing chain is:
 
 ```text
-Repair → filters / corrective EQ → matching EQ → dynamic EQ → compressor → output gain
+Repair → matching EQ → manual corrective EQ → optional dynamics
+       → output gain / limiting → export
 ```
 
 Repair remains a file/region operation before the streaming stages. Reordering
 the other modules can follow once their individual behaviour is established.
+Input filtering before matching is an advanced extension rather than the default
+learner workflow. Dynamic EQ can extend the corrective/dynamics tools later.
 
 ## 3. Broadband compression
 
@@ -140,13 +222,22 @@ A limiter prevents new overload; declipping treats existing damage. Evaluate
 them separately. Check metering against known reference results and inspect
 limiter overshoot, transient distortion, and reported latency.
 
-## 6. Better matching experiments
+## 6. Section matching and further experiments
 
-- [ ] Select which passage contributes to source/reference analysis.
+- [x] Capture named targets from independent reference passages.
+- [x] Assign targets to non-overlapping mix sections, each analysed independently.
+- [x] Inspect per-section curves and audition them with the existing A/B transport.
+- [x] Render aligned filtered paths with complementary, bounded transition windows.
+- [ ] Save/load complete section plans and settings for a particular mix.
+- [ ] Rename/update captured targets without disturbing assignments.
+- [ ] Evaluate transition placement/duration on real metal-to-clean arrangements.
+
+- [x] Select which passage contributes to source/reference analysis for section matching.
 - [ ] Compare spectral normalisation and frequency-weighting strategies.
 - [ ] Offer longer FIR filters and show the latency/resolution tradeoff.
 - [ ] Explore minimum-phase matching as an alternative to linear phase.
-- [ ] Save reference profiles and reproducible processing settings.
+- [x] Save reference spectral profiles.
+- [ ] Save reproducible whole-song processing settings.
 - [ ] Profile memory and render time on full-length songs.
 
 ## 7. Route to real-time

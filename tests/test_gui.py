@@ -314,3 +314,442 @@ def test_selection_playback_looping_edits_and_mode_changes(monkeypatch):
         assert not window.playing
     finally:
         window.close()
+
+
+def test_reference_targets_two_sections_render_edit_and_export(tmp_path, monkeypatch):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    mix = np.random.default_rng(21).normal(0, 0.1, (rate * 2, 2))
+    reference = mix.copy()
+    reference[rate:] = signal.sosfilt(
+        signal.butter(2, 1200, fs=rate, output="sos"), mix[rate:], axis=0
+    )
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (mix, rate, analyse(mix, rate), "mix"))
+        window.waveform.set_selection(SampleRegion(0, rate))
+        window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
+        workbench = window.section_workbench
+        workbench.reference_waveform.set_selection(SampleRegion(0, rate))
+        workbench.target_name.setText("Metal")
+        workbench.capture_button.click()
+        wait()
+        workbench.reference_waveform.set_selection(SampleRegion(rate, len(reference)))
+        workbench.target_name.setText("Clean")
+        workbench.capture_button.click()
+        wait()
+        assert len(workbench.targets) == 2
+        assert window.waveform.selection == SampleRegion(0, rate)
+
+        workbench.use_mix_selection()
+        workbench.name.setText("Metal intro")
+        workbench.target_choice.setCurrentIndex(0)
+        workbench.add_section()
+        assert len(workbench.sections) == 1
+        window.waveform.set_selection(SampleRegion(rate, len(mix)))
+        workbench.use_mix_selection()
+        workbench.name.setText("Clean outro")
+        workbench.target_choice.setCurrentIndex(1)
+        workbench.amount.setValue(100)
+        workbench.add_section()
+        assert len(workbench.sections) == 2
+        assert len(window.waveform.section_items) > 0
+        workbench.render_button.click()
+        wait()
+        assert len(window.section_result.curves) == 2
+        assert window.output[0].shape == mix.shape
+        assert window.export_button.isEnabled()
+
+        window.views.setCurrentWidget(workbench)
+        workbench.table.selectRow(0)
+        assert window.views.currentWidget() is workbench
+        assert window.waveform.selection == SampleRegion(0, rate)
+        assert "Metal intro" in window.eq_plot.plotItem.titleLabel.text
+        export = tmp_path / "sections.wav"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(export), "")
+        )
+        window.export()
+        wait()
+        result, saved_rate = sf.read(export, always_2d=True)
+        assert saved_rate == rate
+        np.testing.assert_allclose(result, window.output[0], atol=1e-7)
+
+        workbench.amount.setValue(25)
+        assert window.output is None
+        assert workbench.draft_dirty
+        workbench.update_section()
+        assert window.output is None
+        assert window.section_result is None
+        assert not window.export_button.isEnabled()
+        assert workbench.sections[0].settings.amount == 0.25
+
+        workbench.amount.setValue(30)
+        workbench.render_all()  # Rendering applies valid pending edits.
+        wait()
+        assert workbench.sections[0].settings.amount == 0.3
+        assert window.section_result is not None
+
+        workbench.end.setValue(1.5)  # Overlaps the second section.
+        workbench.update_section()
+        assert errors and "overlap" in errors.pop()
+        assert workbench.sections[0].region.end == rate
+
+        profiles = tmp_path / "profiles.json"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(profiles), "")
+        )
+        workbench.save_library()
+        wait()
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getOpenFileName", lambda *args: (str(profiles), "")
+        )
+        workbench.load_library()
+        wait()
+        assert len(workbench.targets) == 4
+        assert len(workbench.sections) == 2
+        window.loaded("source", (mix[:rate], rate, analyse(mix[:rate], rate), "short"))
+        assert workbench.sections == []
+        assert len(workbench.targets) == 4
+        assert not window.waveform.section_items
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_clipping_inspection_markers_navigation_and_stale_results():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    audio = np.zeros((rate, 2))
+    audio[100:110, 0] = 0.6
+    audio[150:165, 0] = -0.4
+    audio[200:210, 1] = 1.2
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "test"))
+        window.waveform.set_selection(SampleRegion(50, 300))
+        inspector = window.clipping_inspector
+        inspector.positive.setValue(0.6)
+        inspector.negative.setValue(-0.4)
+        output = audio * 0.5
+        window.output = (output, analyse(output, rate), None)
+        window.update_buttons()
+        inspector.analyse_button.click()
+        wait()
+        assert len(inspector.report.candidates) == 2
+        assert len(inspector.report.overloads) == 1
+        assert window.output[0] is output  # Inspection never modifies render/export audio.
+        assert len(window.waveform.clipping_markers) == 2
+        inspector.table.selectRow(0)
+        inspector.show_interval()
+        app.processEvents()
+        window.waveform.redraw()
+        assert window.position == 100
+        assert window.waveform.selection == SampleRegion(50, 300)
+        assert window.views.currentWidget() is window.waveform
+        assert any(len(marker.points()) > 0 for marker, _, _ in window.waveform.clipping_markers)
+        inspector.tolerance.setValue(0.0001)
+        assert inspector.report is None
+        assert not window.waveform.clipping_items
+        inspector.analyse()
+        wait()
+        window.waveform.set_selection(SampleRegion(50, 250))
+        assert inspector.report is None
+        inspector.channel.setCurrentIndex(1)  # Left only.
+        inspector.suggest()
+        wait()
+        assert inspector.positive.value() == 0.6
+        assert inspector.negative.value() == -0.4
+        window.loaded("source", (audio[:, :1], rate, analyse(audio[:, :1], rate), "mono"))
+        assert inspector.channel.currentData() == 0
+        assert inspector.positive.value() == 1
+        assert inspector.report is None
+        assert not inspector.analyse_button.isEnabled()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypatch):
+    import sounddevice as sd
+
+    from omazone.engine import design_match
+    from omazone.sections import capture_target
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    t = np.arange(rate // 4) / rate
+    clean = (0.9 * np.sin(2 * np.pi * 440 * t))[:, None]
+    clipped = np.clip(clean, -0.45, 0.6)
+    before = clipped.copy()
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (clipped, rate, analyse(clipped, rate), "clipped"))
+        window.waveform.set_selection(SampleRegion(0, len(clipped)))
+        inspector = window.clipping_inspector
+        inspector.positive.setValue(0.6)
+        inspector.negative.setValue(-0.45)
+        inspector.analyse()
+        wait()
+        assert not inspector.repair_button.isEnabled()
+        inspector.check_shown(True)
+        inspector.repair_button.click()
+        wait()
+        assert window.repair_result and len(window.repair_result.repaired) > 100
+        assert window.audition_mode == "repair"
+        assert window.preview_mode.currentData() == "repair"
+        assert window.processing_source()[0] is window.repair_result.audio
+        assert window.source[0] is clipped
+        np.testing.assert_array_equal(clipped, before)
+        assert window.waveform.repair_items
+        window.loop_selection.setChecked(True)
+        window.play_selection()
+        block = np.empty((128, 1), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[0][:128])
+        window.toggle_ab()
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[1][128:256])
+        assert window.ab_button.text() == "Listening: repaired"
+        window.stop()
+
+        export = tmp_path / "repaired.wav"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(export), "")
+        )
+        inspector.export_repair_button.click()
+        wait()
+        saved, saved_rate = sf.read(export, always_2d=True)
+        assert saved_rate == rate
+        assert sf.info(export).subtype == "DOUBLE"
+        np.testing.assert_array_equal(saved, window.repair_result.audio)
+
+        repaired = window.repair_result
+        window.loaded("reference", (clean, rate, analyse(clean, rate), "clean"))
+        window.process()
+        wait()
+        expected = design_match(analyse(repaired.audio, rate), analyse(clean, rate), rate)
+        np.testing.assert_allclose(window.output[2].coefficients, expected.coefficients)
+        assert window.audition_mode == "mastering"
+        assert window.ab_button.text() == "Listening: repaired input"
+        workbench = window.section_workbench
+        workbench.target_captured(
+            capture_target(clean, rate, SampleRegion(0, len(clean)), "Clean", "clean", "generated")
+        )
+        workbench.use_mix_selection()
+        workbench.add_section()
+        workbench.render_all()
+        wait()
+        np.testing.assert_array_equal(
+            window.section_result.curves[0].source.power, analyse(repaired.audio, rate).power
+        )
+        previous_output = window.output
+        inspector.max_run_ms.setValue(0.01)  # All checked runs exceed this limit.
+        inspector.repair()
+        wait()
+        assert window.repair_result is repaired
+        assert window.output is previous_output
+        assert "kept unchanged" in inspector.repair_summary.text()
+
+        window.preview_mode.setCurrentIndex(1)
+        assert window.preview is window.repair_preview
+        inspector.reset_repair_button.click()
+        assert window.repair_result is None
+        assert window.processing_source() is window.source
+        assert window.output is None
+        assert not window.waveform.repair_items
+        assert window.audition_mode == "mastering"
+        np.testing.assert_array_equal(window.source[0], before)
+        assert all(
+            inspector.table.item(row, 7).text() == ""
+            and inspector.table.item(row, 7).toolTip() == ""
+            for row in range(len(inspector.rows))
+        )
+
+        inspector.max_run_ms.setValue(1)
+        inspector.repair()
+        wait()
+        assert window.repair_result is not None
+        window.loaded("source", (clean, rate, analyse(clean, rate), "new file"))
+        assert window.repair_result is None
+        assert not window.waveform.repair_items
+        assert not inspector.export_repair_button.isEnabled()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(monkeypatch):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    t = np.arange(4800) / rate
+    audio = np.column_stack(
+        (
+            np.clip(0.9 * np.sin(2 * np.pi * 440 * t), -0.45, 0.6),
+            np.clip(0.7 * np.sin(2 * np.pi * 660 * t), -0.25, 0.4),
+        )
+    )
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert not errors
+
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "stereo"))
+        window.waveform.set_selection(SampleRegion(0, len(audio)))
+        inspector = window.clipping_inspector
+        # Even with a prior master, entering repair inspection auditions raw source.
+        window.output = (audio * 0.5, analyse(audio * 0.5, rate), None)
+        window.views.setCurrentWidget(inspector)
+        app.processEvents()
+        assert window.audition_mode == "original"
+        assert window.mastering_controls.isHidden()
+        assert window.load_ref.isHidden()
+        assert window.preview_mode.isHidden()
+        assert inspector.advanced_panel.isHidden()
+        assert inspector.review_panel.isHidden()
+        window.play_selection()
+        block = np.empty((32, 2), dtype=np.float32)
+        window.stream.callback(block, 32, None, None)
+        np.testing.assert_array_equal(block, audio[:32].astype(np.float32))
+        window.stop()
+        inspector.analyse_button.click()
+        wait()
+        assert {item.channel for item in inspector.report.candidates} == {0, 1}
+        assert "dBFS" not in inspector.summary.text()
+        assert not inspector.repair_button.isEnabled()
+        inspector.review_button.click()
+        assert not inspector.review_panel.isHidden()
+        assert inspector.table.isColumnHidden(6)
+        inspector.check_shown(True)
+        inspector.repair_button.click()
+        wait()
+        assert window.views.currentWidget() is inspector
+        assert inspector.result_heading.text() == "Repair preview ready"
+        assert not inspector.result_actions.isHidden()
+        inspector.listen_button.click()
+        assert window.playing and window.transport.loop
+        window.stream.callback(block, 32, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[0][:32])
+        window.toggle_ab()
+        window.stream.callback(block, 32, None, None)
+        np.testing.assert_array_equal(block, window.repair_preview[1][32:64])
+        window.stop()
+        inspector.advanced_toggle.setChecked(True)
+        assert not inspector.advanced_panel.isHidden()
+        assert not inspector.table.isColumnHidden(6)
+        inspector.channel.setCurrentIndex(1)
+        inspector.positive.setValue(0.6)
+        inspector.negative.setValue(-0.45)
+        inspector.manual_analyse_button.click()
+        wait()
+        assert len(inspector.report.stats) == 1
+        assert inspector.report.stats[0].channel == 0
+        window.views.setCurrentIndex(0)
+        assert not window.mastering_controls.isHidden()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_guided_no_results_message_does_not_offer_repair():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 48000
+    audio = (0.8 * np.sin(2 * np.pi * 440 * np.arange(4800) / rate))[:, None]
+    try:
+        window.loaded("source", (audio, rate, analyse(audio, rate), "clean"))
+        window.waveform.set_selection(SampleRegion(0, len(audio)))
+        from omazone.clipping import find_clipping
+
+        inspector = window.clipping_inspector
+        inspector.analysed(find_clipping(audio, window.waveform.selection))
+        assert inspector.result_heading.text() == "No clear clipped peaks found"
+        assert "isolated recording" in inspector.summary.text()
+        assert not inspector.review_button.isEnabled()
+        assert not inspector.repair_button.isEnabled()
+    finally:
+        app.processEvents()
+        window.close()
