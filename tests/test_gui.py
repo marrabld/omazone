@@ -581,6 +581,7 @@ def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypat
 
         repaired = window.repair_result
         window.loaded("reference", (clean, rate, analyse(clean, rate), "clean"))
+        window.views.setCurrentWidget(window.match_page)
         window.process()
         wait()
         expected = design_match(analyse(repaired.audio, rate), analyse(clean, rate), rate)

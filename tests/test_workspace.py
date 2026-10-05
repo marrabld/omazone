@@ -1,12 +1,12 @@
 import os
 import time
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Geometry checks must not inherit desktop tiling/window rules.
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import numpy as np
-import pyqtgraph as pg
 import soundfile as sf
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from omazone.engine import analyse
 from omazone.gui import Window, load_audio
@@ -63,7 +63,7 @@ def test_context_survives_every_tool_and_reference_selection():
         assert window.workspace.reference_pane.isVisible()
         assert len(window.workspace.overview_regions) == 2
         assert any(
-            isinstance(item, pg.TextItem) and item.toPlainText() == "Guitar"
+            hasattr(item, "toPlainText") and item.toPlainText() == "Guitar"
             for item in window.workspace.overview_regions
         )
         wait_jobs(app, window)
@@ -157,5 +157,94 @@ def test_profile_only_reference_keeps_mix_visible_and_project_preferences(tmp_pa
         assert window.waveform.selection == SampleRegion(2000, 10000)
         np.testing.assert_allclose(window.waveform.channel_plots[0].viewRange()[0], [0.1, 0.8])
         assert len(window.project.targets) == 1
+    finally:
+        window.close()
+
+
+def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(94).normal(0, 0.1, (32000, 2))
+    reference = audio[:16000]
+    try:
+        window.show()
+        assert window.views.currentWidget() is window.match_page
+        assert window.workspace.mode.currentData() == "waveform"
+        assert window.views.action_label.text() == "Load a mix."
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
+        assert window.views.currentWidget() is window.match_page
+        assert window.views.action_label.text() == "Mix loaded. Add a reference."
+        window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
+        assert window.views.currentWidget() is window.match_page
+        assert window.views.action_label.text() == "Mix and reference ready."
+        assert window.process_button.isEnabled()
+
+        for mode in ("waveform", "spectrum", "both"):
+            window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
+            for tool in range(window.views.count()):
+                window.views.setCurrentIndex(tool)
+                window.loaded("source", (audio.copy(), rate, analyse(audio, rate), "new mix"))
+                assert window.views.currentIndex() == tool
+                assert window.workspace.mode.currentData() == mode
+                selection = SampleRegion(8000, 20000)
+                window.waveform.set_selection(selection)
+                window.waveform.channel_plots[0].setXRange(0.4, 1.3, padding=0)
+                window.position = 9000
+                window.loop_selection.setChecked(True)
+                window.loaded(
+                    "reference", (reference.copy(), rate, analyse(reference, rate), "new reference")
+                )
+                assert window.views.currentIndex() == tool
+                assert window.workspace.mode.currentData() == mode
+                assert window.waveform.selection == selection
+                assert window.position == 9000
+                assert window.transport.region == selection and window.transport.loop
+                np.testing.assert_allclose(
+                    window.waveform.channel_plots[0].viewRange()[0], [0.4, 1.3]
+                )
+        wait_jobs(app, window)
+    finally:
+        window.close()
+
+
+def test_primary_actions_and_navigation_remain_visible_when_settings_scroll():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(95).normal(0, 0.1, (16000, 1))
+
+    def assert_visible(widget):
+        assert widget.isVisible()
+        top_left = widget.mapTo(window, QtCore.QPoint(0, 0))
+        assert window.rect().contains(QtCore.QRect(top_left, widget.size()))
+        assert not window.tool_scroll.isAncestorOf(widget)
+
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
+        window.loaded("reference", (audio, rate, analyse(audio, rate), "reference"))
+        for width, height in ((1024, 768), (1280, 900)):
+            window.resize(width, height)
+            for mode in ("waveform", "spectrum", "both"):
+                window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
+                for page, action in (
+                    (window.match_page, window.process_button),
+                    (window.section_workbench, window.section_workbench.render_button),
+                ):
+                    window.views.setCurrentWidget(page)
+                    window.workspace_split.setSizes([10000, 165])
+                    app.processEvents()
+                    scroll = window.tool_scroll.verticalScrollBar()
+                    scroll.setValue(scroll.maximum())
+                    app.processEvents()
+                    assert_visible(window.views.navigation)
+                    assert_visible(action)
+                    assert_visible(window.views.action_label)
+                    assert window.width() <= width
+                    assert window.height() <= height
+        window.views.setCurrentWidget(window.clipping_inspector)
+        assert window.views.action_bar.isHidden()
+        assert window.process_button.isHidden()
     finally:
         window.close()

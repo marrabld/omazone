@@ -149,6 +149,19 @@ dynamics, and output stages will use the same workspace.
 
 ### First matching experiment
 
+Loading a mix or reference leaves you on your chosen tool and keeps the selected
+viewer mode. Matching starts with "Load a mix", then "Mix loaded. Add a reference",
+then "Mix and reference ready". Reference targets open only when you choose that
+tool; loading a reference does not mean you need to capture named targets.
+
+The tabs and primary action bar do not scroll. **Analyse + process** stays visible
+on Matching; **Render sections** stays visible on Mix sections. Settings may scroll
+when the lower panel is small. **Measurements and status** expands the footer
+details when you need them. Opening a saved project still deliberately restores
+its saved tool and view preferences.
+
+![Matching ready at 1024 by 768 with fixed navigation and an always-visible processing button](docs/images/omazone-matching-ready.png)
+
 1. Load a mix and a broadly similar reference track.
 2. Start with 50% amount, 0.33-octave smoothing, and 6 dB boost/cut limits.
 3. Click **Analyse + process** to render the result.
