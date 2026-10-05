@@ -24,6 +24,7 @@ from .project import AudioReference, Project
 from .project_controller import ProjectController
 from .section_view import SectionWorkbench
 from .sections import TargetProfile
+from .tool_panel import ToolPanel
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
 from .workspace import SongWorkspace
@@ -183,7 +184,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         layout = QtWidgets.QVBoxLayout(central)
-        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(4)
         heading = QtWidgets.QLabel("OMAZONE   /   spectral laboratory")
         heading.setStyleSheet("font-size: 24px; font-weight: bold; color: #63dfc0;")
         layout.addWidget(heading)
@@ -197,7 +199,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         layout.addLayout(row)
 
         pg.setConfigOptions(antialias=True, background="#141a24", foreground="#b8c4d6")
-        self.views = QtWidgets.QTabWidget()
+        self.views = ToolPanel()
         spectra = QtWidgets.QWidget()
         spectra_layout = QtWidgets.QVBoxLayout(spectra)
         spectra_layout.setContentsMargins(0, 0, 0, 0)
@@ -245,19 +247,18 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.workspace = SongWorkspace(self, self.waveform, spectra, reference_waveform)
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.workspace_split.addWidget(self.workspace)
-        self.tool_scroll = QtWidgets.QScrollArea()
-        self.tool_scroll.setWidgetResizable(True)
-        self.tool_scroll.setMinimumHeight(130)
-        self.tool_scroll.setWidget(self.views)
-        self.workspace_split.addWidget(self.tool_scroll)
-        self.workspace_split.setSizes([450, 260])
+        self.tool_scroll = self.views.scroll_area
+        self.views.setMinimumHeight(175)
+        self.workspace_split.addWidget(self.views)
+        self.workspace_split.setChildrenCollapsible(False)
+        self.workspace_split.setSizes([360, 260])
         layout.addWidget(self.workspace_split, 1)
 
         self.mastering_controls = QtWidgets.QWidget()
         mastering_layout = QtWidgets.QVBoxLayout(self.mastering_controls)
         mastering_layout.setContentsMargins(0, 0, 0, 0)
-        mastering_layout.addWidget(
-            QtWidgets.QLabel("Whole-song matching controls; mix sections have their own settings.")
+        self.mastering_controls.setToolTip(
+            "Whole-song matching settings. Mix sections have independent settings."
         )
         controls = QtWidgets.QHBoxLayout()
         self.amount = self.control(controls, "Match amount", 0, 100, 50, "%", 0)
@@ -265,10 +266,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.boost = self.control(controls, "Maximum boost", 0, 18, 6, " dB", 1)
         self.cut = self.control(controls, "Maximum cut", 0, 18, 6, " dB", 1)
         mastering_layout.addLayout(controls)
-        process_row = QtWidgets.QHBoxLayout()
-        self.process_button = self.button(process_row, "Analyse + process", self.process)
-        mastering_layout.addLayout(process_row)
+        self.process_button = self.button(
+            self.views.action_layout, "Analyse + process", self.process
+        )
+        self.views.action_layout.addWidget(self.section_workbench.render_button)
         match_layout.addWidget(self.mastering_controls)
+        match_layout.addStretch(1)
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.valueChanged.connect(self.settings_changed)
 
@@ -307,14 +310,28 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         transport.addWidget(self.time_label)
         layout.addLayout(transport)
         self.meters = QtWidgets.QLabel("RMS and sample-peak measurements appear after processing.")
-        layout.addWidget(self.meters)
+        self.meters.setWordWrap(True)
+        self.details_toggle = QtWidgets.QToolButton()
+        self.details_toggle.setText("Measurements and status")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.details_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        layout.addWidget(self.details_toggle)
+        self.details_panel = QtWidgets.QWidget()
+        details_layout = QtWidgets.QVBoxLayout(self.details_panel)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.addWidget(self.meters)
         self.note = QtWidgets.QLabel(
             "Preview uses RMS-matched levels and shared headroom. Exports omit preview gain matching."
         )
         self.note.setWordWrap(True)
-        layout.addWidget(self.note)
+        details_layout.addWidget(self.note)
         self.status = QtWidgets.QLabel("Ready. FIR: 2049 taps. Offline processing.")
-        layout.addWidget(self.status)
+        self.status.setWordWrap(True)
+        details_layout.addWidget(self.status)
+        layout.addWidget(self.details_panel)
+        self.details_panel.hide()
+        self.details_toggle.toggled.connect(self.toggle_details)
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.check_playback)
         self.timer.start(100)
@@ -430,6 +447,42 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.clipping_inspector.refresh_actions()
         self.update_project_actions()
         self.workspace.refresh()
+        self.update_action_bar()
+
+    def update_action_bar(self):
+        matching = self.views.currentWidget() is self.match_page
+        sections = self.views.currentWidget() is self.section_workbench
+        self.views.action_bar.setVisible(matching or sections)
+        self.process_button.setVisible(matching)
+        self.section_workbench.render_button.setVisible(sections)
+        if self.worker is not None:
+            message = self.status.text()
+        elif self.source is None:
+            message = (
+                "Load a mix."
+                if self.project.source is None
+                else "Relink the original mix to continue."
+            )
+        elif matching and self.reference is None and self.project.reference_target is None:
+            message = "Mix loaded. Add a reference."
+        elif sections:
+            count = len(self.section_workbench.sections)
+            message = (
+                f"{count} sections ready to render."
+                if count
+                else "Select a mix passage and add a section."
+            )
+        elif self.output is not None and self.project.match_mode == "whole":
+            message = "Matching complete. Compare the result or export."
+        else:
+            message = "Mix and reference ready."
+        self.views.action_label.setText(message)
+
+    def toggle_details(self, visible):
+        self.details_panel.setVisible(visible)
+        self.details_toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if visible else QtCore.Qt.ArrowType.RightArrow
+        )
 
     def refresh_file_labels(self):
         if self.views.currentWidget() is self.clipping_inspector or (
@@ -460,6 +513,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.load_ref.setVisible(not repair_workflow)
         self.export_button.setVisible(not repair_workflow)
         self.preview_mode.setVisible(not repair_workflow)
+        self.details_toggle.setVisible(not repair_workflow)
+        self.details_panel.setVisible(not repair_workflow and self.details_toggle.isChecked())
         self.meters.setVisible(not repair_workflow)
         self.note.setVisible(not repair_workflow)
         self.status.setVisible(
@@ -471,6 +526,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if self.source is not None:
             self.workspace.sync_audio()
         self.workspace.refresh()
+        self.update_action_bar()
 
     def start_job(self, function, callback, message):
         self.stop()
@@ -533,18 +589,18 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.waveform.set_audio(index, data[1])
             self.section_workbench.reset_mix()
             self.clipping_inspector.reset_source()
-            self.views.setCurrentWidget(self.region_page)
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
                 self.seek_slider.setPageStep(data[1] * 10)
         else:
             self.section_workbench.set_reference(data)
-            self.views.setCurrentWidget(self.section_workbench.reference_page)
         self.update_transport()
         self.refresh_file_labels()
         self.plot_spectra()
-        self.status.setText("Loaded. Reference sample rate may differ from the mix.")
+        self.status.setText(
+            f"{'Mix' if target == 'source' else 'Reference'} loaded: {data[3]}. Current tool unchanged."
+        )
         self.tab_changed()
         if not self.restoring_project:
             self.project_changed()

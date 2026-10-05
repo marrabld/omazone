@@ -29,6 +29,10 @@ class SongWorkspace(QtWidgets.QWidget):
     def __init__(self, owner, waveform, spectra, reference):
         super().__init__()
         self.owner, self.waveform, self.reference_waveform = owner, waveform, reference
+        waveform.setToolTip(waveform.help_text.text())
+        waveform.help_text.hide()
+        reference.setToolTip(reference.help_text.text())
+        reference.help_text.hide()
         self.syncing = False
         self.refreshing = False
         self.closing = False
@@ -43,7 +47,7 @@ class SongWorkspace(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.overview = pg.PlotWidget()
-        self.overview.setFixedHeight(85)
+        self.overview.setFixedHeight(70)
         self.overview.hideAxis("left")
         self.overview.getAxis("bottom").setHeight(32)
         self.overview.setLabel("bottom", "Song time", units="s")
@@ -96,6 +100,12 @@ class SongWorkspace(QtWidgets.QWidget):
         self.mix_detail = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.mix_detail.addWidget(waveform)
         self.mix_detail.addWidget(spectra)
+        waveform.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Expanding
+        )
+        spectra.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Expanding
+        )
         self.spectra = spectra
         mix_layout.addWidget(self.mix_detail)
         self.panes.addWidget(mix)
@@ -118,11 +128,11 @@ class SongWorkspace(QtWidgets.QWidget):
         self.panes.setSizes([700, 420])
         self.reference_pane.hide()
         layout.addWidget(self.panes, 1)
-        self.setMinimumHeight(430)
+        self.setMinimumHeight(270)
         self.panes.setChildrenCollapsible(False)
         self.mix_detail.setChildrenCollapsible(False)
-        owner.spectrum_plot.setMinimumHeight(100)
-        owner.eq_plot.setMinimumHeight(90)
+        owner.spectrum_plot.setMinimumHeight(80)
+        owner.eq_plot.setMinimumHeight(70)
         self.timer = QtCore.QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(80)
@@ -313,7 +323,7 @@ class SongWorkspace(QtWidgets.QWidget):
                             self.peak_cache = [(data, index), *self.peak_cache[:2]]
                         self.waveform.set_audio(index, rate)
                         for plot in self.waveform.channel_plots:
-                            plot.setMinimumHeight(90)
+                            plot.setMinimumHeight(65)
                         self.waveform.set_selection(old_selection)
                         if zoom:
                             self.waveform.channel_plots[0].setXRange(*zoom, padding=0)
@@ -325,7 +335,7 @@ class SongWorkspace(QtWidgets.QWidget):
                     )
                 self.waveform.set_position(self.owner.position)
                 for plot in self.waveform.channel_plots:
-                    plot.setMinimumHeight(90)
+                    plot.setMinimumHeight(65)
                 if self.owner.project.calibration and self.owner.project.needs_reanalysis:
                     messages.append(
                         "Matching calibration needs refresh; saved correction is retained."
@@ -435,7 +445,7 @@ class SongWorkspace(QtWidgets.QWidget):
                 f"Loaded reference: {loaded[3]} | independent selection/time base"
             )
             for plot in self.reference_waveform.channel_plots:
-                plot.setMinimumHeight(90)
+                plot.setMinimumHeight(65)
         if self.mode.currentData() != "waveform":
             self.timer.start()
 
