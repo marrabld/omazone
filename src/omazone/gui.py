@@ -1,5 +1,6 @@
 """Qt desktop workbench. DSP and file loading run outside the UI thread."""
 
+import argparse
 import math
 import sys
 from pathlib import Path
@@ -1020,10 +1021,24 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        prog="omazone", description="Omazone spectral matching workbench"
+    )
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="Create the window, close it, and exit without the GUI loop",
+    )
+    arguments = parser.parse_args()
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     window = Window()
     window.show()
+    if arguments.selftest:
+        app.processEvents()
+        window.close()
+        print("Omazone selftest OK")
+        return
     sys.exit(app.exec())
 
 

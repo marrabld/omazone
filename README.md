@@ -37,6 +37,22 @@ checks follow. See the [approved workflow](docs/workflow.md) and
 
 ## Quick start
 
+### Windows without installing Python
+
+Download `Omazone-*-windows-x64.zip` from the
+[releases page](https://github.com/marrabld/omazone/releases) (or from a run of
+the [Windows build workflow](https://github.com/marrabld/omazone/actions/workflows/release-windows.yml)),
+unzip it anywhere, and run `Omazone.exe`. The bundle is built automatically by
+GitHub Actions from the tagged source; each release includes a `SHA256SUMS.txt`
+checksum file.
+
+The executable is unsigned, so Windows SmartScreen shows a warning
+("Windows protected your PC"). Choose "More info" then "Run anyway", and prefer
+verifying the SHA-256 checksum over ignoring it. First launch is a little slower
+while Windows unpacks the bundle.
+
+### From source
+
 You need Git and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 The setup below uses Python 3.13, which uv can download if needed.
 
@@ -54,10 +70,12 @@ uv sync --python 3.13
 uv run omazone
 ```
 
-The desktop app has been exercised on Linux. Qt supplies cross-platform GUI
-support, but Windows and macOS installation and playback still need validation.
-Playback uses the default audio output device through PortAudio. If a platform
-reports a missing PortAudio library, install it using that system's package manager.
+The desktop app is developed on Linux. Windows users should prefer the packaged
+build above; the packaged build is smoke-tested on the CI runner only, so
+playback quality still needs real-hardware validation (#14). Qt supplies
+cross-platform GUI support, but macOS still needs validation. Playback uses the
+default audio output device through PortAudio. If a platform reports a missing
+PortAudio library, install it using that system's package manager.
 
 ## Save and reopen your work
 
@@ -343,7 +361,10 @@ compensated and the output retains the input length. The complete convolution
 tail is available through the processor API, but file rendering trims it.
 
 Audio files and outputs are ignored by version control. Dependencies are pinned
-in `uv.lock`.
+in `uv.lock`. Qt uses the `PySide6-Essentials` package: the app only needs
+QtCore/QtGui/QtWidgets, and skipping the Addons wheel roughly halves the install
+and packaged download. `omazone/__init__.py` restores the package `__version__`
+that pyqtgraph expects.
 
 ## How it works
 
