@@ -1,8 +1,9 @@
 # Approved workflow and persistent song viewer
 
-This is the agreed product direction, not a claim that the complete interface or
-project model is implemented. The current processors and region tools provide
-the foundation.
+This is the agreed product direction. The saved project model and persistent
+viewer are implemented for the current repair/matching tools. The full numbered
+navigation, arbitrary stage-prefix comparisons, manual EQ, and dynamics remain
+planned work.
 
 ## User journey
 

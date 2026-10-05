@@ -486,7 +486,7 @@ class ClippingInspector(QtWidgets.QWidget):
     def show_selection(self):
         if self.owner.waveform.selection is not None:
             self.owner.waveform.zoom_selection()
-            self.owner.views.setCurrentWidget(self.owner.waveform)
+            self.owner.show_waveform(signal="original")
 
     def show_interval(self):
         row = self.table.currentRow()
@@ -501,7 +501,7 @@ class ClippingInspector(QtWidgets.QWidget):
             padding=0,
         )
         self.owner.seek(interval.start)
-        self.owner.views.setCurrentWidget(self.owner.waveform)
+        self.owner.show_waveform(signal="original")
 
     def checked_intervals(self):
         return tuple(

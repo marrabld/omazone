@@ -60,7 +60,7 @@ class SectionWorkbench(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         instructions = QtWidgets.QLabel(
-            "Capture targets in Reference targets. Select a mix passage in Waveform / selection, "
+            "Capture targets in Reference targets. Select a passage in the shared waveform, "
             "then Use mix selection and Add section. Select a row to inspect or audition it."
         )
         instructions.setWordWrap(True)
@@ -259,7 +259,7 @@ class SectionWorkbench(QtWidgets.QWidget):
     def use_mix_selection(self):
         region = self.owner.waveform.selection
         if region is None or self.owner.source is None:
-            self.owner.error("Select a passage in Waveform / selection first.")
+            self.owner.error("Select a passage in the shared waveform first.")
             return
         self.table.clearSelection()
         self.draft_dirty = False
@@ -387,7 +387,9 @@ class SectionWorkbench(QtWidgets.QWidget):
             self.owner.source[1],
             self.transition_ms.value(),
         )
-        self.owner.waveform.set_sections(self.sections, transitions, SECTION_COLORS)
+        named = {item.id: item for item in self.owner.project.regions}
+        named.update({item.id: item for item in self.sections})
+        self.owner.waveform.set_sections(list(named.values()), transitions, SECTION_COLORS)
         durations = [1000 * (item.end - item.start) / self.owner.source[1] for item in transitions]
         details = ", ".join(f"{value:.1f}" for value in durations) or "none"
         self.summary.setText(
