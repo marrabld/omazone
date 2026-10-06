@@ -32,6 +32,7 @@ a table or settings form.
 - [x] A persistent song overview shows named regions, selection, and playhead.
 - [x] Matching starts with spectrum/filter plots; waveform tasks start with waveforms.
 - [x] The detailed viewer offers Waveform, Spectrum, and Both, remembering each tool's explicit choice.
+- [x] Every implemented tool uses a compact task inspector and fixed actions, keeping plots prominent.
 - [x] Moving between current tools preserves mix selection, zoom/pan, cursor, and loop bounds.
 - [x] The viewer identifies the signal and scope: original, current-stage input,
   or rendered output for the selected passage.

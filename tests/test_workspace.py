@@ -331,7 +331,109 @@ def test_primary_actions_and_navigation_remain_visible_when_settings_scroll():
                     assert window.width() <= width
                     assert window.height() <= height
         window.views.setCurrentWidget(window.clipping_inspector)
-        assert window.views.action_bar.isHidden()
+        assert window.views.action_bar.isVisible()
+        assert window.clipping_inspector.analyse_button.isVisible()
         assert window.process_button.isHidden()
     finally:
+        window.close()
+
+
+def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    t = np.arange(rate * 2) / rate
+    clean = 0.7 * np.sin(2 * np.pi * 440 * t)
+    audio = np.column_stack((np.clip(clean, -0.35, 0.45), clean * 0.4))
+    reference = np.column_stack((clean, clean * 0.8))
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
+        window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
+        window.waveform.set_selection(SampleRegion(4000, 20000))
+        workbench = window.section_workbench
+        workbench.target_captured(
+            capture_target(reference, rate, SampleRegion(0, 16000), "Clean", "clean", "reference")
+        )
+        workbench.use_mix_selection()
+        workbench.add_section()
+        for width, height in ((1024, 768), (1280, 900)):
+            window.resize(width, height)
+            for tool in range(window.views.count()):
+                window.views.setCurrentIndex(tool)
+                app.processEvents()
+                assert window.workspace_split.orientation() == QtCore.Qt.Orientation.Horizontal
+                assert window.workspace.width() >= window.width() * 0.62
+                assert window.views.action_bar.isVisible()
+                assert window.preview_mode.isHidden()
+                assert window.playback_selection_controls.isHidden()
+                assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+                assert window.height() <= height
+                if tool:
+                    assert window.waveform.isVisible()
+                    for plot in window.waveform.channel_plots:
+                        assert plot.getViewBox().height() >= 90
+                if tool == 2:
+                    assert window.workspace.reference_pane.isVisible()
+                    for plot in workbench.reference_waveform.channel_plots:
+                        assert plot.getViewBox().height() >= 90
+            window.views.setCurrentIndex(3)
+            old_heights = [plot.getViewBox().height() for plot in window.waveform.channel_plots]
+            workbench.advanced_toggle.setChecked(True)
+            app.processEvents()
+            assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+            assert all(
+                plot.getViewBox().height() >= old - 1
+                for plot, old in zip(window.waveform.channel_plots, old_heights, strict=True)
+            )
+            workbench.advanced_toggle.setChecked(False)
+        window.views.setCurrentIndex(4)
+        window.clipping_inspector.find_peaks()
+        wait_jobs(app, window)
+        inspector = window.clipping_inspector
+        inspector.review_button.click()
+        inspector.check_shown(True)
+        window.update_buttons()
+        assert inspector.repair_button.isVisible()
+        assert not inspector.analyse_button.isVisible()
+        assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+    finally:
+        window.close()
+
+
+def test_regions_and_reference_capture_use_fixed_actions_and_keep_mix_selection(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    audio = np.random.default_rng(98).normal(0, 0.1, (16000, 1))
+    source = tmp_path / "mix.wav"
+    reference = tmp_path / "reference.wav"
+    sf.write(source, audio, 16000, subtype="DOUBLE")
+    sf.write(reference, audio, 16000, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.loaded("reference", load_audio(reference))
+        window.views.setCurrentWidget(window.region_page)
+        selection = SampleRegion(2000, 10000)
+        window.waveform.set_selection(selection)
+        window.region_name.setText("Acoustic verse")
+        window.name_region_button.click()
+        assert window.project.regions[-1].name == "Acoustic verse"
+        assert window.region_list.item(0).text() == "Acoustic verse"
+        assert window.region_advanced_panel.isHidden()
+        window.views.setCurrentWidget(window.section_workbench.reference_page)
+        assert not window.section_workbench.capture_button.isEnabled()
+        window.section_workbench.reference_waveform.select_seconds(0.1, 0.8)
+        window.section_workbench.target_name.setText("Clean reference")
+        assert window.section_workbench.capture_button.isEnabled()
+        window.section_workbench.capture_button.click()
+        wait_jobs(app, window)
+        assert len(window.project.targets) == 1
+        assert window.waveform.selection == selection
+        assert window.section_workbench.reference_advanced_panel.isHidden()
+        assert not window.tool_scroll.isAncestorOf(window.section_workbench.capture_button)
+    finally:
+        if window.worker:
+            window.worker.wait()
+            app.processEvents()
         window.close()
