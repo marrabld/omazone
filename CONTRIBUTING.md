@@ -43,3 +43,26 @@ retarget the dependent PR to `main` and review its final diff.
 
 Do not commit private recordings or commercial reference tracks. Contributions
 use the project's [GPLv3 license](LICENSE).
+
+## Windows builds and publication
+
+Merging a PR into `main` automatically starts **Windows build and publish**.
+After packaging and the bundled executable's smoke test succeed, the workflow
+updates the `development` prerelease and the README's direct download link.
+There is no separate publishing button or routine version-tag step.
+
+PRs that change packaging files also exercise the Windows build, but never publish.
+Manual runs on `main` publish; manual feature-branch runs produce temporary artifacts
+only. A queued build whose source is no longer the current `main` skips publishing,
+so an old rerun cannot replace newer code. The Windows workflow serialises runs
+for the same ref. Failed builds leave the last public download in place.
+
+For a deliberate numbered snapshot, bump `version` in `pyproject.toml`, update
+`uv.lock` if needed, merge, and push a matching tag such as `v0.1.1`. That build
+publishes a separate numbered release; published snapshots are not replaced by
+reruns. The workflow-owned lightweight `development` tag is advanced only through
+a non-forced fast-forward, and each bundle records its full source commit.
+
+The first merge containing this workflow activates automation and creates the
+development release after the build succeeds. Maintainers can then share the
+README download link rather than explaining Actions artifact downloads.

@@ -1,5 +1,9 @@
 # Omazone
 
+[**Download Windows app: latest development build**](https://github.com/marrabld/omazone/releases/download/development/Omazone-windows-x64.zip)
+ · [Build details and checksums](https://github.com/marrabld/omazone/releases/tag/development)
+ · [Numbered releases](https://github.com/marrabld/omazone/releases)
+
 A Python desktop playground for learning audio signal processing and building
 useful mastering tools. Load a mix and a reference, inspect their spectra, design
 a matching EQ, then listen to the result with level-matched A/B playback.
@@ -39,17 +43,35 @@ checks follow. See the [approved workflow](docs/workflow.md) and
 
 ### Windows without installing Python
 
-Download `Omazone-*-windows-x64.zip` from the
-[releases page](https://github.com/marrabld/omazone/releases) (or from a run of
-the [Windows build workflow](https://github.com/marrabld/omazone/actions/workflows/release-windows.yml)),
-unzip it anywhere, and run `Omazone.exe`. The bundle is built automatically by
-GitHub Actions from the tagged source; each release includes a `SHA256SUMS.txt`
-checksum file.
+Use the **Download Windows app** link above for `Omazone-windows-x64.zip`, the
+latest successful development build. Extract the entire zip, open the `Omazone`
+folder, and run `Omazone.exe`. Keep `_internal` beside the executable. You do not
+need Python or an installer.
+
+Every push or PR merge into `main` builds and tests the Windows app, then updates
+the public [development release](https://github.com/marrabld/omazone/releases/tag/development).
+The first successful publishing run creates that release; until then, use a
+[numbered release](https://github.com/marrabld/omazone/releases) or an Actions artifact.
+No tag creation or manual Actions button is needed for routine downloads. Manual
+builds from `main` publish too; PR and feature-branch builds are artifacts only.
+
+The development release is marked **pre-release** because it follows ongoing
+changes. Numbered releases such as `v0.1.0` remain fixed snapshots. Each download
+includes `SHA256SUMS.txt` and `BUILD-INFO.json` with the exact source commit and
+build run. The rolling development tag advances, so use that recorded commit to
+reproduce a particular download.
 
 The executable is unsigned, so Windows SmartScreen shows a warning
 ("Windows protected your PC"). Choose "More info" then "Run anyway", and prefer
-verifying the SHA-256 checksum over ignoring it. First launch is a little slower
-while Windows unpacks the bundle.
+verifying the SHA-256 checksum over ignoring it. In PowerShell, run
+`Get-FileHash .\Omazone-windows-x64.zip -Algorithm SHA256` and compare its hash with
+the published `SHA256SUMS.txt`.
+
+If the build or executable test fails, the publication step does not run and
+the last published download remains available. See the
+[Windows build and publish workflow](https://github.com/marrabld/omazone/actions/workflows/release-windows.yml)
+for progress. Development files live in Releases rather than requiring people
+to find expiring Actions artifacts.
 
 ### From source
 
