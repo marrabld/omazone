@@ -107,6 +107,8 @@ class FrequencyAxis(pg.AxisItem):
     """Label a log-frequency grid in Hz and kHz without crowding the axis."""
 
     def tickValues(self, minVal, maxVal, size):
+        if not self.logMode:
+            return super().tickValues(minVal, maxVal, size)
         low, high = sorted((minVal, maxVal))
         if low == high:
             return []
@@ -187,15 +189,23 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
         heading = QtWidgets.QLabel("OMAZONE   /   spectral laboratory")
-        heading.setStyleSheet("font-size: 24px; font-weight: bold; color: #63dfc0;")
+        heading.setStyleSheet("font-size: 18px; font-weight: bold; color: #63dfc0;")
         layout.addWidget(heading)
         self.files = QtWidgets.QLabel("Load a mix and a reference to begin.")
+        self.files.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+        )
         layout.addWidget(self.files)
 
         row = QtWidgets.QHBoxLayout()
         self.load_mix = self.button(row, "Load mix", lambda: self.load("source"))
         self.load_ref = self.button(row, "Load reference", lambda: self.load("reference"))
         self.export_button = self.button(row, "Export WAV", self.export)
+        for button in (self.load_mix, self.load_ref, self.export_button):
+            button.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Fixed
+            )
+        row.addStretch(1)
         layout.addLayout(row)
 
         pg.setConfigOptions(antialias=True, background="#141a24", foreground="#b8c4d6")
@@ -208,6 +218,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_plot = self.plot("Filter gain", "dB", spectra_layout)
         self.eq_plot.addLegend()
         self.eq_plot.setYRange(-8, 8)
+        self.eq_plot.setXLink(self.spectrum_plot)
+        spectra_layout.setStretch(0, 3)
+        spectra_layout.setStretch(1, 2)
         self.match_page = QtWidgets.QWidget()
         match_layout = QtWidgets.QVBoxLayout(self.match_page)
         match_layout.setContentsMargins(0, 0, 0, 0)
@@ -227,11 +240,38 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 "Select in the shared waveform or overview. Name a passage to retain it independently of effects."
             )
         )
+        self.region_name = QtWidgets.QLineEdit()
+        self.region_name.setPlaceholderText("Passage name, e.g. Acoustic verse")
+        region_layout.addWidget(self.region_name)
+        self.region_list = QtWidgets.QListWidget()
+        self.region_list.setMaximumHeight(180)
+        self.region_list.itemClicked.connect(
+            lambda item: self.waveform.set_selection(
+                self.project.regions[self.region_list.row(item)].bounds
+            )
+        )
+        region_layout.addWidget(self.region_list)
         self.name_region_button = QtWidgets.QPushButton("Name current selection…")
         self.name_region_button.clicked.connect(self.name_selection)
         region_layout.addWidget(self.name_region_button)
-        region_layout.addWidget(self.waveform.selection_controls)
-        region_layout.addWidget(self.waveform.selection_label)
+        self.region_advanced_toggle = QtWidgets.QToolButton()
+        self.region_advanced_toggle.setText("Precise selection bounds")
+        self.region_advanced_toggle.setCheckable(True)
+        self.region_advanced_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.region_advanced_toggle.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        region_layout.addWidget(self.region_advanced_toggle)
+        self.region_advanced_panel = QtWidgets.QWidget()
+        region_advanced = QtWidgets.QVBoxLayout(self.region_advanced_panel)
+        self.waveform.selection_controls.layout().setDirection(
+            QtWidgets.QBoxLayout.Direction.TopToBottom
+        )
+        region_advanced.addWidget(self.waveform.selection_controls)
+        region_advanced.addWidget(self.waveform.selection_label)
+        region_layout.addWidget(self.region_advanced_panel)
+        self.region_advanced_panel.hide()
+        self.region_advanced_toggle.toggled.connect(self.region_advanced_panel.setVisible)
         region_layout.addStretch(1)
         self.views.addTab(self.region_page, "Regions")
         self.section_workbench = SectionWorkbench(self)
@@ -242,8 +282,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         reference_waveform = self.section_workbench.reference_waveform
         reference_layout = self.section_workbench.reference_page.layout()
         reference_layout.removeWidget(reference_waveform)
-        reference_layout.addWidget(reference_waveform.selection_controls)
-        reference_layout.addWidget(reference_waveform.selection_label)
+        reference_waveform.selection_controls.layout().setDirection(
+            QtWidgets.QBoxLayout.Direction.TopToBottom
+        )
+        self.section_workbench.reference_advanced_layout.addWidget(
+            reference_waveform.selection_controls
+        )
+        self.section_workbench.reference_advanced_layout.addWidget(
+            reference_waveform.selection_label
+        )
         self.workspace = SongWorkspace(self, self.waveform, spectra, reference_waveform)
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.workspace_split.addWidget(self.workspace)
@@ -253,6 +300,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.workspace_split.setChildrenCollapsible(False)
         self.workspace_split.setSizes([360, 260])
         layout.addWidget(self.workspace_split, 1)
+        self.views.layout().removeWidget(self.views.navigation)
+        layout.insertWidget(layout.indexOf(self.workspace_split), self.views.navigation)
 
         self.mastering_controls = QtWidgets.QWidget()
         mastering_layout = QtWidgets.QVBoxLayout(self.mastering_controls)
@@ -260,18 +309,67 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_controls.setToolTip(
             "Whole-song matching settings. Mix sections have independent settings."
         )
-        controls = QtWidgets.QHBoxLayout()
+        controls = QtWidgets.QVBoxLayout()
         self.amount = self.control(controls, "Match amount", 0, 100, 50, "%", 0)
-        self.smoothing = self.control(controls, "Smoothing", 0.02, 2, 0.33, " oct", 2)
-        self.boost = self.control(controls, "Maximum boost", 0, 18, 6, " dB", 1)
-        self.cut = self.control(controls, "Maximum cut", 0, 18, 6, " dB", 1)
         mastering_layout.addLayout(controls)
+        self.match_advanced_toggle = QtWidgets.QToolButton()
+        self.match_advanced_toggle.setText("Advanced matching settings")
+        self.match_advanced_toggle.setCheckable(True)
+        self.match_advanced_toggle.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.match_advanced_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        mastering_layout.addWidget(self.match_advanced_toggle)
+        self.match_advanced_panel = QtWidgets.QWidget()
+        advanced = QtWidgets.QVBoxLayout(self.match_advanced_panel)
+        self.smoothing = self.control(advanced, "Smoothing", 0.02, 2, 0.33, " oct", 2)
+        self.boost = self.control(advanced, "Maximum boost", 0, 18, 6, " dB", 1)
+        self.cut = self.control(advanced, "Maximum cut", 0, 18, 6, " dB", 1)
+        mastering_layout.addWidget(self.match_advanced_panel)
+        self.match_advanced_panel.hide()
+        self.match_advanced_toggle.toggled.connect(self.toggle_match_advanced)
         self.process_button = self.button(
             self.views.action_layout, "Analyse + process", self.process
         )
         self.views.action_layout.addWidget(self.section_workbench.render_button)
+        self.views.action_layout.addWidget(self.name_region_button)
+        self.views.action_layout.addWidget(self.section_workbench.capture_button)
+        self.views.action_layout.addWidget(self.section_workbench.add_button)
+        self.views.action_layout.addWidget(self.section_workbench.update_button)
+        self.task_actions = [
+            self.process_button,
+            self.section_workbench.render_button,
+            self.name_region_button,
+            self.section_workbench.capture_button,
+            self.section_workbench.add_button,
+            self.section_workbench.update_button,
+        ]
+        for button in (
+            self.clipping_inspector.analyse_button,
+            self.clipping_inspector.review_button,
+            self.clipping_inspector.repair_button,
+            self.clipping_inspector.listen_button,
+        ):
+            self.views.action_layout.addWidget(button)
+            self.task_actions.append(button)
+        self.clipping_inspector.review_link = QtWidgets.QToolButton()
+        self.clipping_inspector.review_link.setText("Review candidate list")
+        self.clipping_inspector.review_link.clicked.connect(self.clipping_inspector.toggle_review)
+        self.clipping_inspector.layout().insertWidget(3, self.clipping_inspector.review_link)
+        self.process_button.setMinimumHeight(46)
         match_layout.addWidget(self.mastering_controls)
         match_layout.addStretch(1)
+        for page in (
+            self.region_page,
+            self.section_workbench.reference_page,
+            self.section_workbench,
+            self.clipping_inspector,
+        ):
+            for label in page.findChildren(QtWidgets.QLabel):
+                label.setWordWrap(True)
+                label.setSizePolicy(
+                    QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+                )
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.valueChanged.connect(self.settings_changed)
 
@@ -296,7 +394,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.whole_song_button = self.button(selection_controls, "Whole song", self.whole_song)
         self.playback_mode = QtWidgets.QLabel("Playback: whole song")
         selection_controls.addWidget(self.playback_mode, 1)
-        layout.addLayout(selection_controls)
+        self.playback_selection_controls = QtWidgets.QWidget()
+        self.playback_selection_controls.setLayout(selection_controls)
+        layout.addWidget(self.playback_selection_controls)
         transport = QtWidgets.QHBoxLayout()
         self.seek_slider = SeekSlider(QtCore.Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 0)
@@ -339,10 +439,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             QMainWindow, QWidget { background: #10151e; color: #d8e1ed; }
             QLabel { padding: 4px; }
             QPushButton { background: #253246; border: 1px solid #384b64;
-                          border-radius: 6px; padding: 10px; }
+                          border-radius: 6px; padding: 6px; }
             QPushButton:hover { border-color: #63dfc0; }
             QPushButton:disabled { color: #647085; }
-            QDoubleSpinBox { background: #1c2737; padding: 8px; border: 1px solid #384b64; }
+            QDoubleSpinBox { background: #1c2737; padding: 6px; border: 1px solid #384b64; }
             QSlider::groove:horizontal { background: #253246; height: 6px; border-radius: 3px; }
             QSlider::sub-page:horizontal { background: #63dfc0; border-radius: 3px; }
             QSlider::handle:horizontal { background: #d8e1ed; width: 14px;
@@ -352,7 +452,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.update_buttons()
         self.update_project_title()
         self.views.currentChanged.connect(self.tab_changed)
+        self.section_workbench.target_name.textChanged.connect(self.update_buttons)
+        reference_waveform.selection_changed.connect(lambda _: self.update_buttons())
+        self.section_workbench.table.itemSelectionChanged.connect(self.update_buttons)
         self.tab_changed()
+        self.reset_filter_view()
 
     def button(self, layout, title, callback):
         button = QtWidgets.QPushButton(title)
@@ -376,10 +480,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
     def plot(self, label, units, layout):
         plot = pg.PlotWidget(axisItems={"bottom": FrequencyAxis(orientation="bottom")})
         plot.setLogMode(x=True)
+        plot.getAxis("bottom").enableAutoSIPrefix(False)
         plot.setLabel("bottom", "Frequency")
         plot.setLabel("left", label, units=units)
         plot.showGrid(x=True, y=True, alpha=0.15)
-        plot.setXRange(np.log10(20), np.log10(20000))
+        plot.setXRange(np.log10(20), np.log10(20000), padding=0)
+        plot.getViewBox().setLimits(
+            xMin=np.log10(20), xMax=np.log10(20000), maxXRange=3, minXRange=0.05
+        )
+        plot.disableAutoRange(axis="x")
         layout.addWidget(plot, 1)
         return plot
 
@@ -452,9 +561,41 @@ class Window(ProjectController, QtWidgets.QMainWindow):
     def update_action_bar(self):
         matching = self.views.currentWidget() is self.match_page
         sections = self.views.currentWidget() is self.section_workbench
-        self.views.action_bar.setVisible(matching or sections)
-        self.process_button.setVisible(matching)
-        self.section_workbench.render_button.setVisible(sections)
+        regions = self.views.currentWidget() is self.region_page
+        reference = self.views.currentWidget() is self.section_workbench.reference_page
+        clipping = self.views.currentWidget() is self.clipping_inspector
+        self.views.action_bar.show()
+        shown = set()
+        if matching:
+            shown.add(self.process_button)
+        elif sections:
+            shown.add(self.section_workbench.render_button)
+            shown.add(
+                self.section_workbench.update_button
+                if self.section_workbench.selected_section()
+                else self.section_workbench.add_button
+            )
+        elif regions:
+            shown.add(self.name_region_button)
+        elif reference:
+            shown.add(self.section_workbench.capture_button)
+        elif clipping:
+            shown.add(self.clipping_inspector.primary_action())
+        for button in self.task_actions:
+            button.setVisible(button in shown)
+        self.name_region_button.setEnabled(
+            self.worker is None and self.source is not None and self.waveform.selection is not None
+        )
+        self.section_workbench.capture_button.setEnabled(
+            self.worker is None
+            and self.reference is not None
+            and self.section_workbench.reference_waveform.selection is not None
+            and bool(self.section_workbench.target_name.text().strip())
+        )
+        self.clipping_inspector.review_link.setVisible(
+            self.clipping_inspector.report is not None
+            and bool(self.clipping_inspector.report.candidates)
+        )
         if self.worker is not None:
             message = self.status.text()
         elif self.source is None:
@@ -463,6 +604,24 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 if self.project.source is None
                 else "Relink the original mix to continue."
             )
+        elif regions:
+            message = (
+                "Select a passage and give it a name."
+                if self.waveform.selection is None
+                else "Selected passage ready to name."
+            )
+        elif reference:
+            message = (
+                "Load a reference."
+                if self.reference is None
+                else (
+                    "Select a reference passage."
+                    if self.section_workbench.reference_waveform.selection is None
+                    else "Name this target, then capture it."
+                )
+            )
+        elif clipping:
+            message = self.clipping_inspector.result_heading.text()
         elif matching and self.reference is None and self.project.reference_target is None:
             message = "Mix loaded. Add a reference."
         elif sections:
@@ -480,9 +639,54 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def toggle_details(self, visible):
         self.details_panel.setVisible(visible)
+        if visible:
+            self.meters.show()
+            self.note.show()
+            self.status.show()
+        with QtCore.QSignalBlocker(self.workspace.measurements_action):
+            self.workspace.measurements_action.setChecked(visible)
         self.details_toggle.setArrowType(
             QtCore.Qt.ArrowType.DownArrow if visible else QtCore.Qt.ArrowType.RightArrow
         )
+
+    def toggle_match_advanced(self, visible):
+        self.match_advanced_panel.setVisible(visible)
+        self.match_advanced_toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if visible else QtCore.Qt.ArrowType.RightArrow
+        )
+
+    def configure_workflow_layout(self):
+        if not hasattr(self, "match_advanced_toggle"):
+            return
+        matching = self.views.currentWidget() is self.match_page
+        wide = self.width() >= 950
+        orientation = QtCore.Qt.Orientation.Horizontal if wide else QtCore.Qt.Orientation.Vertical
+        if self.workspace_split.orientation() != orientation:
+            self.workspace_split.setOrientation(orientation)
+            self.workspace_split.setSizes(
+                [max(1, self.width() - 320), 320] if wide else [max(1, self.height() - 250), 175]
+            )
+        self.views.setMinimumWidth(250 if wide else 0)
+        self.views.setMaximumWidth((300 if matching else 340) if wide else 16777215)
+        self.views.setMinimumHeight(0 if wide else 155)
+        self.views.action_layout.setDirection(
+            QtWidgets.QBoxLayout.Direction.TopToBottom
+            if wide
+            else QtWidgets.QBoxLayout.Direction.LeftToRight
+        )
+        self.preview_mode.hide()
+        self.playback_selection_controls.hide()
+        self.details_toggle.hide()
+        self.details_panel.setVisible(self.details_toggle.isChecked())
+        if self.details_toggle.isChecked():
+            self.meters.show()
+            self.note.show()
+            self.status.show()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "workspace_split"):
+            self.configure_workflow_layout()
 
     def refresh_file_labels(self):
         if self.views.currentWidget() is self.clipping_inspector or (
@@ -502,6 +706,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.files.setText(f"Mix: {mix}    |    Reference: {reference}")
 
     def tab_changed(self, *args):
+        self.workspace.tool_changed()
         clipping = self.views.currentWidget() is self.clipping_inspector
         reviewing = self.views.currentWidget() is self.region_page and self.audition_mode in (
             "original",
@@ -527,6 +732,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.workspace.sync_audio()
         self.workspace.refresh()
         self.update_action_bar()
+        self.configure_workflow_layout()
 
     def start_job(self, function, callback, message):
         self.stop()
@@ -616,7 +822,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.preview = self.repair_preview if self.audition_mode == "repair" else None
         self.listen_processed = False
         self.update_ab_label()
-        self.eq_plot.clear()
+        self.reset_filter_view()
         self.meters.setText("Process to update measurements.")
         self.update_buttons()
 
@@ -722,6 +928,14 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_plot.plot(
             frequency[1:], response[1:], pen=pg.mkPen("#63dfc0", width=2), name="Actual FIR"
         )
+
+    def reset_filter_view(self):
+        self.eq_plot.clear()
+        self.eq_plot.setTitle("No correction yet. Analyse to build the filter.")
+        self.eq_plot.plot(
+            [20, 20000], [0, 0], pen=pg.mkPen("#647085", style=QtCore.Qt.PenStyle.DashLine)
+        )
+        self.eq_plot.setYRange(-8, 8, padding=0)
 
     def sections_rendered(self, payload, learn=True):
         result, spectrum, previews = payload
@@ -1016,6 +1230,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.update_transport()
         if resume:
             self.play()
+        self.workspace.refresh()
 
     def whole_song(self):
         resume = self.playing or self.resume_after_selection_edit
@@ -1023,6 +1238,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.reset_playback_mode()
         if resume and self.source is not None and self.position < len(self.source[0]):
             self.play()
+        self.workspace.refresh()
 
     def selection_changed(self, region):
         self.clipping_inspector.selection_changed(region)

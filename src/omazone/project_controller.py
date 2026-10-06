@@ -150,7 +150,11 @@ class ProjectController:
 
     def refresh_named_regions(self):
         self.named_regions_menu.clear()
+        if hasattr(self, "region_list"):
+            self.region_list.clear()
         for region in self.project.regions:
+            if hasattr(self, "region_list"):
+                self.region_list.addItem(region.name)
             item = self.named_regions_menu.addAction(region.name)
             item.triggered.connect(
                 lambda checked=False, selected=region: self.waveform.set_selection(selected.bounds)
@@ -164,7 +168,10 @@ class ProjectController:
         if region is None or self.project.source is None:
             self.error("Load a recording and select a passage first.")
             return
-        name, ok = QtWidgets.QInputDialog.getText(self, "Name selected passage", "Name")
+        name = self.region_name.text().strip() if hasattr(self, "region_name") else ""
+        ok = bool(name)
+        if not ok:
+            name, ok = QtWidgets.QInputDialog.getText(self, "Name selected passage", "Name")
         if ok and name.strip():
             self.project.regions.append(NamedRegion(uuid4().hex, name.strip(), region))
             self.project_changed(processing=False)

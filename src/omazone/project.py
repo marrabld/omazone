@@ -463,6 +463,14 @@ def validate_project(project):
             or any(type(item) is not int or item < 0 for item in sizes)
         ):
             raise ValueError("Invalid saved viewer panel sizes.")
+    modes = project.view.get("viewer_tool_modes", {})
+    if not isinstance(modes, dict) or any(
+        not isinstance(key, str) or value not in ("waveform", "spectrum", "both")
+        for key, value in modes.items()
+    ):
+        raise ValueError("Invalid saved tool-specific viewer modes.")
+    if type(project.view.get("matching_overview", False)) is not bool:
+        raise ValueError("Invalid saved matching overview preference.")
     reference_rate = (
         project.reference.sample_rate
         if project.reference

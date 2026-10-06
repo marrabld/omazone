@@ -9,7 +9,7 @@ measures, what correction it requests, and what the resulting filter actually
 does. This is an early, working prototype. Contributions from musicians, DSP
 developers, and people who enjoy building audio interfaces are welcome.
 
-![Omazone showing mix, reference, and processed spectra, requested and actual EQ responses, and the A/B playback scrubber](docs/images/omazone-spectral-matching.png)
+![Current Omazone Matching workspace with large spectrum and filter plots, compact side controls, and A/B playback](docs/images/omazone-matching-plots.png)
 
 ## What works now
 
@@ -116,24 +116,44 @@ are not overwritten by saving projects. Session JSON files are ignored by Git.
 
 ### Keep the song in view
 
-The workspace stays above the tool controls. Use **Waveform**, **Spectrum**, or
+Every tab follows the same plot-first layout: the audio stays large, task controls
+live in a compact inspector, and the primary action is fixed below it. The View
+menu and a single playback row replace duplicate toolbars. On narrow windows the
+inspector becomes a bounded lower panel; detailed controls scroll within it rather
+than reducing the plot area.
+
+| Tool | Inspector defaults | Optional details |
+| --- | --- | --- |
+| Regions | Passage name and saved-region list | Precise times and sample counts |
+| Reference targets | Target name and short library list | Import/export/remove and precise bounds |
+| Mix sections | Compact section list, target, and amount | Bounds, smoothing, limits, transition, removal |
+| Clipping inspection | Result summary and candidate review | Detector/repair parameters and measurements |
+
+![Regions with a large waveform and compact naming inspector](docs/images/omazone-shared-regions.png)
+
+The workspace stays beside a compact task inspector on wider windows, with
+bounded controls below on narrow ones. Use **Waveform**, **Spectrum**, or
 **Both** to inspect the same passage while working in Matching, Regions, Reference
 targets, Mix sections, or Clipping inspection. Drag the splitter between the
-viewer and controls to give either more space; controls scroll rather than hiding
-the song. In Both mode, waveform and spectra are shown side by side.
+viewer and controls to give either more space; inspector contents scroll rather than hiding
+the song. Matching prioritises its frequency spectrum and filter response, with
+compact settings beside the plots on wider windows. Other tools retain the
+waveform-led workspace. In Both mode, waveform and spectra are shown side by side.
 
 ![Section controls below the persistent waveform and spectral viewer](docs/images/omazone-shared-sections.png)
 
-The overview always shows the whole song, named passages, your selection, and
+The overview shows the whole song, named passages, your selection, and
 playback cursor. Selection, zoom, position, and loop survive tool changes.
+On Matching it is hidden by default to give the plots more space; **View → Show
+song overview** enables it. Seeking and elapsed/total time remain available.
 **Step input**, **Step output**, and **Original recording** identify the visible
 signal and coordinate the audition side. Waveforms use raw processing levels;
 RMS-matched playback does not change the displayed/exported samples.
 
 If output needs rendering, a yellow message says so and the input remains visible
 for context. Spectrum analysis follows the selected passage, runs in a background
-worker, and excludes very short selections below 0.1 seconds. Spectrum mode still
-keeps the time-domain overview. The label identifies input/output and scope;
+worker, and excludes very short selections below 0.1 seconds. Spectrum mode can
+keep the time-domain overview. The label identifies input/output and scope;
 the spectrum overlays show before/after tonal balance and the reference target.
 
 ![Independent reference waveform beside the retained mix context](docs/images/omazone-shared-reference.png)
@@ -153,17 +173,28 @@ dynamics, and output stages will use the same workspace.
 ### First matching experiment
 
 Loading a mix or reference leaves you on your chosen tool and keeps the selected
-viewer mode. Matching starts with "Load a mix", then "Mix loaded. Add a reference",
+viewer mode. A new session starts on Matching with spectrum/filter plots. Regions,
+reference capture, section assignment, and repair start with waveforms. Each tool
+remembers an explicitly chosen view. On Matching, its compact **View** menu offers
+Waveform/Spectrum/Both, original/input/output signals, and the optional overview.
+Looping and returning to whole-recording playback are also available in this menu.
+Matching starts with "Load a mix", then "Mix loaded. Add a reference",
 then "Mix and reference ready". Reference targets open only when you choose that
 tool; loading a reference does not mean you need to capture named targets.
 
-The tabs and primary action bar do not scroll. **Analyse + process** stays visible
+The plots take most of the Matching workspace. **Match amount** is shown in a
+compact panel, with smoothing and gain limits under **Advanced matching settings**.
+At narrower widths, controls become a strip below the plots. Basic matching
+playback across all tools is Play/Stop, A/B, seeking, and time; looping and view
+options are in **View**. The tabs and primary action bar do not scroll. **Analyse + process** stays visible
 on Matching; **Render sections** stays visible on Mix sections. Settings may scroll
-when the lower panel is small. **Measurements and status** expands the footer
+when the lower panel is small. **View → Show measurements and status** expands the footer
 details when you need them. Opening a saved project still deliberately restores
 its saved tool and view preferences.
 
 ![Matching ready at 1024 by 768 with fixed navigation and an always-visible processing button](docs/images/omazone-matching-ready.png)
+
+![Large matching spectrum and filter response beside compact controls](docs/images/omazone-matching-plots.png)
 
 1. Load a mix and a broadly similar reference track.
 2. Start with 50% amount, 0.33-octave smoothing, and 6 dB boost/cut limits.
@@ -184,8 +215,12 @@ are supported. Different reference and mix sample rates are supported.
 
 ## Inspect a waveform and select a region
 
-Loading a mix opens **Regions** with the shared waveform visible. It has linked
-left/right plots, or one for mono. Choose Spectrum/Both without leaving your tool.
+Choose **Regions** to inspect the shared waveform. It has linked left/right plots,
+or one for mono. Loading files keeps the current tool selected.
+Choose Spectrum/Both without leaving your tool.
+The inspector contains a passage name and saved-region list. **Name current
+selection** stays fixed below it. Exact times and sample counts are under
+**Precise selection bounds**.
 Matching controls are on **Matching**; the response stays in the shared spectrum view.
 
 ![Omazone showing a full-song stereo waveform, selected region, exact sample bounds, and the A/B playback cursor](docs/images/omazone-waveform-selection.png)
@@ -193,7 +228,7 @@ Matching controls are on **Matching**; the response stays in the shared spectrum
 - Use the mouse wheel to zoom horizontally and drag the background to pan.
 - **Shift+drag** on the background creates a selection. Drag its green edges to
   resize it, or drag the shaded region to move it. Both channels share the region.
-- Edit **Start** and **End** in seconds for precise adjustment. Spin-box steps
+- Expand **Precise selection bounds** to edit **Start** and **End**. Spin-box steps
   move one sample; the label shows exact sample indices and duration.
 - **Select view** selects the visible time range. **Zoom selection** magnifies
   the region; **Fit song** returns to the full track; **Clear** removes it.
@@ -243,25 +278,28 @@ number of display points.
 Use different targets when a song contains passages with different tonal goals.
 Each mix section is analysed independently against its assigned target; the
 whole-song spectrum is not used to design its correction.
+Its inspector shows the compact section list, name, assigned target, and amount.
+Precise time bounds, smoothing, boost/cut limits, transition settings, and removal
+are under **Section settings and bounds**. Add/Update and Render actions stay fixed.
 
-![Two mix sections assigned to separate Metal and Clean spectral targets](docs/images/omazone-section-matching.png)
+![Mix-section assignment inspector beside a large waveform with named passages](docs/images/omazone-shared-sections.png)
 
 1. Load a reference and open **Reference targets**. Shift+drag its metal passage,
    enter a target name such as `Metal`, and click **Capture target**.
 2. Select its clean passage and capture `Clean`. You can also capture targets
    from different reference files; earlier targets remain in the library.
 3. Load your mix. In **Regions** or the shared waveform, select the metal passage.
-4. Open **Mix sections**, click **Use mix selection**, name the section, choose
+4. Open **Mix sections**, click **Use selected passage**, name the section, choose
    `Metal`, set its amount/smoothing/gain limits, and click **Add section**.
 5. Repeat for the clean passage with the `Clean` target. Assignments cannot overlap.
 6. Choose a **Transition** duration and click **Render sections**. This produces
    one complete preview and exportable file, keeping the original duration.
-7. Select a table row and use **Inspect EQ** to view its requested and actual
-   correction. **Audition section** uses the existing transport; enable
-   **Loop selection** and switch original/processed to compare it repeatedly.
+7. Select a table row and use **Inspect EQ** under section settings to view its
+   correction. **Listen to section** uses the existing transport; enable looping
+   from **View** and switch original/processed to compare it repeatedly.
 
-To change an assignment, select its row, edit the fields, and click **Apply to
-selected**. **Inspect EQ** and **Render sections** also apply pending edits to the
+To change an assignment, select its row, edit the fields, and click **Update
+section**. **Inspect EQ** and **Render sections** also apply pending edits to the
 selected row. Edits invalidate the old preview and export until you render again.
 The controls below the tabs and **Analyse + process** still perform whole-song
 matching; section settings live in the section table and editor.
@@ -295,7 +333,7 @@ vocal/instrument balance.
 ## Try clipping repair
 
 The clipping screen starts with a guided workflow. Numerical controls are hidden
-under **Advanced settings and measurements**, and unrelated mastering controls
+under **Advanced**, and unrelated mastering controls
 are hidden while you inspect or audition a repair.
 
 ![Guided clipping workflow with Find, Review, and Try repair actions](docs/images/omazone-clipping-guided.png)
@@ -330,7 +368,7 @@ and flat-looking peaks are not proof of damage; clean low-frequency or synthesis
 signals can produce false positives. Compare by listening and undo a poor result.
 
 For manual scanning, channel/threshold controls, exact measurements, and repair
-parameters, expand **Advanced settings and measurements**. See
+parameters, expand **Advanced**. See
 [the inspection guide](docs/clipping-inspection.md) and
 [the reconstruction algorithm](docs/declipping.md).
 

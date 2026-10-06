@@ -1,8 +1,11 @@
 # Clipping inspection: advanced controls
 
 The normal workflow is **Find clipped peaks → Review peaks → Try repair → Listen**.
-Start there. The numerical controls below are available under **Advanced settings
-and measurements** when a manual experiment is useful.
+Start there. The numerical controls below are under **Advanced** in the compact
+inspector when a manual experiment is useful. The current primary action stays
+fixed below the inspector; opening candidate review or Advanced settings scrolls
+the inspector without shrinking the waveform. **Review candidate list** reopens
+the checked-peak list when Listen becomes the primary action.
 
 ## Automatic scan
 
@@ -46,8 +49,9 @@ selection.
 
 Review [the algorithm](declipping.md) before interpreting these parameters as
 quality controls. Longer gaps or damaged context may be skipped rather than repaired.
-Each successful attempt replaces the current repair from the original; attempts
-with no successful intervals retain the previous repair preview.
+Each successful attempt updates the selected intervals from the original while
+retaining repairs elsewhere. Attempts with no successful intervals retain the
+previous repair preview.
 
 ## Markers and measurements
 

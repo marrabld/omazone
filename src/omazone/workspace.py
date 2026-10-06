@@ -2,7 +2,7 @@
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from .engine import analyse
 from .waveform import PeakIndex
@@ -44,6 +44,13 @@ class SongWorkspace(QtWidgets.QWidget):
         self.completed_key = None
         self.peak_cache = []
         self.pending_key = None
+        self.active_tool = owner.views.currentIndex()
+        self.tool_modes = {
+            str(index): ("spectrum" if index == 0 else "waveform")
+            for index in range(owner.views.count())
+        }
+        self.matching_overview = False
+        self.reference_focus = False
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.overview = pg.PlotWidget()
@@ -62,10 +69,13 @@ class SongWorkspace(QtWidgets.QWidget):
         self.overview_cursor = pg.InfiniteLine(pos=0, pen=pg.mkPen("#ffffff"))
         self.overview.addItem(self.overview_cursor)
         layout.addWidget(self.overview)
-        row = QtWidgets.QHBoxLayout()
+        self.view_controls = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(self.view_controls)
+        row.setContentsMargins(0, 0, 0, 0)
         self.mode = QtWidgets.QComboBox()
         for title, key in (("Waveform", "waveform"), ("Spectrum", "spectrum"), ("Both", "both")):
             self.mode.addItem(title, key)
+        self.mode.setCurrentIndex(self.mode.findData("spectrum"))
         self.mode.currentIndexChanged.connect(self.mode_changed)
         row.addWidget(self.mode)
         self.signal = QtWidgets.QComboBox()
@@ -85,7 +95,63 @@ class SongWorkspace(QtWidgets.QWidget):
             button = QtWidgets.QPushButton(title)
             button.clicked.connect(callback)
             row.addWidget(button)
-        layout.addLayout(row)
+        layout.addWidget(self.view_controls)
+        self.view_menu_button = QtWidgets.QToolButton()
+        self.view_menu_button.setText("View")
+        self.view_menu_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QtWidgets.QMenu(self.view_menu_button)
+        self.view_menu_button.setMenu(menu)
+        self.mode_actions = {}
+        group = QtGui.QActionGroup(menu)
+        group.setExclusive(True)
+        for text, key in (
+            ("Spectrum and filter", "spectrum"),
+            ("Waveform", "waveform"),
+            ("Both", "both"),
+        ):
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked=False, chosen=key: self.mode.setCurrentIndex(
+                    self.mode.findData(chosen)
+                )
+            )
+            group.addAction(action)
+            self.mode_actions[key] = action
+        menu.addSeparator()
+        self.signal_actions = {}
+        signal_group = QtGui.QActionGroup(menu)
+        signal_group.setExclusive(True)
+        for text, key in (
+            ("Step input", "input"),
+            ("Step output", "output"),
+            ("Original recording", "original"),
+        ):
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked=False, chosen=key: self.signal.setCurrentIndex(
+                    self.signal.findData(chosen)
+                )
+            )
+            signal_group.addAction(action)
+            self.signal_actions[key] = action
+        menu.addSeparator()
+        self.overview_action = menu.addAction("Show song overview")
+        self.overview_action.setCheckable(True)
+        self.overview_action.toggled.connect(self.toggle_matching_overview)
+        self.loop_action = menu.addAction("Loop selected passage")
+        self.loop_action.setCheckable(True)
+        self.loop_action.toggled.connect(
+            lambda checked: self.owner.loop_selection.setChecked(checked)
+        )
+        menu.addAction("Return to whole-recording playback", self.owner.whole_song)
+        self.measurements_action = menu.addAction("Show measurements and status")
+        self.measurements_action.setCheckable(True)
+        self.measurements_action.triggered.connect(
+            lambda checked: self.owner.details_toggle.setChecked(checked)
+        )
+        layout.addWidget(self.view_menu_button, 0, QtCore.Qt.AlignmentFlag.AlignRight)
         self.label = QtWidgets.QLabel("Load a recording to see its waveform.")
         self.label.setWordWrap(True)
         layout.addWidget(self.label)
@@ -148,13 +214,22 @@ class SongWorkspace(QtWidgets.QWidget):
             "viewer_signal": self.signal.currentData(),
             "viewer_split": self.mix_detail.sizes(),
             "reference_split": self.panes.sizes(),
+            "viewer_tool_modes": dict(self.tool_modes),
+            "matching_overview": self.matching_overview,
         }
 
     def restore_preferences(self, view):
         self.syncing = True
         try:
+            self.tool_modes.update(view.get("viewer_tool_modes", {}))
+            self.tool_modes[str(self.active_tool)] = view.get(
+                "viewer_mode", self.tool_modes[str(self.active_tool)]
+            )
+            self.matching_overview = bool(view.get("matching_overview", False))
+            with QtCore.QSignalBlocker(self.overview_action):
+                self.overview_action.setChecked(self.matching_overview)
             self.mode.setCurrentIndex(
-                max(0, self.mode.findData(view.get("viewer_mode", "waveform")))
+                max(0, self.mode.findData(self.tool_modes[str(self.active_tool)]))
             )
             self.signal.setCurrentIndex(
                 max(0, self.signal.findData(view.get("viewer_signal", "input")))
@@ -163,12 +238,18 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.mix_detail.setSizes(view["viewer_split"])
             if view.get("reference_split"):
                 self.panes.setSizes(view["reference_split"])
+                self.reference_focus = all(size > 0 for size in view["reference_split"])
         finally:
             self.syncing = False
         self.mode_changed()
 
     def mode_changed(self):
         mode = self.mode.currentData()
+        if not self.syncing:
+            self.tool_modes[str(self.active_tool)] = mode
+        for key, action in self.mode_actions.items():
+            with QtCore.QSignalBlocker(action):
+                action.setChecked(key == mode)
         self.mix_detail.setOrientation(
             QtCore.Qt.Orientation.Horizontal if mode == "both" else QtCore.Qt.Orientation.Vertical
         )
@@ -179,6 +260,22 @@ class SongWorkspace(QtWidgets.QWidget):
         self.refresh()
         if mode != "waveform":
             self.timer.start()
+
+    def tool_changed(self):
+        index = self.owner.views.currentIndex()
+        if index != self.active_tool:
+            self.active_tool = index
+            self.mode.setCurrentIndex(
+                self.mode.findData(self.tool_modes.get(str(index), "waveform"))
+            )
+        matching = index == 0
+        self.view_controls.hide()
+        self.view_menu_button.show()
+        self.overview.setVisible(not matching or self.matching_overview)
+
+    def toggle_matching_overview(self, visible):
+        self.matching_overview = visible
+        self.overview.setVisible(self.active_tool != 0 or visible)
 
     def pairs(self):
         if self.owner.source is None:
@@ -193,9 +290,21 @@ class SongWorkspace(QtWidgets.QWidget):
         else:
             before = self.owner.processing_source()[0]
             after = self.owner.output[0] if self.owner.output is not None else None
-            title = (
-                "Section matching" if self.owner.project.match_mode == "sections" else "Matching"
-            )
+            tool = self.owner.views.currentIndex()
+            if tool == 1:
+                title = "Working mix"
+            elif tool == 2:
+                title = "Mix context"
+            elif tool == 3:
+                title = "Section matching"
+                if self.owner.project.match_mode != "sections":
+                    after = None
+            else:
+                title = (
+                    "Section matching"
+                    if self.owner.project.match_mode == "sections"
+                    else "Matching"
+                )
             if self.owner.project.stages["match"].bypassed:
                 title += " (stage skipped)"
         return before, after, rate, title
@@ -213,9 +322,15 @@ class SongWorkspace(QtWidgets.QWidget):
         return self.owner.project.reference_target
 
     def signal_changed(self):
+        self.update_signal_actions()
         if not self.syncing:
             self.sync_audio()
         self.refresh()
+
+    def update_signal_actions(self):
+        for key, action in self.signal_actions.items():
+            with QtCore.QSignalBlocker(action):
+                action.setChecked(key == self.signal.currentData())
 
     def sync_audio(self):
         if self.syncing or self.owner.source is None:
@@ -265,6 +380,9 @@ class SongWorkspace(QtWidgets.QWidget):
             return
         self.refreshing = True
         try:
+            with QtCore.QSignalBlocker(self.loop_action):
+                self.loop_action.setChecked(self.owner.transport.loop)
+            self.update_signal_actions()
             self.refresh_overview()
             before, after, rate, title = self.pairs()
             requested = self.signal.currentData()
@@ -300,7 +418,11 @@ class SongWorkspace(QtWidgets.QWidget):
                     else ("output" if requested == "output" and after is not None else "input")
                 )
                 self.label.setText(
-                    f"Viewing: {title} {shown} | {scope} | Raw processing levels; audition gain is separate"
+                    f"{title} {shown} | {scope}"
+                    + (" | Loop active" if self.owner.transport.loop else "")
+                )
+                self.label.setToolTip(
+                    "Waveforms show raw processing levels; preview gain matching is separate. Spectrum compares relative tonal balance."
                 )
                 key = (id(data), rate)
                 if key != self.wave_key:
@@ -413,6 +535,9 @@ class SongWorkspace(QtWidgets.QWidget):
     def refresh_reference(self):
         visible = self.owner.views.currentIndex() == 2
         self.reference_pane.setVisible(visible)
+        if visible and not self.reference_focus:
+            self.panes.setSizes([max(1, self.width() * 2 // 5), max(1, self.width() * 3 // 5)])
+            self.reference_focus = True
         if not visible:
             return
         item = self.owner.section_workbench.target_list.currentItem()

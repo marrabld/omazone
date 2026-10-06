@@ -33,35 +33,53 @@ class SectionWorkbench(QtWidgets.QWidget):
         self.reference_page = QtWidgets.QWidget()
         reference_layout = QtWidgets.QVBoxLayout(self.reference_page)
         reference_layout.setContentsMargins(0, 0, 0, 0)
-        reference_layout.addWidget(
-            QtWidgets.QLabel(
-                "Select a reference passage, name it, and capture a target. Mix selection is independent."
-            )
+        prompt = QtWidgets.QLabel(
+            "Select a passage in the reference waveform, then name its target."
         )
-        row = QtWidgets.QHBoxLayout()
+        prompt.setWordWrap(True)
+        reference_layout.addWidget(prompt)
+        row = QtWidgets.QVBoxLayout()
         self.target_name = QtWidgets.QLineEdit()
         self.target_name.setPlaceholderText("Target name, e.g. Metal or Clean")
-        row.addWidget(self.target_name, 1)
+        row.addWidget(self.target_name)
         self.capture_button = self.button(row, "Capture target", self.capture)
-        self.button(row, "Save targets", self.save_library)
-        self.button(row, "Load targets", self.load_library)
-        self.button(row, "Remove target", self.remove_target)
         reference_layout.addLayout(row)
         self.target_list = QtWidgets.QListWidget()
-        self.target_list.setMaximumHeight(100)
+        self.target_list.setMaximumHeight(180)
+        self.target_list.setMinimumHeight(90)
         reference_layout.addWidget(self.target_list)
+        self.reference_advanced_toggle = QtWidgets.QToolButton()
+        self.reference_advanced_toggle.setText("Library and precise bounds")
+        self.reference_advanced_toggle.setCheckable(True)
+        self.reference_advanced_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.reference_advanced_toggle.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        reference_layout.addWidget(self.reference_advanced_toggle)
+        self.reference_advanced_panel = QtWidgets.QWidget()
+        self.reference_advanced_layout = QtWidgets.QVBoxLayout(self.reference_advanced_panel)
+        self.button(self.reference_advanced_layout, "Save targets", self.save_library)
+        self.button(self.reference_advanced_layout, "Load targets", self.load_library)
+        self.button(self.reference_advanced_layout, "Remove target", self.remove_target)
+        reference_layout.addWidget(self.reference_advanced_panel)
+        self.reference_advanced_panel.hide()
+        self.reference_advanced_toggle.toggled.connect(
+            lambda shown: self.disclose(
+                self.reference_advanced_toggle, self.reference_advanced_panel, shown
+            )
+        )
         self.reference_waveform = WaveformView()
         self.reference_waveform.buttons[3].hide()  # Reference audition is not the mix transport.
         self.reference_waveform.help_text.setText(
             "Reference only | Wheel: zoom | Drag: pan | Shift+drag: select | Drag green edges: adjust"
         )
         reference_layout.addWidget(self.reference_waveform, 1)
+        reference_layout.addStretch(1)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         instructions = QtWidgets.QLabel(
-            "Capture targets in Reference targets. Select a passage in the shared waveform, "
-            "then Use mix selection and Add section. Select a row to inspect or audition it."
+            "Choose a section or select a new passage in the waveform. Assign a target, then render."
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
@@ -74,40 +92,56 @@ class SectionWorkbench(QtWidgets.QWidget):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.table.itemSelectionChanged.connect(self.select_row)
-        layout.addWidget(self.table, 1)
-        row = QtWidgets.QHBoxLayout()
+        self.table.setMaximumHeight(160)
+        self.table.setMinimumHeight(80)
+        for column in (1, 2, 5, 6):
+            self.table.setColumnHidden(column, True)
+        layout.addWidget(self.table)
+        row = QtWidgets.QVBoxLayout()
         self.name = QtWidgets.QLineEdit()
         self.name.setPlaceholderText("Section name")
         row.addWidget(self.name, 1)
         self.target_choice = QtWidgets.QComboBox()
         row.addWidget(self.target_choice, 1)
-        self.start = self.spin(row, "Start", 0, 1e8, 0, " s", 9)
-        self.end = self.spin(row, "End", 0, 1e8, 0, " s", 9)
         layout.addLayout(row)
-        settings_row = QtWidgets.QHBoxLayout()
+        settings_row = QtWidgets.QVBoxLayout()
         self.amount = self.spin(settings_row, "Amount", 0, 100, 50, "%", 0)
-        self.smoothing = self.spin(settings_row, "Smooth", 0.02, 2, 0.33, " oct", 2)
-        self.boost = self.spin(settings_row, "Max boost", 0, 18, 6, " dB", 1)
-        self.cut = self.spin(settings_row, "Max cut", 0, 18, 6, " dB", 1)
         layout.addLayout(settings_row)
-        row = QtWidgets.QHBoxLayout()
-        self.button(row, "Use mix selection", self.use_mix_selection)
-        self.button(row, "Add section", self.add_section)
-        self.button(row, "Apply to selected", self.update_section)
-        self.button(row, "Remove section", self.remove_section)
-        self.button(row, "Inspect EQ", self.inspect)
-        self.button(row, "Audition section", self.audition)
+        row = QtWidgets.QVBoxLayout()
+        self.button(row, "Use selected passage", self.use_mix_selection)
+        self.add_button = self.button(row, "Add section", self.add_section)
+        self.update_button = self.button(row, "Update section", self.update_section)
+        self.button(row, "Listen to section", self.audition)
         layout.addLayout(row)
-        row = QtWidgets.QHBoxLayout()
-        self.transition_ms = self.spin(row, "Transition", 0, 5000, 75, " ms", 1)
+        self.advanced_toggle = QtWidgets.QToolButton()
+        self.advanced_toggle.setText("Section settings and bounds")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.advanced_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        layout.addWidget(self.advanced_toggle)
+        self.advanced_panel = QtWidgets.QWidget()
+        advanced = QtWidgets.QVBoxLayout(self.advanced_panel)
+        self.start = self.spin(advanced, "Start", 0, 1e8, 0, " s", 9)
+        self.end = self.spin(advanced, "End", 0, 1e8, 0, " s", 9)
+        self.smoothing = self.spin(advanced, "Smoothing", 0.02, 2, 0.33, " oct", 2)
+        self.boost = self.spin(advanced, "Maximum boost", 0, 18, 6, " dB", 1)
+        self.cut = self.spin(advanced, "Maximum cut", 0, 18, 6, " dB", 1)
+        self.transition_ms = self.spin(advanced, "Transition", 0, 5000, 75, " ms", 1)
         self.transition_ms.valueChanged.connect(self.transition_changed)
-        self.render_button = self.button(row, "Render sections", self.render_all)
-        layout.addLayout(row)
+        self.button(advanced, "Inspect EQ", self.inspect)
+        self.button(advanced, "Remove selected section", self.remove_section)
+        self.render_button = self.button(advanced, "Render sections", self.render_all)
+        layout.addWidget(self.advanced_panel)
+        self.advanced_panel.hide()
+        self.advanced_toggle.toggled.connect(
+            lambda shown: self.disclose(self.advanced_toggle, self.advanced_panel, shown)
+        )
         self.summary = QtWidgets.QLabel(
             "Unassigned passages stay dry except in yellow transition windows."
         )
         self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
+        advanced.addWidget(self.summary)
+        layout.addStretch(1)
         for control in (self.start, self.end, self.amount, self.smoothing, self.boost, self.cut):
             control.valueChanged.connect(self.mark_draft)
         self.name.textEdited.connect(self.mark_draft)
@@ -118,6 +152,13 @@ class SectionWorkbench(QtWidgets.QWidget):
         button.clicked.connect(callback)
         row.addWidget(button)
         return button
+
+    @staticmethod
+    def disclose(toggle, panel, shown):
+        panel.setVisible(shown)
+        toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if shown else QtCore.Qt.ArrowType.RightArrow
+        )
 
     def spin(self, row, label, low, high, value, suffix, decimals):
         row.addWidget(QtWidgets.QLabel(label))
@@ -151,9 +192,9 @@ class SectionWorkbench(QtWidgets.QWidget):
         for profile in self.targets.values():
             self.target_choice.addItem(profile.name, profile.id)
             duration = (profile.region.end - profile.region.start) / profile.sample_rate
-            item = QtWidgets.QListWidgetItem(
-                f"{profile.name} | {profile.source_name} | {profile.region.start / profile.sample_rate:.3f}-"
-                f"{profile.region.end / profile.sample_rate:.3f} s | {duration:.3f} s | {profile.sample_rate} Hz"
+            item = QtWidgets.QListWidgetItem(f"{profile.name} | {duration:.1f} s")
+            item.setToolTip(
+                f"{profile.source_name} | {profile.region.start / profile.sample_rate:.3f}-{profile.region.end / profile.sample_rate:.3f} s | {profile.sample_rate} Hz"
             )
             item.setData(QtCore.Qt.ItemDataRole.UserRole, profile.id)
             self.target_list.addItem(item)

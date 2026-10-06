@@ -30,7 +30,7 @@ class ClippingInspector(QtWidgets.QWidget):
         layout.addWidget(description)
         self.scope = QtWidgets.QLabel("Select a mix passage first.")
         layout.addWidget(self.scope)
-        primary = QtWidgets.QHBoxLayout()
+        primary = QtWidgets.QVBoxLayout()
         self.analyse_button = self.button(primary, "1. Find clipped peaks", self.find_peaks)
         self.analyse_button.setStyleSheet(
             "QPushButton { background: #63dfc0; color: #10151e; font-weight: bold; } QPushButton:disabled { background: #253246; color: #647085; }"
@@ -51,7 +51,7 @@ class ClippingInspector(QtWidgets.QWidget):
         self.repair_summary.hide()
         layout.addWidget(self.repair_summary)
         self.result_actions = QtWidgets.QWidget()
-        repair_actions = QtWidgets.QHBoxLayout(self.result_actions)
+        repair_actions = QtWidgets.QVBoxLayout(self.result_actions)
         repair_actions.setContentsMargins(0, 0, 0, 0)
         self.listen_button = self.button(repair_actions, "Listen to repair", self.listen)
         self.reset_repair_button = self.button(
@@ -70,7 +70,7 @@ class ClippingInspector(QtWidgets.QWidget):
                 "Only checked peaks will be changed. Inspect a peak in the waveform if unsure."
             )
         )
-        review_actions = QtWidgets.QHBoxLayout()
+        review_actions = QtWidgets.QVBoxLayout()
         self.button(review_actions, "Inspect selected peak", self.show_interval)
         self.button(review_actions, "Include shown peaks", lambda: self.check_shown(True))
         self.button(review_actions, "Exclude shown peaks", lambda: self.check_shown(False))
@@ -87,7 +87,8 @@ class ClippingInspector(QtWidgets.QWidget):
         layout.addWidget(self.review_panel)
 
         self.advanced_toggle = QtWidgets.QToolButton()
-        self.advanced_toggle.setText("Advanced settings and measurements")
+        self.advanced_toggle.setText("Advanced")
+        self.advanced_toggle.setToolTip("Advanced settings and measurements")
         self.advanced_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.advanced_toggle.setCheckable(True)
         self.advanced_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
@@ -103,7 +104,7 @@ class ClippingInspector(QtWidgets.QWidget):
         )
         manual_note.setWordWrap(True)
         advanced.addWidget(manual_note)
-        controls = QtWidgets.QHBoxLayout()
+        controls = QtWidgets.QVBoxLayout()
         controls.addWidget(QtWidgets.QLabel("Channel"))
         self.channel = QtWidgets.QComboBox()
         self.channel.addItem("All", None)
@@ -118,13 +119,13 @@ class ClippingInspector(QtWidgets.QWidget):
         self.minimum_run.setSuffix(" samples")
         controls.addWidget(self.minimum_run)
         advanced.addLayout(controls)
-        row = QtWidgets.QHBoxLayout()
+        row = QtWidgets.QVBoxLayout()
         self.manual_analyse_button = self.button(row, "Scan with these settings", self.analyse)
         self.suggest_button = self.button(row, "Suggest levels", self.suggest)
         self.button(row, "Show selection", self.show_selection)
         self.button(row, "Clear markers", self.clear)
         advanced.addLayout(row)
-        repair_controls = QtWidgets.QHBoxLayout()
+        repair_controls = QtWidgets.QVBoxLayout()
         self.max_run_ms = self.spin(repair_controls, "Max gap (ms)", 0.01, 10, 1, 2)
         repair_controls.addWidget(QtWidgets.QLabel("Context / side"))
         self.context_samples = QtWidgets.QSpinBox()
@@ -202,7 +203,7 @@ class ClippingInspector(QtWidgets.QWidget):
         for column in range(8):
             self.table.setColumnHidden(column, not advanced and column not in (0, 1, 3, 7))
         self.table.setColumnHidden(7, not advanced and self.last_attempt is None)
-        self.table.setMaximumHeight(16777215 if advanced else 240)
+        self.table.setMaximumHeight(260 if advanced else 180)
         for row, (interval, kind) in enumerate(self.rows):
             self.table.setRowHidden(row, not advanced and not kind.startswith("Suspected"))
             self.table.item(row, 3).setText(
@@ -230,11 +231,8 @@ class ClippingInspector(QtWidgets.QWidget):
             self.repair_summary.setText(
                 "A repair preview is available. Listen to it or undo it below."
             )
-        next_action = self.analyse_button
-        if self.report is not None and self.report.candidates:
-            next_action = self.repair_button if self.checked_intervals() else self.review_button
-        if active and self.last_attempt is not None and self.last_attempt.repaired:
-            next_action = self.listen_button
+        next_action = self.primary_action()
+        self.current_primary = next_action
         for button in (
             self.analyse_button,
             self.review_button,
@@ -249,6 +247,15 @@ class ClippingInspector(QtWidgets.QWidget):
                     if emphasized
                     else ""
                 )
+
+    def primary_action(self):
+        active = self.owner.repair_result is not None
+        next_action = self.analyse_button
+        if self.report is not None and self.report.candidates:
+            next_action = self.repair_button if self.checked_intervals() else self.review_button
+        if active and self.last_attempt is not None and self.last_attempt.repaired:
+            next_action = self.listen_button
+        return next_action
 
     def reset_repair_status(self):
         self.last_attempt = None

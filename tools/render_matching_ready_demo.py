@@ -34,24 +34,35 @@ def main():
         window.loaded(
             "reference", (reference, rate, analyse(reference, rate), "Generated reference.wav")
         )
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            app.processEvents()
-            if window.workspace.job is None and not window.workspace.timer.isActive():
-                break
-            time.sleep(0.01)
-        else:
-            raise RuntimeError("Spectrum demo timed out.")
-        for _ in range(10):
-            app.processEvents()
-            time.sleep(0.01)
-        window.waveform.redraw()
-        app.processEvents()
+
+        def wait():
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                app.processEvents()
+                if (
+                    window.worker is None
+                    and window.workspace.job is None
+                    and not window.workspace.timer.isActive()
+                ):
+                    break
+                time.sleep(0.01)
+            else:
+                raise RuntimeError("Matching demo timed out.")
+            for _ in range(10):
+                app.processEvents()
+                time.sleep(0.01)
+
+        wait()
         assert window.views.currentWidget() is window.match_page
         assert window.process_button.isVisible() and window.process_button.isEnabled()
         if not window.grab().save(str(directory / "omazone-matching-ready.png")):
             raise RuntimeError("Could not save screenshot.")
-        print("Captured the fixed Matching action bar at 1024x768.")
+        window.resize(1280, 900)
+        window.process()
+        wait()
+        if not window.grab().save(str(directory / "omazone-matching-plots.png")):
+            raise RuntimeError("Could not save processed screenshot.")
+        print("Captured plot-focused Matching at 1024x768 and 1280x900.")
     finally:
         window.close()
 
