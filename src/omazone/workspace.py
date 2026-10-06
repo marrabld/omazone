@@ -46,7 +46,7 @@ class SongWorkspace(QtWidgets.QWidget):
         self.pending_key = None
         self.active_tool = owner.views.currentIndex()
         self.tool_modes = {
-            str(index): ("spectrum" if index == 0 else "waveform")
+            str(index): ("spectrum" if index in (0, 5) else "waveform")
             for index in range(owner.views.count())
         }
         self.matching_overview = False
@@ -287,9 +287,27 @@ class SongWorkspace(QtWidgets.QWidget):
             title = "Repair" + (
                 " preview (stage skipped)" if self.owner.project.stages["repair"].bypassed else ""
             )
+        elif self.owner.views.currentWidget() is self.owner.manual_eq_view:
+            before = (
+                self.owner.eq_before
+                if self.owner.eq_before is not None
+                else self.owner.processing_source()[0]
+            )
+            after = (
+                self.owner.output[0]
+                if self.owner.eq_preview is not None and self.owner.output is not None
+                else None
+            )
+            title = "Manual EQ" + (
+                " (bypassed)" if self.owner.project.stages["eq"].bypassed else ""
+            )
         else:
             before = self.owner.processing_source()[0]
-            after = self.owner.output[0] if self.owner.output is not None else None
+            after = (
+                self.owner.match_output
+                if self.owner.match_output is not None
+                else (self.owner.output[0] if self.owner.output is not None else None)
+            )
             tool = self.owner.views.currentIndex()
             if tool == 1:
                 title = "Working mix"
@@ -310,6 +328,8 @@ class SongWorkspace(QtWidgets.QWidget):
         return before, after, rate, title
 
     def reference_target(self):
+        if self.owner.views.currentWidget() is self.owner.manual_eq_view:
+            return None
         workbench = self.owner.section_workbench
         if self.owner.views.currentIndex() == 3:
             section = workbench.selected_section()
@@ -342,6 +362,9 @@ class SongWorkspace(QtWidgets.QWidget):
             mode, processed = 2, False
         elif clipping:
             mode = 1 if self.owner.repair_preview is not None else 2
+            processed = chosen == "output" and after is not None
+        elif self.owner.views.currentWidget() is self.owner.manual_eq_view:
+            mode = self.owner.preview_mode.findData("eq")
             processed = chosen == "output" and after is not None
         else:
             mode, processed = 0, chosen == "output" and after is not None
@@ -455,12 +478,25 @@ class SongWorkspace(QtWidgets.QWidget):
                     self.waveform.set_repair(
                         self.owner.repair_result if data is self.owner.source[0] else None
                     )
+                if self.owner.views.currentWidget() is self.owner.manual_eq_view:
+                    self.owner.manual_eq_view.draw_response()
+                else:
+                    self.waveform.set_eq_scope(None)
                 self.waveform.set_position(self.owner.position)
                 for plot in self.waveform.channel_plots:
                     plot.setMinimumHeight(65)
                 if self.owner.project.calibration and self.owner.project.needs_reanalysis:
                     messages.append(
                         "Matching calibration needs refresh; saved correction is retained."
+                    )
+                if (
+                    self.owner.views.currentWidget() is self.owner.manual_eq_view
+                    and self.owner.eq_before is None
+                    and self.owner.project.match_mode != "none"
+                    and not self.owner.project.stages["match"].bypassed
+                ):
+                    messages.append(
+                        "Render the saved chain to obtain EQ input after matching. Showing pre-match source context."
                     )
                 self.badge.setText(" | ".join(messages))
                 if self.mode.currentData() != "waveform":

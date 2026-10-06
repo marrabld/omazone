@@ -1,6 +1,7 @@
 """Qt desktop workbench. DSP and file loading run outside the UI thread."""
 
 import argparse
+import copy
 import math
 import sys
 from pathlib import Path
@@ -16,11 +17,12 @@ from .engine import (
     audition_pair,
     design_match,
     peak_db,
-    render,
     rms_db,
 )
+from .manual_eq_view import ManualEQView
+from .pipeline import ChainRenderer
 from .playback import PlaybackCursor
-from .project import AudioReference, Project
+from .project import AudioReference, MatchCalibration, Project
 from .project_controller import ProjectController
 from .section_view import SectionWorkbench
 from .sections import TargetProfile
@@ -173,6 +175,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.repaired_source = None
         self.repair_preview = None
         self.mastering_preview = None
+        self.eq_preview = None
+        self.eq_before = None
+        self.match_output = None
+        self.chain_result = None
+        self.renderer = None
+        self.renderer_key = None
         self.audition_mode = "mastering"
         self.worker = None
         self.stream = None
@@ -279,6 +287,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.views.addTab(self.section_workbench, "Mix sections")
         self.clipping_inspector = ClippingInspector(self)
         self.views.addTab(self.clipping_inspector, "Clipping inspection")
+        self.manual_eq_view = ManualEQView(self)
+        self.views.addTab(self.manual_eq_view, "Manual EQ")
         reference_waveform = self.section_workbench.reference_waveform
         reference_layout = self.section_workbench.reference_page.layout()
         reference_layout.removeWidget(reference_waveform)
@@ -344,6 +354,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.section_workbench.add_button,
             self.section_workbench.update_button,
         ]
+        self.views.action_layout.addWidget(self.manual_eq_view.render_button)
+        self.task_actions.append(self.manual_eq_view.render_button)
         for button in (
             self.clipping_inspector.analyse_button,
             self.clipping_inspector.review_button,
@@ -364,6 +376,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.section_workbench.reference_page,
             self.section_workbench,
             self.clipping_inspector,
+            self.manual_eq_view,
         ):
             for label in page.findChildren(QtWidgets.QLabel):
                 label.setWordWrap(True)
@@ -381,6 +394,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.preview_mode.addItem("Input / mastered", "mastering")
         self.preview_mode.addItem("Original / repaired", "repair")
         self.preview_mode.addItem("Original recording", "original")
+        self.preview_mode.addItem("Before / after manual EQ", "eq")
         self.preview_mode.currentIndexChanged.connect(self.preview_mode_changed)
         row.addWidget(self.preview_mode)
         layout.addLayout(row)
@@ -509,7 +523,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             and (
                 self.repair_preview is not None
                 if self.audition_mode == "repair"
-                else self.output is not None
+                else (
+                    self.eq_preview is not None
+                    if self.audition_mode == "eq"
+                    else self.mastering_preview is not None
+                )
             )
         )
         self.preview_mode.setEnabled(not busy and self.source is not None)
@@ -554,6 +572,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.setEnabled(not busy)
         self.clipping_inspector.refresh_actions()
+        self.manual_eq_view.setEnabled(not busy and self.source is not None)
+        self.manual_eq_view.render_button.setEnabled(not busy and self.source is not None)
+        self.manual_eq_view.listen_button.setEnabled(not busy and self.eq_preview is not None)
         self.update_project_actions()
         self.workspace.refresh()
         self.update_action_bar()
@@ -564,6 +585,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         regions = self.views.currentWidget() is self.region_page
         reference = self.views.currentWidget() is self.section_workbench.reference_page
         clipping = self.views.currentWidget() is self.clipping_inspector
+        manual_eq = self.views.currentWidget() is self.manual_eq_view
         self.views.action_bar.show()
         shown = set()
         if matching:
@@ -581,6 +603,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             shown.add(self.section_workbench.capture_button)
         elif clipping:
             shown.add(self.clipping_inspector.primary_action())
+        elif manual_eq:
+            shown.add(self.manual_eq_view.render_button)
         for button in self.task_actions:
             button.setVisible(button in shown)
         self.name_region_button.setEnabled(
@@ -622,6 +646,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             )
         elif clipping:
             message = self.clipping_inspector.result_heading.text()
+        elif manual_eq:
+            message = (
+                "EQ rendered. Compare this step or export."
+                if self.eq_preview is not None
+                else "Adjust the band, then render. Earlier work is retained."
+            )
         elif matching and self.reference is None and self.project.reference_target is None:
             message = "Mix loaded. Add a reference."
         elif sections:
@@ -733,6 +763,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.workspace.refresh()
         self.update_action_bar()
         self.configure_workflow_layout()
+        if self.views.currentWidget() is self.manual_eq_view:
+            self.manual_eq_view.draw_response()
 
     def start_job(self, function, callback, message):
         self.stop()
@@ -795,6 +827,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.waveform.set_audio(index, data[1])
             self.section_workbench.reset_mix()
             self.clipping_inspector.reset_source()
+            self.renderer = None
+            self.renderer_key = None
+            self.manual_eq_view.restore()
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
@@ -819,12 +854,33 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.output = None
         self.section_result = None
         self.mastering_preview = None
+        self.eq_preview = self.eq_before = self.match_output = self.chain_result = None
         self.preview = self.repair_preview if self.audition_mode == "repair" else None
         self.listen_processed = False
         self.update_ab_label()
         self.reset_filter_view()
         self.meters.setText("Process to update measurements.")
         self.update_buttons()
+
+    def invalidate_eq(self):
+        self.project_changed()
+        self.stop()
+        self.output = None
+        self.eq_preview = None
+        self.chain_result = None
+        self.preview = None if self.audition_mode == "eq" else self.mastering_preview
+        self.listen_processed = False
+        self.update_ab_label()
+        self.workspace.completed_key = None
+        self.update_buttons()
+
+    def get_renderer(self):
+        repair = self.repair_result.audio if self.repair_result is not None else None
+        key = (id(self.source[0]), id(repair), self.source[1])
+        if key != self.renderer_key:
+            self.renderer = ChainRenderer(self.source[0], self.source[1], repair)
+            self.renderer_key = key
+        return self.renderer
 
     def settings_changed(self):
         self.invalidate()
@@ -876,13 +932,23 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         settings = self.project.matching
         source, rate, spectrum = self.processing_source()[:3]
         reference = self.reference[2] if self.reference else self.project.reference_target.spectrum
+        snapshot = copy.deepcopy(self.project)
+        renderer = self.get_renderer()
 
         def calculate():
             spec = design_match(spectrum, reference, rate, settings)
-            output = render(source, spec)
-            if self.project.stages["match"].bypassed:
-                output = source.copy()
-            return output, analyse(output, rate), spec, audition_pair(source, output)
+            snapshot.calibration = MatchCalibration(
+                snapshot.config_key(), snapshot.input_key(), whole=spec
+            )
+            result = renderer.render(snapshot)
+            return (
+                result.output,
+                analyse(result.output, rate),
+                spec,
+                audition_pair(result.repaired, result.matched),
+                result,
+                audition_pair(result.matched, result.output),
+            )
 
         self.invalidate()
         self.start_job(calculate, self.processed, "Designing filter and rendering blocks…")
@@ -890,6 +956,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
     def processed(self, result, learn=True):
         self.output = result[:3]
         self.mastering_preview = self.preview = result[3]
+        if len(result) > 4:
+            self.chain_result = result[4]
+            self.match_output = result[4].matched
+            self.eq_before = result[4].matched
+            self.eq_preview = result[5]
         self.audition_mode = "mastering"
         with QtCore.QSignalBlocker(self.preview_mode):
             self.preview_mode.setCurrentIndex(0)
@@ -938,8 +1009,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_plot.setYRange(-8, 8, padding=0)
 
     def sections_rendered(self, payload, learn=True):
-        result, spectrum, previews = payload
-        self.processed((result.audio, spectrum, result.curves[0].filter, previews), learn=False)
+        result, spectrum, previews = payload[:3]
+        output = payload[3].output if len(payload) > 3 else result.audio
+        self.processed(
+            (output, spectrum, result.curves[0].filter, previews, *payload[3:]), learn=False
+        )
         if learn:
             self.project.match_mode = "sections"
             self.record_calibration(sections=result.curves)
@@ -976,7 +1050,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         if self.preview is None:
             source = (
-                self.processing_source()[0] if self.audition_mode == "mastering" else self.source[0]
+                self.eq_before
+                if self.audition_mode == "eq" and self.eq_before is not None
+                else (
+                    self.processing_source()[0]
+                    if self.audition_mode == "mastering"
+                    else self.source[0]
+                )
             )
             self.preview = audition_pair(source, source)
         if self.transport.region is not None:
@@ -1072,6 +1152,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
     def update_ab_label(self):
         if self.audition_mode == "original":
             label = "original"
+        elif self.audition_mode == "eq":
+            label = "after EQ" if self.listen_processed else "before EQ"
         elif self.audition_mode == "repair":
             label = "repaired" if self.listen_processed else "original"
         else:
@@ -1087,7 +1169,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         self.audition_mode = self.preview_mode.currentData()
         self.preview = (
-            self.repair_preview
+            self.eq_preview
+            if self.audition_mode == "eq"
+            else self.repair_preview
             if self.audition_mode == "repair"
             else (self.mastering_preview if self.audition_mode == "mastering" else None)
         )

@@ -916,3 +916,147 @@ def test_project_open_preserves_hidden_matching_precision_and_rejects_invalid_vi
             window.worker.wait()
             app.processEvents()
         window.close()
+
+
+def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path, monkeypatch):
+    import copy
+
+    import sounddevice as sd
+
+    from omazone.gui import load_audio
+    from omazone.project import NamedRegion
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(130).normal(0, 0.1, (32000, 2))
+    reference = signal.sosfilt(signal.butter(2, 2500, fs=rate, output="sos"), audio, axis=0)
+    source_path, reference_path = tmp_path / "mix.wav", tmp_path / "reference.wav"
+    sf.write(source_path, audio, rate, subtype="DOUBLE")
+    sf.write(reference_path, reference, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            app.processEvents()
+            if (
+                window.worker is None
+                and window.workspace.job is None
+                and not window.workspace.timer.isActive()
+            ):
+                assert not errors
+                return
+            time.sleep(0.01)
+        raise AssertionError("Render did not finish")
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source_path))
+        window.loaded("reference", load_audio(reference_path))
+        window.process()
+        wait()
+        matching_output = window.match_output.copy()
+        calibration = window.project.calibration
+        coefficients = calibration.whole.coefficients.copy()
+        matching_preview = window.mastering_preview
+        window.project.regions.append(
+            NamedRegion("guitar", "Acoustic guitar", SampleRegion(8000, 24000))
+        )
+        window.refresh_named_regions()
+        window.views.setCurrentWidget(window.manual_eq_view)
+        eq = window.manual_eq_view
+        eq.region.setCurrentIndex(eq.region.findData("guitar"))
+        eq.frequency.setValue(2200)
+        eq.gain.setValue(-4)
+        assert eq.enabled.isChecked()
+        assert window.output is None
+        assert window.mastering_preview is matching_preview
+        assert window.project.calibration is calibration and not window.project.needs_reanalysis
+        eq.render_button.click()
+        wait()
+        assert window.output is not None
+        np.testing.assert_array_equal(window.match_output, matching_output)
+        np.testing.assert_array_equal(window.project.calibration.whole.coefficients, coefficients)
+        np.testing.assert_array_equal(window.output[0][:8000], matching_output[:8000])
+        np.testing.assert_array_equal(window.output[0][24000:], matching_output[24000:])
+        assert np.any(window.output[0][8000:24000] != matching_output[8000:24000])
+        assert window.renderer.computations["match"] == 1
+        assert window.views.currentWidget() is eq
+        eq.listen_button.click()
+        assert window.audition_mode == "eq" and window.transport.loop
+        block = np.empty((128, 2), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.eq_preview[0][8000:8128])
+        window.toggle_ab()
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.eq_preview[1][8128:8256])
+        assert window.ab_button.text() == "Listening: after EQ"
+        window.stop()
+
+        export = tmp_path / "final.wav"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(export), "")
+        )
+        window.export()
+        wait()
+        saved, saved_rate = sf.read(export, always_2d=True)
+        assert saved_rate == rate
+        np.testing.assert_allclose(saved, window.output[0], atol=1e-7)
+        expected_output = window.output[0].copy()
+        expected_parameters = copy.deepcopy(window.project.stages["eq"].parameters)
+        project_path = tmp_path / "eq-session.omazone.json"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(project_path), "")
+        )
+        window.save_current_project()
+        wait()
+        window.new_project()
+        window.open_project_path(project_path)
+        wait()
+        assert window.project.stages["eq"].parameters == expected_parameters
+        assert eq.region.currentData() == "guitar" and eq.gain.value() == -4
+        assert window.output is None
+        eq.render_button.click()
+        wait()
+        np.testing.assert_array_equal(window.output[0], expected_output)
+        np.testing.assert_array_equal(window.project.calibration.whole.coefficients, coefficients)
+        eq.enabled.setChecked(False)
+        eq.render_button.click()
+        wait()
+        np.testing.assert_array_equal(window.output[0], matching_output)
+        assert window.project.stages["eq"].parameters == expected_parameters
+        eq.enabled.setChecked(True)
+        eq.gain.setValue(-2)
+        eq.render_button.click()
+        wait()
+        assert window.renderer.computations["match"] == 1
+        np.testing.assert_array_equal(window.project.calibration.whole.coefficients, coefficients)
+        eq_parameters = copy.deepcopy(window.project.stages["eq"].parameters)
+        window.amount.setValue(60)
+        assert window.project.stages["eq"].parameters == eq_parameters
+        window.process()  # Explicitly relearn upstream matching, retaining the later band.
+        wait()
+        assert window.project.stages["eq"].parameters == eq_parameters
+        assert window.eq_preview is not None
+        assert window.project.regions[-1].id == "guitar"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()

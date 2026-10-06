@@ -42,6 +42,8 @@ class WaveformView(QtWidgets.QWidget):
         self.clipping_markers = []
         self.repair_items = []
         self.repair_data = []
+        self.eq_items = []
+        self.eq_scope_key = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.help_text = QtWidgets.QLabel(
@@ -100,6 +102,8 @@ class WaveformView(QtWidgets.QWidget):
         self.clipping_markers = []
         self.repair_items = []
         self.repair_data = []
+        self.eq_items = []
+        self.eq_scope_key = None
         self.index = index
         self.sample_rate = sample_rate
         duration = len(index.audio) / sample_rate
@@ -160,6 +164,7 @@ class WaveformView(QtWidgets.QWidget):
         self.channel_plots, self.curves, self.regions, self.playheads = [], [], [], []
         self.section_items, self.clipping_items, self.clipping_markers = [], [], []
         self.repair_items, self.repair_data = [], []
+        self.eq_items, self.eq_scope_key = [], None
         self.index = None
         self.set_selection(None)
         self.setEnabled(False)
@@ -278,6 +283,43 @@ class WaveformView(QtWidgets.QWidget):
     def set_position(self, samples):
         for line in self.playheads:
             line.setValue(samples / self.sample_rate)
+
+    def set_eq_scope(self, bounds, transition_ms=0, gain_db=0, frequency=0):
+        key = (
+            bounds,
+            transition_ms,
+            gain_db,
+            frequency,
+            tuple(id(plot) for plot in self.channel_plots),
+        )
+        if key == self.eq_scope_key:
+            return
+        for plot, item in self.eq_items:
+            plot.removeItem(item)
+        self.eq_items = []
+        self.eq_scope_key = key
+        if bounds is None:
+            return
+        fade = min(round(transition_ms * self.sample_rate / 1000), (bounds.end - bounds.start) // 2)
+        windows = []
+        if bounds.start > 0 and fade:
+            windows.append((bounds.start, bounds.start + fade))
+        if self.index is not None and bounds.end < len(self.index.audio) and fade:
+            windows.append((bounds.end - fade, bounds.end))
+        for plot in self.channel_plots:
+            for start, end in windows:
+                window = pg.LinearRegionItem(
+                    values=(start / self.sample_rate, end / self.sample_rate),
+                    movable=False,
+                    brush=pg.mkBrush(201, 155, 255, 35),
+                    pen=pg.mkPen("#c99bff", style=QtCore.Qt.PenStyle.DashLine),
+                )
+                window.setZValue(-3)
+                window.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                for line in window.lines:
+                    line.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+                plot.addItem(window, ignoreBounds=True)
+                self.eq_items.append((plot, window))
 
     def set_sections(self, sections, transitions, colors):
         for plot, item in self.section_items:

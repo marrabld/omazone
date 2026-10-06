@@ -11,8 +11,7 @@ on:
       - omazone.spec
       - pyproject.toml
       - uv.lock
-      - src/omazone/__init__.py
-      - src/omazone/__main__.py
+      - src/omazone/**
       - tools/publish_windows_release.py
       - tests/test_windows_release.py
 

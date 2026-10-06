@@ -369,10 +369,13 @@ def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling()
                 assert window.playback_selection_controls.isHidden()
                 assert window.tool_scroll.horizontalScrollBar().maximum() == 0
                 assert window.height() <= height
-                if tool:
+                if tool in (1, 2, 3, 4):
                     assert window.waveform.isVisible()
                     for plot in window.waveform.channel_plots:
-                        assert plot.getViewBox().height() >= 90
+                            assert plot.getViewBox().height() >= 90
+                if tool == 5:
+                    assert window.workspace.spectra.isVisible()
+                    assert window.manual_eq_view.render_button.isVisible()
                 if tool == 2:
                     assert window.workspace.reference_pane.isVisible()
                     for plot in workbench.reference_waveform.channel_plots:
