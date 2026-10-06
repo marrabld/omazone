@@ -1,9 +1,26 @@
-name: Windows build
+name: Windows build and publish
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release-windows.yml
+      - omazone.spec
+      - pyproject.toml
+      - uv.lock
+      - src/omazone/__init__.py
+      - src/omazone/__main__.py
+      - tools/publish_windows_release.py
+      - tests/test_windows_release.py
+
+# Main pushes and manual main builds share a queue. A build also verifies that
+# its source is still current before publishing, since queue order is not assured.
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -11,8 +28,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    env:
-      QT_QPA_PLATFORM: offscreen
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -25,27 +41,66 @@ jobs:
         id: version
         shell: bash
         run: echo "version=$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      - name: Test release publishing rules
+        run: uv run pytest tests/test_windows_release.py -q
       - name: Build with PyInstaller
         run: uv run pyinstaller --noconfirm --distpath dist omazone.spec
       - name: Smoke test the bundled executable
-        run: ./dist/Omazone/Omazone.exe --selftest
+        env:
+          QT_QPA_PLATFORM: offscreen
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath ./dist/Omazone/Omazone.exe -ArgumentList '--selftest' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Bundled executable selftest failed: $($process.ExitCode)" }
+      - name: Record source and build identity
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $info = [ordered]@{
+            version = $env:APP_VERSION
+            commit = $env:GITHUB_SHA
+            source = "https://github.com/$env:GITHUB_REPOSITORY/tree/$env:GITHUB_SHA"
+            workflow_run = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            ref = $env:GITHUB_REF
+            event = $env:GITHUB_EVENT_NAME
+          }
+          $info | ConvertTo-Json | Set-Content BUILD-INFO.json -Encoding utf8
+          Copy-Item BUILD-INFO.json dist/Omazone/BUILD-INFO.json
+          Copy-Item LICENSE dist/Omazone/LICENSE.txt
+      - name: Choose download filename
+        id: bundle
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $name = if ($env:GITHUB_REF -like 'refs/tags/v*') { "Omazone-$env:APP_VERSION-windows-x64.zip" } else { 'Omazone-windows-x64.zip' }
+          "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Bundle zip with SHA-256 checksum
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/Omazone -DestinationPath "Omazone-${{ steps.version.outputs.version }}-windows-x64.zip"
-          $hash = (Get-FileHash "Omazone-${{ steps.version.outputs.version }}-windows-x64.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  Omazone-${{ steps.version.outputs.version }}-windows-x64.zip" | Out-File -FilePath SHA256SUMS.txt -Encoding ascii
+          $name = '${{ steps.bundle.outputs.name }}'
+          Compress-Archive -Path dist/Omazone -DestinationPath $name
+          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -FilePath SHA256SUMS.txt -Encoding ascii
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Omazone-windows-x64
+          retention-days: 3
           path: |
-            Omazone-*-windows-x64.zip
+            ${{ steps.bundle.outputs.name }}
             SHA256SUMS.txt
-      - name: Attach to GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            Omazone-*-windows-x64.zip
-            SHA256SUMS.txt
+            BUILD-INFO.json
+      - name: Publish development or numbered release
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          uv run python tools/publish_windows_release.py `
+            --repo "$env:GITHUB_REPOSITORY" --event "$env:GITHUB_EVENT_NAME" `
+            --ref "$env:GITHUB_REF" --sha "$env:GITHUB_SHA" `
+            --version '${{ steps.version.outputs.version }}' `
+            --run-url "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" `
+            --assets '${{ steps.bundle.outputs.name }}' SHA256SUMS.txt BUILD-INFO.json
