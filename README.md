@@ -9,7 +9,7 @@ measures, what correction it requests, and what the resulting filter actually
 does. This is an early, working prototype. Contributions from musicians, DSP
 developers, and people who enjoy building audio interfaces are welcome.
 
-![Omazone showing mix, reference, and processed spectra, requested and actual EQ responses, and the A/B playback scrubber](docs/images/omazone-spectral-matching.png)
+![Current Omazone Matching workspace with large spectrum and filter plots, compact side controls, and A/B playback](docs/images/omazone-matching-plots.png)
 
 ## What works now
 
