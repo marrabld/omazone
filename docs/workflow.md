@@ -44,9 +44,16 @@ The song stays in the workspace. Tools change around the viewer:
 ```
 
 Use a resizable viewer/control split so a table cannot squeeze away the song.
+All implemented tools use a compact inspector beside the viewer on wider displays,
+or a bounded panel beneath on narrow displays. Primary actions remain fixed;
+lists and detailed editors scroll within the inspector. Region naming, target
+capture, section assignment and repair all keep the waveform prominent.
 Matching starts with large spectrum/filter plots and a compact settings panel
 beside them on wider displays, or a small controls strip below on narrow ones.
 Only Match amount is initially exposed; the remaining settings are optional.
+Reference targets retain mix context while giving the independent reference pane
+most of the detail-view width. Other tools use the same compact View menu and
+single playback row, with looping and signal selection available on demand.
 Waveform is the starting view for region, reference, section, and repair tasks.
 Spectrum and Both remain available without leaving the current step, and each
 tool remembers explicit overrides. Preserve the user's detailed-view preference, mix
