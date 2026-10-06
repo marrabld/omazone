@@ -117,20 +117,24 @@ The workspace stays above the tool controls. Use **Waveform**, **Spectrum**, or
 **Both** to inspect the same passage while working in Matching, Regions, Reference
 targets, Mix sections, or Clipping inspection. Drag the splitter between the
 viewer and controls to give either more space; controls scroll rather than hiding
-the song. In Both mode, waveform and spectra are shown side by side.
+the song. Matching prioritises its frequency spectrum and filter response, with
+compact settings beside the plots on wider windows. Other tools retain the
+waveform-led workspace. In Both mode, waveform and spectra are shown side by side.
 
 ![Section controls below the persistent waveform and spectral viewer](docs/images/omazone-shared-sections.png)
 
-The overview always shows the whole song, named passages, your selection, and
+The overview shows the whole song, named passages, your selection, and
 playback cursor. Selection, zoom, position, and loop survive tool changes.
+On Matching it is hidden by default to give the plots more space; **View → Show
+song overview** enables it. Seeking and elapsed/total time remain available.
 **Step input**, **Step output**, and **Original recording** identify the visible
 signal and coordinate the audition side. Waveforms use raw processing levels;
 RMS-matched playback does not change the displayed/exported samples.
 
 If output needs rendering, a yellow message says so and the input remains visible
 for context. Spectrum analysis follows the selected passage, runs in a background
-worker, and excludes very short selections below 0.1 seconds. Spectrum mode still
-keeps the time-domain overview. The label identifies input/output and scope;
+worker, and excludes very short selections below 0.1 seconds. Spectrum mode can
+keep the time-domain overview. The label identifies input/output and scope;
 the spectrum overlays show before/after tonal balance and the reference target.
 
 ![Independent reference waveform beside the retained mix context](docs/images/omazone-shared-reference.png)
@@ -150,17 +154,28 @@ dynamics, and output stages will use the same workspace.
 ### First matching experiment
 
 Loading a mix or reference leaves you on your chosen tool and keeps the selected
-viewer mode. Matching starts with "Load a mix", then "Mix loaded. Add a reference",
+viewer mode. A new session starts on Matching with spectrum/filter plots. Regions,
+reference capture, section assignment, and repair start with waveforms. Each tool
+remembers an explicitly chosen view. On Matching, its compact **View** menu offers
+Waveform/Spectrum/Both, original/input/output signals, and the optional overview.
+Looping and returning to whole-recording playback are also available in this menu.
+Matching starts with "Load a mix", then "Mix loaded. Add a reference",
 then "Mix and reference ready". Reference targets open only when you choose that
 tool; loading a reference does not mean you need to capture named targets.
 
-The tabs and primary action bar do not scroll. **Analyse + process** stays visible
+The plots take most of the Matching workspace. **Match amount** is shown in a
+compact panel, with smoothing and gain limits under **Advanced matching settings**.
+At narrower widths, controls become a strip below the plots. Basic matching
+playback is Play/Stop, A/B, seeking, and time; region-loop controls remain on the
+waveform-oriented tools. The tabs and primary action bar do not scroll. **Analyse + process** stays visible
 on Matching; **Render sections** stays visible on Mix sections. Settings may scroll
 when the lower panel is small. **Measurements and status** expands the footer
 details when you need them. Opening a saved project still deliberately restores
 its saved tool and view preferences.
 
 ![Matching ready at 1024 by 768 with fixed navigation and an always-visible processing button](docs/images/omazone-matching-ready.png)
+
+![Large matching spectrum and filter response beside compact controls](docs/images/omazone-matching-plots.png)
 
 1. Load a mix and a broadly similar reference track.
 2. Start with 50% amount, 0.33-octave smoothing, and 6 dB boost/cut limits.
@@ -181,8 +196,9 @@ are supported. Different reference and mix sample rates are supported.
 
 ## Inspect a waveform and select a region
 
-Loading a mix opens **Regions** with the shared waveform visible. It has linked
-left/right plots, or one for mono. Choose Spectrum/Both without leaving your tool.
+Choose **Regions** to inspect the shared waveform. It has linked left/right plots,
+or one for mono. Loading files keeps the current tool selected.
+Choose Spectrum/Both without leaving your tool.
 Matching controls are on **Matching**; the response stays in the shared spectrum view.
 
 ![Omazone showing a full-song stereo waveform, selected region, exact sample bounds, and the A/B playback cursor](docs/images/omazone-waveform-selection.png)

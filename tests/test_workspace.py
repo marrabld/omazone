@@ -45,6 +45,10 @@ def test_context_survives_every_tool_and_reference_selection():
         window.position = 9000
         window.loop_selection.setChecked(True)
         window.project.regions.append(NamedRegion("guitar", "Guitar", selection))
+        window.workspace.tool_modes.update(
+            {str(index): "both" for index in range(window.views.count())}
+        )
+        window.workspace.overview_action.setChecked(True)
         window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("both"))
         for index in range(window.views.count()):
             window.views.setCurrentIndex(index)
@@ -71,6 +75,84 @@ def test_context_survives_every_tool_and_reference_selection():
         window.close()
 
 
+def test_task_view_defaults_and_overrides_are_remembered():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        window.show()
+        assert window.workspace.mode.currentData() == "spectrum"
+        assert window.workspace.view_controls.isHidden()
+        assert window.playback_selection_controls.isHidden()
+        assert window.match_advanced_panel.isHidden()
+        for index in (1, 2, 3, 4):
+            window.views.setCurrentIndex(index)
+            assert window.workspace.mode.currentData() == "waveform"
+        window.views.setCurrentIndex(1)
+        window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("both"))
+        window.views.setCurrentIndex(0)
+        assert window.workspace.mode.currentData() == "spectrum"
+        window.workspace.mode_actions["waveform"].trigger()
+        window.views.setCurrentIndex(1)
+        assert window.workspace.mode.currentData() == "both"
+        window.views.setCurrentIndex(0)
+        assert window.workspace.mode.currentData() == "waveform"
+        assert window.workspace.preferences()["viewer_tool_modes"]["1"] == "both"
+    finally:
+        app.processEvents()
+        window.close()
+
+
+def test_matching_has_usable_plot_area_and_bounded_linked_frequency_axes():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 48000
+    audio = np.random.default_rng(97).normal(0, 0.1, (rate, 2))
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
+        window.loaded("reference", (audio * 0.5, rate, analyse(audio * 0.5, rate), "reference"))
+        for width, height in ((1024, 768), (1280, 900)):
+            window.resize(width, height)
+            wait_jobs(app, window)
+            assert window.workspace_split.orientation() == QtCore.Qt.Orientation.Horizontal
+            assert window.spectrum_plot.getViewBox().height() >= 140
+            assert window.eq_plot.getViewBox().height() >= 80
+            assert window.workspace.width() > window.width() * 0.65
+            assert window.process_button.isVisible()
+        assert window.height() <= height
+        window.waveform.set_selection(SampleRegion(1000, 10000))
+        window.workspace.loop_action.setChecked(True)
+        assert window.transport.loop
+        assert "Loop active" in window.workspace.label.text()
+        window.whole_song()
+        assert not window.workspace.loop_action.isChecked()
+        window.eq_plot.getViewBox().setXRange(-10, 14, padding=0)
+        app.processEvents()
+        for plot in (window.spectrum_plot, window.eq_plot):
+            low, high = plot.viewRange()[0]
+            assert low >= np.log10(20) - 1e-6
+            assert high <= np.log10(20000) + 1e-6
+            assert plot.getAxis("bottom").logMode
+            assert not plot.getAxis("bottom").autoSIPrefix
+        window.process()
+        wait_jobs(app, window)
+        assert len(window.eq_plot.listDataItems()) == 2
+        window.amount.setValue(60)
+        assert (
+            len(window.eq_plot.listDataItems()) == 1
+        )  # Honest unity placeholder, not stale correction.
+        assert "No correction" in window.eq_plot.plotItem.titleLabel.text
+        np.testing.assert_allclose(
+            window.eq_plot.viewRange()[0], window.spectrum_plot.viewRange()[0]
+        )
+        window.resize(850, 850)
+        app.processEvents()
+        assert window.workspace_split.orientation() == QtCore.Qt.Orientation.Vertical
+        assert window.process_button.isVisible()
+    finally:
+        window.close()
+
+
 def test_actual_output_visualisation_and_pending_input_context():
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = Window()
@@ -92,6 +174,7 @@ def test_actual_output_visualisation_and_pending_input_context():
         assert "output" in window.workspace.label.text()
         assert window.listen_processed
         window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("spectrum"))
+        window.workspace.overview_action.setChecked(True)
         wait_jobs(app, window)
         assert window.workspace.overview.isVisible()
         assert window.workspace.spectra.isVisible()
@@ -141,6 +224,7 @@ def test_profile_only_reference_keeps_mix_visible_and_project_preferences(tmp_pa
         assert "Saved clean target" in window.workspace.reference_label.text()
         assert window.waveform.isVisible()
         window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("both"))
+        window.workspace.tool_modes["4"] = "spectrum"
         window.waveform.set_selection(SampleRegion(2000, 10000))
         window.waveform.channel_plots[0].setXRange(0.1, 0.8, padding=0)
         wait_jobs(app, window)
@@ -154,6 +238,7 @@ def test_profile_only_reference_keeps_mix_visible_and_project_preferences(tmp_pa
         wait_jobs(app, window)
         assert not errors
         assert window.workspace.mode.currentData() == "both"
+        assert window.workspace.tool_modes["4"] == "spectrum"
         assert window.waveform.selection == SampleRegion(2000, 10000)
         np.testing.assert_allclose(window.waveform.channel_plots[0].viewRange()[0], [0.1, 0.8])
         assert len(window.project.targets) == 1
@@ -170,7 +255,7 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
     try:
         window.show()
         assert window.views.currentWidget() is window.match_page
-        assert window.workspace.mode.currentData() == "waveform"
+        assert window.workspace.mode.currentData() == "spectrum"
         assert window.views.action_label.text() == "Load a mix."
         window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
         assert window.views.currentWidget() is window.match_page
@@ -184,6 +269,7 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
             window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
             for tool in range(window.views.count()):
                 window.views.setCurrentIndex(tool)
+                window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
                 window.loaded("source", (audio.copy(), rate, analyse(audio, rate), "new mix"))
                 assert window.views.currentIndex() == tool
                 assert window.workspace.mode.currentData() == mode
@@ -233,6 +319,7 @@ def test_primary_actions_and_navigation_remain_visible_when_settings_scroll():
                     (window.section_workbench, window.section_workbench.render_button),
                 ):
                     window.views.setCurrentWidget(page)
+                    window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
                     window.workspace_split.setSizes([10000, 165])
                     app.processEvents()
                     scroll = window.tool_scroll.verticalScrollBar()

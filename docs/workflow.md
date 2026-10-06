@@ -44,12 +44,17 @@ The song stays in the workspace. Tools change around the viewer:
 ```
 
 Use a resizable viewer/control split so a table cannot squeeze away the song.
-Waveform is the starting view; Spectrum and Both remain available without
-leaving the current step. Preserve the user's detailed-view preference, mix
+Matching starts with large spectrum/filter plots and a compact settings panel
+beside them on wider displays, or a small controls strip below on narrow ones.
+Only Match amount is initially exposed; the remaining settings are optional.
+Waveform is the starting view for region, reference, section, and repair tasks.
+Spectrum and Both remain available without leaving the current step, and each
+tool remembers explicit overrides. Preserve the user's detailed-view preference, mix
 selection, zoom/pan, playback cursor, and loop bounds when navigating.
 
-Even in Spectrum mode, the small time-domain overview locates the selected
-passage in the song. Spectrum analysis should identify whether it represents
+The time-domain overview locates the selected passage in the song. Matching hides
+it by default to reserve space for the plots; its View menu can show it, and seeking
+and elapsed/total time remain visible. Spectrum analysis should identify whether it represents
 that selected passage or the full recording.
 
 ### Reference capture

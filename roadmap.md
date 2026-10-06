@@ -30,7 +30,8 @@ mix-section assignments, and clipping controls must not replace the viewer with
 a table or settings form.
 
 - [x] A persistent song overview shows named regions, selection, and playhead.
-- [x] The detailed viewer offers Waveform, Spectrum, and Both, preserving the user's choice.
+- [x] Matching starts with spectrum/filter plots; waveform tasks start with waveforms.
+- [x] The detailed viewer offers Waveform, Spectrum, and Both, remembering each tool's explicit choice.
 - [x] Moving between current tools preserves mix selection, zoom/pan, cursor, and loop bounds.
 - [x] The viewer identifies the signal and scope: original, current-stage input,
   or rendered output for the selected passage.
@@ -41,8 +42,9 @@ a table or settings form.
 - [x] Pending or stale output is labelled; previously rendered audio is not
   silently presented as the result of new settings.
 
-The time-domain overview remains useful even when the detailed view is a
-spectrum: it tells the user which part of the song they are editing. See
+The time-domain overview remains useful for locating the selected passage.
+Matching hides it by default to prioritise the spectrum and filter, with an
+optional View action and a persistent seek/time display. See
 [the workflow and layout specification](docs/workflow.md).
 
 ## Next development milestones
