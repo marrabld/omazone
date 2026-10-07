@@ -52,3 +52,13 @@ def test_assembly_fails_before_creating_release_dir_for_missing_or_wrong_build(t
     with pytest.raises(ValueError, match="Missing or empty"):
         assembler.assemble(source, output, "0.2.0", SHA, False)
     assert not output.exists()
+
+
+def test_platform_supplied_checksum_file_is_rejected(tmp_path):
+    source = bundles(tmp_path)
+    output = tmp_path / "release"
+    # A per-platform checksum file could hide a stale or incomplete shared list.
+    (source / "Omazone-windows-x64" / "SHA256SUMS.txt").write_text("deadbeef  other.zip\n")
+    with pytest.raises(ValueError, match="unexpected files"):
+        assembler.assemble(source, output, "0.2.0", SHA, False)
+    assert not output.exists()

@@ -93,7 +93,7 @@ jobs:
           $name = '${{ steps.bundle.outputs.name }}'
           Compress-Archive -Path dist/Omazone -DestinationPath $name
           New-Item -ItemType Directory -Force -Path staged/Omazone-windows-x64 | Out-Null
-          Move-Item -Force $name, SHA256SUMS.txt, BUILD-INFO.json staged/Omazone-windows-x64/
+          Move-Item -Force $name, BUILD-INFO.json staged/Omazone-windows-x64/
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

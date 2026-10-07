@@ -26,6 +26,13 @@ def assemble(input_dir, output_dir, version, sha, numbered):
         archive, info_file = folder / bundle, folder / info_name
         if not archive.is_file() or archive.stat().st_size == 0 or not info_file.is_file():
             raise ValueError(f"Missing or empty {artifact} archive/build identity.")
+        # One shared checksum file covers every platform, so a platform build must
+        # not bring its own and let a stale copy win.
+        unexpected = sorted(
+            item.name for item in folder.iterdir() if item.name not in {bundle, info_name}
+        )
+        if unexpected:
+            raise ValueError(f"{artifact} uploaded unexpected files: {', '.join(unexpected)}")
         info = json.loads(info_file.read_text(encoding="utf-8-sig"))
         if info.get("version") != version or info.get("commit") != sha:
             raise ValueError(f"{artifact} does not match release version and commit.")
