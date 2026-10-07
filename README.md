@@ -63,6 +63,16 @@ includes `SHA256SUMS.txt` and `BUILD-INFO.json` with the exact source commit and
 build run. The rolling development tag advances, so use that recorded commit to
 reproduce a particular download.
 
+To publish a numbered Windows build, update the project version in a PR with
+`uv version 0.2.0 --no-sync` (replace the number with your intended version).
+This updates `pyproject.toml` and `uv.lock`. Merge that PR, then push a matching
+tag from the new `main` commit, such as `v0.2.0`. The tag build creates the
+numbered release and attaches its Windows zip, checksum and build information.
+Creating a release in GitHub before bumping the project version leaves it empty:
+the build refuses a mismatched tag. If an empty release with a matching tag
+already exists, the workflow can fill it. It never replaces assets on an
+existing numbered release.
+
 The executable is unsigned, so Windows SmartScreen shows a warning
 ("Windows protected your PC"). Choose "More info" then "Run anyway", and prefer
 verifying the SHA-256 checksum over ignoring it. In PowerShell, run

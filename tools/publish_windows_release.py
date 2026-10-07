@@ -53,10 +53,13 @@ def publish(repo, event, ref, sha, version, assets, run_url):
         if main_sha != sha:
             return "Publishing skipped: main has advanced. The newer main build will publish."
     elif tag != f"v{version}":
-        raise ValueError("Version tag must match the version in pyproject.toml.")
+        raise ValueError(
+            f"Version tag {tag} does not match pyproject.toml version {version}. "
+            "Merge a matching version bump before pushing the tag."
+        )
 
     release = read_release(repo, tag)
-    if not development and release is not None and not release["draft"]:
+    if not development and release is not None and not release["draft"] and release["assets"]:
         return f"Versioned release {tag} already exists; preserving its published assets."
     if development:
         reference = read_api(f"repos/{repo}/git/ref/tags/{tag}")

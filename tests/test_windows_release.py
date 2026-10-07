@@ -130,9 +130,18 @@ def test_numbered_release_is_separate_and_reruns_preserve_assets(tmp_path, monke
     publish(tmp_path, ref="refs/tags/v0.1.0")
     assert not any("PATCH" in args for args in calls)
     assert "--prerelease=false" in calls[-1] and "--latest=true" in calls[-1]
-    calls, _ = fake_github(monkeypatch, release={"draft": False})
+    calls, _ = fake_github(monkeypatch, release={"draft": False, "assets": ["existing.zip"]})
     assert "already exists" in publish(tmp_path, ref="refs/tags/v0.1.0")
     assert not any(args[:2] in (("release", "upload"), ("release", "edit")) for args in calls)
+
+
+def test_empty_published_numbered_release_gets_assets(tmp_path, monkeypatch):
+    calls, _ = fake_github(monkeypatch, release={"draft": False, "assets": []})
+    assert "Published" in publish(tmp_path, ref="refs/tags/v0.1.0")
+    assert not any(args[:2] == ("release", "create") for args in calls)
+    upload = next(args for args in calls if args[:2] == ("release", "upload"))
+    assert "--clobber" not in upload
+    assert "--latest=true" in calls[-1]
 
 
 def test_tag_version_mismatch_and_missing_assets_fail_before_mutation(tmp_path, monkeypatch):

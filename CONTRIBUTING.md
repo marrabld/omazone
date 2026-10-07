@@ -57,11 +57,17 @@ only. A queued build whose source is no longer the current `main` skips publishi
 so an old rerun cannot replace newer code. The Windows workflow serialises runs
 for the same ref. Failed builds leave the last public download in place.
 
-For a deliberate numbered snapshot, bump `version` in `pyproject.toml`, update
-`uv.lock` if needed, merge, and push a matching tag such as `v0.1.1`. That build
-publishes a separate numbered release; published snapshots are not replaced by
-reruns. The workflow-owned lightweight `development` tag is advanced only through
-a non-forced fast-forward, and each bundle records its full source commit.
+For a deliberate numbered snapshot, run `uv version 0.2.0 --no-sync` (choose
+the intended version), review the `pyproject.toml` and `uv.lock` changes, and
+merge that version-bump PR into `main`. Push a matching `v0.2.0` tag on the new
+main commit. The tag workflow creates the numbered GitHub release and uploads
+the Windows zip, checksum and build metadata. Do not create the tag or release
+before the source version matches: a mismatched tag fails before packaging.
+The workflow can fill an existing empty numbered release, but never replaces
+assets on an already-published numbered build. The workflow-owned lightweight
+`development` tag advances only by a non-forced fast-forward, and each bundle
+records its full source commit. A per-merge version bump is not needed for the
+rolling `development` download.
 
 The first merge containing this workflow activates automation and creates the
 development release after the build succeeds. Maintainers can then share the
