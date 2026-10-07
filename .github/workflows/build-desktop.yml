@@ -57,6 +57,13 @@ jobs:
             exit 1
           fi
           dist/Omazone.app/Contents/MacOS/Omazone --selftest
+          # Confirm the bundle identifies itself rather than inheriting Qt's defaults,
+          # which would make the app unopenable by double-click.
+          plist=dist/Omazone.app/Contents/Info.plist
+          for expected in "au.com.omazone.app" "Omazone" "14.0"; do
+            grep -q "<string>$expected</string>" "$plist" \
+              || { echo "::error::Info.plist is missing $expected" >&2; exit 1; }
+          done
       - name: Choose download filename
         id: bundle
         shell: bash
@@ -73,6 +80,10 @@ jobs:
           cp LICENSE dist/Omazone.app/Contents/Resources/LICENSE.txt
           ditto -c -k --keepParent dist/Omazone.app \
             "staged/Omazone-macos-arm64/${{ steps.bundle.outputs.name }}"
+          # ditto preserves the executable bit; without it the app cannot launch.
+          unzip -l "staged/Omazone-macos-arm64/${{ steps.bundle.outputs.name }}" \
+            | grep -q "Contents/MacOS/Omazone" \
+            || { echo "::error::zipped app is missing its executable" >&2; exit 1; }
       - name: Record platform build identity
         run: |
           uv run python tools/write_build_info.py \
