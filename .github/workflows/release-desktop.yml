@@ -1,0 +1,85 @@
+name: Desktop release and publish
+
+# Coordinates the Windows, Apple Silicon and Arch artifacts into one atomic
+# release update. Every platform job must succeed and agree on version and
+# commit before anything is published, so a broken platform cannot half-update
+# a release or overwrite the existing Windows download link.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows x64
+    uses: ./.github/workflows/release-windows.yml
+
+  macos:
+    name: Apple Silicon app
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      platform: macos
+
+  arch:
+    name: Arch x86-64 package
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      platform: arch
+
+  publish:
+    name: Publish all platforms
+    needs: [windows, macos, arch]
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Read project version
+        id: version
+        shell: bash
+        run: echo "version=$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Omazone-*
+          path: artifacts
+          merge-multiple: true
+      - name: Assemble verified release assets
+        id: assets
+        shell: bash
+        run: |
+          numbered=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then numbered="--numbered"; fi
+          uv run python tools/assemble_release_assets.py \
+            --input artifacts --output release-assets \
+            --version '${{ steps.version.outputs.version }}' --sha "$GITHUB_SHA" $numbered \
+            | tee assembled.txt
+      - name: Upload combined release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: Omazone-release-assets
+          retention-days: 3
+          path: release-assets
+      - name: Publish development or numbered release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run python tools/publish_windows_release.py \
+            --repo "$GITHUB_REPOSITORY" --event "$GITHUB_EVENT_NAME" \
+            --ref "$GITHUB_REF" --sha "$GITHUB_SHA" \
+            --version '${{ steps.version.outputs.version }}' \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --assets $(cat assembled.txt)

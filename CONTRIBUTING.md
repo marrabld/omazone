@@ -44,31 +44,35 @@ retarget the dependent PR to `main` and review its final diff.
 Do not commit private recordings or commercial reference tracks. Contributions
 use the project's [GPLv3 license](LICENSE).
 
-## Windows builds and publication
+## Desktop builds and publication
 
-Merging a PR into `main` automatically starts **Windows build and publish**.
-After packaging and the bundled executable's smoke test succeed, the workflow
-updates the `development` prerelease and the README's direct download link.
-There is no separate publishing button or routine version-tag step.
+Merging a PR into `main` automatically starts **Desktop release and publish**. It
+builds Windows x64, an Apple Silicon macOS app and an Arch Linux package, runs each
+bundled application's self-test, and publishes all three together. There is no
+separate publishing button or routine version-tag step.
 
-PRs that change app or packaging files also exercise the Windows build, but never publish.
-Manual runs on `main` publish; manual feature-branch runs produce temporary artifacts
-only. A queued build whose source is no longer the current `main` skips publishing,
-so an old rerun cannot replace newer code. The Windows workflow serialises runs
-for the same ref. Failed builds leave the last public download in place.
+Publication is coordinated. Individual platform workflows only upload artifacts.
+The release step refuses to publish unless all three archives exist, are
+non-empty, and report the release version and commit, so a broken or stale
+platform leaves the last public downloads in place instead of half-updating them.
+A queued build whose source is no longer the current `main` skips publishing, so an
+old rerun cannot replace newer code. Failed builds never publish.
+
+PRs that change app or packaging files exercise the Windows build without
+publishing. A manual run of any platform workflow produces temporary artifacts
+only. The Windows workflow serialises runs for the same ref.
+
+See [platform builds](docs/packaging.md) for what each bundle contains, how the
+Mac and Arch packages are verified, and the current signing and validation limits.
 
 For a deliberate numbered snapshot, run `uv version 0.2.0 --no-sync` (choose
 the intended version), review the `pyproject.toml` and `uv.lock` changes, and
 merge that version-bump PR into `main`. Push a matching `v0.2.0` tag on the new
 main commit. The tag workflow creates the numbered GitHub release and uploads
-the Windows zip, checksum and build metadata. Do not create the tag or release
-before the source version matches: a mismatched tag fails before packaging.
-The workflow can fill an existing empty numbered release, but never replaces
-assets on an already-published numbered build. The workflow-owned lightweight
-`development` tag advances only by a non-forced fast-forward, and each bundle
-records its full source commit. A per-merge version bump is not needed for the
-rolling `development` download.
-
-The first merge containing this workflow activates automation and creates the
-development release after the build succeeds. Maintainers can then share the
-README download link rather than explaining Actions artifact downloads.
+every platform archive, one shared checksum file and per-platform build
+metadata. Do not create the tag or release before the source version matches: a
+mismatched tag fails before packaging. The workflow can fill an existing empty
+numbered release, but never replaces assets on an already-published numbered
+build. The workflow-owned lightweight `development` tag advances only by a
+non-forced fast-forward, and each bundle records its full source commit. A
+per-merge version bump is not needed for the rolling `development` download.

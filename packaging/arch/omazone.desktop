@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Omazone
+Comment=Offline audio mastering workbench
+Exec=omazone
+Icon=omazone
+Terminal=false
+Categories=AudioVideo;Audio;AudioVideoEditing;

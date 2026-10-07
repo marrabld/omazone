@@ -1,0 +1,135 @@
+name: macOS and Arch build
+
+# Builds one Apple Silicon app or Arch x86-64 package and uploads it as an
+# artifact. It never publishes a release itself, so a missing or broken
+# platform cannot half-update a release. The coordinated release workflow calls
+# it once per platform and publishes only after all platforms succeed.
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Platform to build (macos or arch).
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build (macos or arch).
+        required: true
+        type: string
+
+# This workflow only builds. The coordinated release workflow calls it and is
+# responsible for publishing, so a single main merge produces one release update.
+concurrency:
+  group: desktop-build-${{ inputs.platform || github.event.inputs.platform }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Apple Silicon app
+    if: (inputs.platform || github.event.inputs.platform) == 'macos'
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Read project version
+        id: version
+        shell: bash
+        run: echo "version=$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      - name: Build app bundle
+        run: uv run pyinstaller --noconfirm --distpath dist omazone.spec
+      - name: Smoke test the bundled app
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [[ ! -d dist/Omazone.app ]]; then
+            echo "::error::PyInstaller did not produce Omazone.app" >&2
+            exit 1
+          fi
+          dist/Omazone.app/Contents/MacOS/Omazone --selftest
+      - name: Choose download filename
+        id: bundle
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=Omazone-${{ steps.version.outputs.version }}-macos-arm64.zip" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=Omazone-macos-arm64.zip" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Bundle app zip
+        shell: bash
+        run: |
+          mkdir -p staged/Omazone-macos-arm64
+          cp LICENSE dist/Omazone.app/Contents/Resources/LICENSE.txt
+          ditto -c -k --keepParent dist/Omazone.app \
+            "staged/Omazone-macos-arm64/${{ steps.bundle.outputs.name }}"
+      - name: Record platform build identity
+        run: |
+          uv run python tools/write_build_info.py \
+            --platform macos-arm64 --version '${{ steps.version.outputs.version }}' \
+            --commit "$GITHUB_SHA" --ref "$GITHUB_REF" --event "$GITHUB_EVENT_NAME" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --output staged/Omazone-macos-arm64/BUILD-INFO-macos-arm64.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Omazone-macos-arm64
+          retention-days: 3
+          path: staged/Omazone-macos-arm64
+
+  arch:
+    name: Arch x86-64 package
+    if: (inputs.platform || github.event.inputs.platform) == 'arch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv for the container
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: false
+      - name: Build and test package in a clean Arch container
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v uv)" "$HOME/.local/bin/uv"
+          docker run --rm -e HOST_UID="$(id -u)" \
+            -v "$PWD:/work" -v "$HOME/.local/bin/uv:/usr/local/bin/uv:ro" -w /work \
+            archlinux:latest bash tools/build_arch_package.sh
+      - name: Read project version
+        id: version
+        shell: bash
+        run: echo "version=$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      - name: Reinstall the built package and run the installed launcher
+        run: docker run --rm -v "$PWD:/work:ro" -w /work archlinux:latest bash tools/verify_arch_package.sh
+      - name: Collect package
+        shell: bash
+        run: |
+          mkdir -p staged/Omazone-arch-x86_64
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            name="Omazone-${{ steps.version.outputs.version }}-arch-x86_64.pkg.tar.zst"
+          else
+            name="Omazone-arch-x86_64.pkg.tar.zst"
+          fi
+          mv packaging/arch/omazone-bin-*.pkg.tar.zst "staged/Omazone-arch-x86_64/$name"
+      - name: Record platform build identity
+        run: |
+          uv run python tools/write_build_info.py \
+            --platform arch-x86_64 --version '${{ steps.version.outputs.version }}' \
+            --commit "$GITHUB_SHA" --ref "$GITHUB_REF" --event "$GITHUB_EVENT_NAME" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --output staged/Omazone-arch-x86_64/BUILD-INFO-arch-x86_64.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Omazone-arch-x86_64
+          retention-days: 3
+          path: staged/Omazone-arch-x86_64

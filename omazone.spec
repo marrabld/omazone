@@ -4,6 +4,13 @@
 # Onedir (not onefile): faster startup and fewer antivirus false positives.
 # The GitHub Actions workflow zips dist/Omazone for release upload.
 
+import sys
+import tomllib
+
+
+with open("pyproject.toml", "rb") as metadata:
+    app_version = tomllib.load(metadata)["project"]["version"]
+
 a = Analysis(
     ["src/omazone/__main__.py"],
     pathex=["src"],
@@ -41,3 +48,12 @@ coll = COLLECT(
     upx=False,
     name="Omazone",
 )
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="Omazone.app",
+        bundle_identifier="au.com.omazone.app",
+        version=app_version,
+        info_plist={"LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True},
+    )

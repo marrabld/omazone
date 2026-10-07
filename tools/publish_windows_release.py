@@ -1,4 +1,4 @@
-"""Publish verified Windows assets with gh. PR/feature builds never publish.
+"""Publish verified Windows, Mac and Arch assets with gh in one release update.
 
 The rolling development tag advances only by a non-forced fast-forward. A stale
 main build is skipped instead of replacing a more recent build. Version tags are
@@ -45,7 +45,21 @@ def publish(repo, event, ref, sha, version, assets, run_url):
     if tag is None:
         return "Build complete; PR and feature-branch builds are artifacts only."
     assets = [Path(path) for path in assets]
-    if not assets or any(not path.is_file() for path in assets):
+    prefix = f"Omazone-{version}-" if tag != "development" else "Omazone-"
+    required = {
+        "SHA256SUMS.txt",
+        "BUILD-INFO.json",
+        "BUILD-INFO-macos-arm64.json",
+        "BUILD-INFO-arch-x86_64.json",
+        prefix + "windows-x64.zip",
+        prefix + "macos-arm64.zip",
+        prefix + "arch-x86_64.pkg.tar.zst",
+    }
+    if (
+        not assets
+        or {file.name for file in assets} != required
+        or any(not path.is_file() for path in assets)
+    ):
         raise ValueError("Verified release assets are missing.")
     development = tag == "development"
     if development:
@@ -81,18 +95,19 @@ def publish(repo, event, ref, sha, version, assets, run_url):
         "This development build is updated automatically after successful main builds.\n"
         "It contains the latest changes and may be less tested than numbered releases.\n\n"
         if development
-        else "Standalone Windows build from this version tag.\n\n"
+        else "Standalone desktop builds from this version tag.\n\n"
     )
     notes += (
-        "Download the Windows zip below, extract the entire folder, and run Omazone.exe.\n"
-        "Keep the _internal folder beside the executable. Python installation is not needed.\n\n"
+        "Windows: extract the zip and run Omazone.exe with _internal beside it.\n"
+        "Apple Silicon Mac: extract the zip and move Omazone.app to Applications.\n"
+        "Arch/Omarchy x86-64: install the package with sudo pacman -U.\n\n"
         f"App version: {version}\n\n"
         f"Built source: [{sha[:12]}](https://github.com/{repo}/tree/{sha})\n\n"
         f"Build and executable smoke test: {run_url}\n\n"
-        "SHA256SUMS.txt contains the download checksum. BUILD-INFO.json identifies the build.\n"
-        "The executable is unsigned; Windows may display a SmartScreen warning.\n"
+        "SHA256SUMS.txt contains all three package checksums. Each BUILD-INFO file identifies its platform build.\n"
+        "The Windows executable is unsigned, and the Mac app is not Apple-notarized.\n"
     )
-    title = "Latest development build for Windows" if development else tag
+    title = "Latest development builds" if development else tag
     with tempfile.TemporaryDirectory() as directory:
         notes_file = Path(directory) / "release-notes.md"
         notes_file.write_text(notes, encoding="utf-8")
