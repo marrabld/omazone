@@ -43,45 +43,64 @@ compression and dynamic EQ can follow the tested broadband detector. See the [ap
 
 ## Quick start
 
-### Windows without installing Python
+Downloads for all three platforms are published together in the
+[development release](https://github.com/marrabld/omazone/releases/tag/development)
+after every merge into `main`. Choose the file for your system:
 
-Use the **Download Windows app** link above for `Omazone-windows-x64.zip`, the
-latest successful development build. Extract the entire zip, open the `Omazone`
-folder, and run `Omazone.exe`. Keep `_internal` beside the executable. You do not
-need Python or an installer.
+| Platform | Download | Install |
+| --- | --- | --- |
+| Windows x64 | `Omazone-windows-x64.zip` | Extract, keep `_internal` beside `Omazone.exe` |
+| Apple Silicon Mac | `Omazone-macos-arm64.zip` | Extract, then move `Omazone.app` to Applications |
+| Arch / Omarchy x86-64 | `Omazone-arch-x86_64.pkg.tar.zst` | `sudo pacman -U Omazone-arch-x86_64.pkg.tar.zst` |
 
-Every push or PR merge into `main` builds and tests the Windows app, then updates
-the public [development release](https://github.com/marrabld/omazone/releases/tag/development).
-The first successful publishing run creates that release; until then, use a
-[numbered release](https://github.com/marrabld/omazone/releases) or an Actions artifact.
-No tag creation or manual Actions button is needed for routine downloads. Manual
-builds from `main` publish too; PR and feature-branch builds are artifacts only.
+None of these need Python installed. The Mac build targets macOS 14 or newer on
+Apple Silicon; Intel Macs are not supported yet. The Arch package installs the
+bundled application to `/opt/omazone` and adds an `omazone` command plus a
+desktop-menu entry.
 
+Every push or PR merge into `main` builds all three platforms, and publishes only
+when each build and its bundled self-test succeed. A broken platform leaves the
+last public downloads in place rather than replacing them with a partial update.
 The development release is marked **pre-release** because it follows ongoing
-changes. Numbered releases such as `v0.1.0` remain fixed snapshots. Each download
-includes `SHA256SUMS.txt` and `BUILD-INFO.json` with the exact source commit and
-build run. The rolling development tag advances, so use that recorded commit to
-reproduce a particular download.
+changes. Numbered releases such as `v0.2.0` remain fixed snapshots.
 
-To publish a numbered Windows build, update the project version in a PR with
+Each download includes a shared `SHA256SUMS.txt` listing all three platform
+archives, plus a per-platform `BUILD-INFO` file recording the exact source commit.
+Verify the file you downloaded by comparing only its own hash against that list:
+
+```powershell
+# Windows
+Get-FileHash .\Omazone-windows-x64.zip -Algorithm SHA256
+```
+
+```bash
+# macOS and Arch: check just the archive you downloaded
+grep 'macos-arm64.zip' SHA256SUMS.txt | shasum -a 256 -c -
+grep 'arch-x86_64' SHA256SUMS.txt | sha256sum -c -
+```
+
+Each command prints the expected hash beside your download; the two agree only
+if the file is intact.
+
+To publish a numbered release, update the project version in a PR with
 `uv version 0.2.0 --no-sync` (replace the number with your intended version).
 This updates `pyproject.toml` and `uv.lock`. Merge that PR, then push a matching
 tag from the new `main` commit, such as `v0.2.0`. The tag build creates the
-numbered release and attaches its Windows zip, checksum and build information.
-Creating a release in GitHub before bumping the project version leaves it empty:
-the build refuses a mismatched tag. If an empty release with a matching tag
-already exists, the workflow can fill it. It never replaces assets on an
-existing numbered release.
+numbered release and attaches every platform archive, the checksum file and the
+build information. Creating a release in GitHub before bumping the project
+version leaves it empty: the build refuses a mismatched tag. If an empty release
+with a matching tag already exists, the workflow can fill it. It never replaces
+assets on an existing numbered release.
 
-The executable is unsigned, so Windows SmartScreen shows a warning
-("Windows protected your PC"). Choose "More info" then "Run anyway", and prefer
-verifying the SHA-256 checksum over ignoring it. In PowerShell, run
-`Get-FileHash .\Omazone-windows-x64.zip -Algorithm SHA256` and compare its hash with
-the published `SHA256SUMS.txt`.
+The Windows executable is unsigned, and the Mac app is not Apple-signed or
+notarized. On macOS, an unnotarized app is opened by Control-clicking it,
+choosing **Open**, then confirming **Open** the first time. Windows SmartScreen
+shows a similar warning on first run. See [platform builds](docs/packaging.md)
+for details and for what a first Mac release can and cannot guarantee.
 
-If the build or executable test fails, the publication step does not run and
-the last published download remains available. See the
-[Windows build and publish workflow](https://github.com/marrabld/omazone/actions/workflows/release-windows.yml)
+If any platform build or its bundled self-test fails, nothing is published and the
+last public downloads remain available. See the
+[desktop release workflow](https://github.com/marrabld/omazone/actions/workflows/release-desktop.yml)
 for progress. Development files live in Releases rather than requiring people
 to find expiring Actions artifacts.
 
@@ -107,12 +126,13 @@ uv run omazone
 To try the matching engine without recordings or a GUI, follow the
 [generated-signal example](examples/README.md).
 
-The desktop app is developed on Linux. Windows users should prefer the packaged
-build above; the packaged build is smoke-tested on the CI runner only, so
-playback quality still needs real-hardware validation (#14). Qt supplies
-cross-platform GUI support, but macOS still needs validation. Playback uses the
-default audio output device through PortAudio. If a platform reports a missing
-PortAudio library, install it using that system's package manager.
+The desktop app is developed on Linux, and every packaged build is verified by
+running the bundled application on the CI runner before publication. Real audio
+hardware is still validated by people, so playback quality on your own machine is
+worth confirming (#14). Playback uses the default output device through
+PortAudio, which each platform bundle includes. See
+[platform builds](docs/packaging.md) for what is and is not yet proven per
+platform.
 
 ## Save and reopen your work
 

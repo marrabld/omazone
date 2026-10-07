@@ -1,0 +1,25 @@
+# Maintainer: Omazone contributors
+pkgname=omazone-bin
+pkgver=$(python -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$startdir/../../pyproject.toml")
+pkgrel=1
+pkgdesc='Offline audio mastering workbench (bundled application)'
+arch=('x86_64')
+url='https://github.com/marrabld/omazone'
+license=('GPL-3.0-only')
+depends=('glibc' 'libgcc' 'libstdc++' 'portaudio' 'libsndfile' 'libxkbcommon' 'libglvnd' 'fontconfig' 'libxcb')
+provides=('omazone')
+conflicts=('omazone')
+source=()
+sha256sums=()
+# Bundled wheels ship without debugging symbols, so split the empty debug
+# package makepkg would otherwise generate. Strip only our launcher script.
+options=('strip' '!docs' '!debug')
+
+package() {
+    install -d "$pkgdir/opt/omazone"
+    cp -a "$startdir/../../dist/Omazone/." "$pkgdir/opt/omazone/"
+    install -Dm755 "$startdir/omazone" "$pkgdir/usr/bin/omazone"
+    install -Dm644 "$startdir/omazone.desktop" "$pkgdir/usr/share/applications/omazone.desktop"
+    install -Dm644 "$startdir/omazone.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omazone.svg"
+    install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

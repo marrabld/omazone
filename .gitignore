@@ -13,3 +13,9 @@ outputs/
 build/
 dist/
 SHA256SUMS.txt
+packaging/arch/pkg/
+packaging/arch/src/
+packaging/arch/*.pkg.tar.*
+packaging/arch/*.BUILDINFO
+packaging/arch/*.PKGINFO
+packaging/arch/*.MTREE

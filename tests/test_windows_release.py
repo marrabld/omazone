@@ -33,11 +33,16 @@ def test_publication_policy(event, ref, expected):
     assert publisher.publication_target(event, ref) == expected
 
 
-def assets(tmp_path):
+def assets(tmp_path, *, version="0.1.0", numbered=False):
+    prefix = f"Omazone-{version}-" if numbered else "Omazone-"
     files = [
-        tmp_path / "Omazone-windows-x64.zip",
+        tmp_path / (prefix + "windows-x64.zip"),
+        tmp_path / (prefix + "macos-arm64.zip"),
+        tmp_path / (prefix + "arch-x86_64.pkg.tar.zst"),
         tmp_path / "SHA256SUMS.txt",
         tmp_path / "BUILD-INFO.json",
+        tmp_path / "BUILD-INFO-macos-arm64.json",
+        tmp_path / "BUILD-INFO-arch-x86_64.json",
     ]
     for path in files:
         path.write_bytes(b"verified-build")
@@ -77,7 +82,7 @@ def publish(tmp_path, *, event="push", ref="refs/heads/main", version="0.1.0"):
         ref,
         SHA,
         version,
-        assets(tmp_path),
+        assets(tmp_path, version=version, numbered=ref.startswith("refs/tags/v")),
         "https://github.com/example/omazone/actions/runs/123",
     )
 
@@ -152,6 +157,14 @@ def test_tag_version_mismatch_and_missing_assets_fail_before_mutation(tmp_path, 
         publisher.publish(
             REPO, "push", "refs/heads/main", SHA, "0.1.0", [tmp_path / "missing.zip"], "url"
         )
+    assert not calls
+
+
+def test_partial_platform_assets_are_never_published(tmp_path, monkeypatch):
+    calls, _ = fake_github(monkeypatch)
+    partial = assets(tmp_path)[:-1]
+    with pytest.raises(ValueError, match="release assets"):
+        publisher.publish(REPO, "push", "refs/heads/main", SHA, "0.1.0", partial, "url")
     assert not calls
 
 

@@ -1,0 +1,82 @@
+name: PR desktop build and publish-layout check
+
+# Temporary: proves the Apple Silicon and Arch builds work on pull requests, and
+# rehearses the release publish layout that PR checks otherwise skip. Without the
+# assemble step below, a wrong artifact layout only breaks the next main build.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/build-desktop.yml
+      - .github/workflows/pr-desktop-check.yml
+      - .github/workflows/release-desktop.yml
+      - .github/workflows/release-windows.yml
+      - omazone.spec
+      - packaging/arch/**
+      - pyproject.toml
+      - uv.lock
+      - src/omazone/**
+      - tools/assemble_release_assets.py
+      - tools/publish_windows_release.py
+      - tools/write_build_info.py
+      - tests/test_release_assets.py
+      - tests/test_windows_release.py
+
+concurrency:
+  group: pr-desktop-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64
+    uses: ./.github/workflows/release-windows.yml
+
+  macos:
+    name: Apple Silicon app
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      platform: macos
+
+  arch:
+    name: Arch x86-64 package
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      platform: arch
+
+  assemble:
+    name: Release asset layout
+    needs: [windows, macos, arch]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Read project version
+        id: version
+        shell: bash
+        run: echo "version=$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      # No merge-multiple: each artifact must land in its own directory, which is
+      # the layout the release workflow depends on.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Omazone-*
+          path: artifacts
+      - name: Rehearse release assembly
+        run: |
+          uv run python tools/assemble_release_assets.py \
+            --input artifacts --output release-assets \
+            --version '${{ steps.version.outputs.version }}' --sha "$GITHUB_SHA"
+      - name: Show assembled assets
+        run: ls -1 release-assets && cat release-assets/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Omazone-release-assets
+          retention-days: 3
+          path: release-assets
