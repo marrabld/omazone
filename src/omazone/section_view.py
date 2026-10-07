@@ -502,7 +502,8 @@ class SectionWorkbench(QtWidgets.QWidget):
                 analyse(chain.output, source[1]),
                 audition_pair(chain.repaired, chain.matched),
                 chain,
-                audition_pair(chain.matched, chain.output),
+                audition_pair(chain.matched, chain.equalized),
+                audition_pair(chain.equalized, chain.output),
             )
 
         self.owner.start_job(

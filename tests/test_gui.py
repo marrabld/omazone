@@ -1056,6 +1056,22 @@ def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path,
         assert window.project.stages["eq"].parameters == eq_parameters
         assert window.eq_preview is not None
         assert window.project.regions[-1].id == "guitar"
+        eq_output = window.chain_result.equalized.copy()
+        match_computations = window.renderer.computations["match"]
+        retained_calibration = window.project.calibration.whole.coefficients.copy()
+        comp = window.compressor_view
+        window.views.setCurrentWidget(comp)
+        comp.threshold.setValue(-27)
+        comp.enabled.setChecked(True)
+        assert window.output is None and window.eq_preview is not None
+        comp.render_button.click()
+        wait()
+        np.testing.assert_array_equal(window.chain_result.equalized, eq_output)
+        assert window.dynamics_preview is not None
+        assert window.renderer.computations["match"] == match_computations
+        np.testing.assert_array_equal(
+            window.project.calibration.whole.coefficients, retained_calibration
+        )
     finally:
         if window.worker is not None:
             window.worker.wait()
@@ -1144,4 +1160,112 @@ def test_multiband_canvas_edits_and_shared_viewer_without_relearning(tmp_path):
     finally:
         if window.workspace.job:
             window.workspace.close_jobs()
+        window.close()
+
+
+def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
+    import sounddevice as sd
+
+    from omazone.compressor import render_compressor
+    from omazone.manual_eq import render_eq
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    t = np.arange(rate) / rate
+    envelope = np.where(t < 0.4, 0.08, 0.8)
+    left = envelope * np.sin(2 * np.pi * 440 * t)
+    audio = np.column_stack((left, -0.6 * left))
+    source = tmp_path / "recording.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        eq = window.manual_eq_view
+        eq.add_band(2100, -2)
+        comp = window.compressor_view
+        window.views.setCurrentWidget(comp)
+        assert window.workspace.plot_stack.currentWidget() is comp.canvas
+        comp.threshold.setValue(-28)
+        comp.ratio.setValue(3)
+        comp.enabled.setChecked(True)
+        assert not window.project.stages["dynamics"].bypassed
+        comp.render_button.click()
+        wait()
+        before = render_eq(audio, rate, eq.settings())
+        direct = render_compressor(before, rate, comp.settings())
+        np.testing.assert_allclose(window.output[0], direct.audio, atol=1e-12)
+        np.testing.assert_array_equal(window.chain_result.equalized, before)
+        assert window.chain_result.compression is not None
+        assert len(comp.canvas.reduction_curve.yData) == len(direct.reduction_db)
+        window.position = rate // 2
+        window.update_transport()
+        assert comp.canvas.cursors[0].value() == pytest.approx(0.5)
+        assert window.renderer.computations == {"repair": 1, "match": 1, "eq": 1, "dynamics": 1}
+        window.waveform.set_selection(SampleRegion(7000, 12000))
+        comp.listen_button.click()
+        assert window.audition_mode == "dynamics"
+        block = np.empty((128, 2), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.dynamics_preview[0][7000:7128])
+        window.toggle_ab()
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.dynamics_preview[1][7128:7256])
+        assert window.ab_button.text() == "Listening: after compression"
+        window.stop()
+        before_eq = window.eq_preview[1].copy()
+        comp.attack.setValue(30)
+        assert window.output is None and window.eq_preview is not None
+        comp.render_button.click()
+        wait()
+        assert window.renderer.computations == {"repair": 1, "match": 1, "eq": 1, "dynamics": 2}
+        np.testing.assert_allclose(window.eq_preview[1], before_eq, atol=1e-12)
+        expected = window.output[0].copy()
+        project_file = tmp_path / "compressor.omazone.json"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(project_file), "")
+        )
+        window.save_current_project()
+        wait()
+        window.new_project()
+        window.open_project_path(project_file)
+        wait()
+        assert window.compressor_view.attack.value() == 30
+        assert window.compressor_view.enabled.isChecked()
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_array_equal(window.output[0], expected)
+        window.compressor_view.enabled.setChecked(False)
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_array_equal(window.output[0], before)
+        assert window.project.stages["dynamics"].parameters["kind"] == "compressor-v1"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
         window.close()

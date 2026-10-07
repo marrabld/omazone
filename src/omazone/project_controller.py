@@ -52,7 +52,7 @@ class ProjectController:
             ("repair", "Skip repair"),
             ("match", "Skip matching"),
             ("eq", "Skip manual EQ"),
-            ("dynamics", "Skip dynamics (reserved)"),
+            ("dynamics", "Skip compressor"),
             ("output", "Skip output processing (reserved)"),
         ):
             item = QtGui.QAction(title, self)
@@ -146,7 +146,10 @@ class ProjectController:
                 item.setChecked(self.project.stages[key].bypassed)
             item.setEnabled(
                 not busy
-                and (key in ("repair", "match", "eq") or not self.project.stages[key].bypassed)
+                and (
+                    key in ("repair", "match", "eq", "dynamics")
+                    or not self.project.stages[key].bypassed
+                )
             )
 
     def refresh_named_regions(self):
@@ -231,6 +234,7 @@ class ProjectController:
             self.restoring_project = False
         self.refresh_named_regions()
         self.manual_eq_view.restore()
+        self.compressor_view.restore()
         self.update_project_title()
         self.refresh_file_labels()
         self.plot_spectra()
@@ -378,6 +382,7 @@ class ProjectController:
         self.refresh_named_regions()
         self.update_project_title()
         self.manual_eq_view.restore()
+        self.compressor_view.restore()
         self.plot_spectra()
         self.refresh_file_labels()
         self.update_transport()
@@ -418,6 +423,9 @@ class ProjectController:
         if stage == "eq":
             self.invalidate_eq()
             self.manual_eq_view.restore()
+        elif stage == "dynamics":
+            self.invalidate_dynamics()
+            self.compressor_view.restore()
         else:
             self.invalidate()
         self.plot_spectra()
@@ -461,7 +469,8 @@ class ProjectController:
                 spec,
                 audition_pair(result.repaired, result.matched),
                 result,
-                audition_pair(result.matched, result.output),
+                audition_pair(result.matched, result.equalized),
+                audition_pair(result.equalized, result.output),
             )
 
         def completed(payload):
@@ -492,9 +501,7 @@ class ProjectController:
                 "Saved repair could not be replayed. Its choices are retained; reassess it, reset it, or bypass repair."
             )
             return False
-        unsupported = [
-            key for key in ("dynamics", "output") if not self.project.stages[key].bypassed
-        ]
+        unsupported = [key for key in ("output",) if not self.project.stages[key].bypassed]
         if unsupported:
             self.error(
                 "Enabled stages are not implemented yet: "

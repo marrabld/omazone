@@ -34,10 +34,11 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Versioned saved project recipes, verified source relinking, and retained learned curves.
 - Persistent song overview and shared waveform/spectrum viewer across tool pages.
 - Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
-- Cached repair/matching/EQ prefixes rendered from the original and saved recipe.
+- Stereo-linked broadband compression with peak/RMS detection, timed gain reduction and step A/B.
+- Cached repair/matching/EQ/compression prefixes rendered from the original and saved recipe.
 
-Next priorities are broadband compression, output metering/limiting, and guided
-navigation. Dynamic EQ follows the simpler EQ/detector foundation. See the [approved workflow](docs/workflow.md) and
+Next priorities are output metering/limiting and guided navigation. Three-band
+compression and dynamic EQ can follow the tested broadband detector. See the [approved workflow](docs/workflow.md) and
 [roadmap](roadmap.md) for the implementation priorities and contribution tasks.
 
 ## Quick start
@@ -127,11 +128,11 @@ can still be used when its reference recording is unavailable. Moving an earlier
 processing choice marks later calibration as needing analysis, but stored curves
 remain available when their configuration still matches. Updating matching
 settings or assignments requires explicit analysis for newly requested matching
-curves. Manual EQ edits only need rendering; they do not relearn matching.
+curves. Manual EQ and compressor edits only need rendering; they do not relearn matching.
 
-The implemented chain is repair -> learned matching -> manual EQ. Reserved
-dynamics and output settings are preserved in the schema; enabled unsupported
-stages cannot be silently rendered as though implemented. Save explicitly before
+The implemented chain is repair -> learned matching -> manual EQ -> compressor.
+Reserved output settings are preserved in the schema; an enabled unsupported
+output stage cannot be silently rendered as though implemented. Save explicitly before
 closing; loading a new recording/New project starts a new session. Audio originals
 are not overwritten by saving projects. Session JSON files are ignored by Git.
 
@@ -190,8 +191,8 @@ signal preference, panel sizes, and the existing selection/zoom/loop context.
 ![Clipping controls with the selected waveform still visible](docs/images/omazone-shared-clipping.png)
 
 This implements the shared visual context, not the full numbered wizard or all
-stage processing. The current steps are repair, matching, and manual EQ; later
-dynamics and output stages will use the same workspace.
+stage processing. The current steps are repair, matching, manual EQ, and compression;
+later output stages will use the same workspace.
 
 ### First matching experiment
 
@@ -472,6 +473,37 @@ causal and changes phase around the band, with shared stereo coefficients and no
 lookahead. It is not compression or limiting; boosts can exceed full scale.
 Preview gain matching/headroom is not exported. See [the chain and EQ design](docs/manual-eq.md).
 
+## Control whole-mix dynamics
+
+Compression sits after manual EQ and applies to the whole recording. It can work
+without a reference or EQ. It does not split the song into frequency bands.
+
+1. Open **Compression**, set **Threshold** around the louder passages and start
+   with a modest **Ratio**, such as 2:1. The graph shows the input-to-output level
+   curve; the dashed diagonal is unchanged level.
+2. Check **Apply compressor** and click **Apply compression and render**. The
+   detector and actual gain-reduction histories appear below the curve. A lower
+   threshold or higher ratio usually means more reduction.
+3. **Timing, knee and detector** holds attack, release, soft knee and peak/RMS
+   detector selection. Attack controls how quickly the linked envelope rises;
+   release controls how it falls. Both stereo channels receive the same gain.
+4. Click **Loop and compare compression** for the same-position A/B. Both sides
+   include the previous repair, matching and manual EQ steps. The inspector shows
+   maximum gain reduction and output sample peak.
+5. Add **Manual makeup gain** only if wanted. It is exported; preview-only
+   level matching is not. Check peaks before **Export WAV**.
+
+![Stereo-linked compressor with level curve, detector and gain-reduction traces](docs/images/omazone-compression.png)
+
+**View → Both** keeps the waveform next to the compression graphs:
+
+![Waveform alongside the compressor graphs](docs/images/omazone-compression-waveform.png)
+
+You can bypass compression without losing its saved settings. Changing compression
+only invalidates its final preview/export; the EQ and learned matching are kept.
+This causal compressor has no lookahead or limiter and may exceed 0 dBFS after
+manual makeup. See [the compressor design](docs/compressor.md).
+
 ## Current limitations
 
 The interface shows RMS and sample peaks, not LUFS or true peaks. Preview is
@@ -479,10 +511,10 @@ RMS-matched, with common attenuation to provide headroom. That is an approximate
 level comparison, not perceptual loudness matching. Abrupt A/B switches can click;
 crossfaded switching is a follow-up improvement.
 
-Mastering exports are 32-bit floating-point WAVs containing the raw EQ result, without
+Mastering exports are 32-bit floating-point WAVs containing the full chain, without
 preview attenuation. Samples can exceed 0 dBFS; there is no limiter yet. Delay is
-compensated and the output retains the input length. The complete convolution
-tail is available through the processor API, but file rendering trims it.
+compensated and the output retains the input length. The complete matching-FIR
+convolution tail is available through its processor API, but file rendering trims it.
 
 Audio files and outputs are ignored by version control. Dependencies are pinned
 in `uv.lock`. Qt uses the `PySide6-Essentials` package: the app only needs
@@ -530,6 +562,8 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/manual_eq.py`: causal bell processor, region fades, and frequency response.
 - `src/omazone/manual_eq_view.py`: band controls and before/after-this-step audition.
 - `src/omazone/eq_canvas.py`: interactive band graph and overlaid spectrum.
+- `src/omazone/compressor.py`: linked detector, static curve, block processing and diagnostics.
+- `src/omazone/compressor_view.py`: compressor controls, level curve and gain history.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.

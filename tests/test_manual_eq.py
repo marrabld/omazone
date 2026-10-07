@@ -133,7 +133,7 @@ def test_chain_matches_direct_processing_caches_prefixes_and_retains_calibration
     project.stages["eq"].parameters = {"kind": "bell-v1", "band": asdict(BellSettings(gain_db=-4))}
     second = renderer.render(project)
     assert second.matched is first.matched
-    assert renderer.computations == {"repair": 1, "match": 1, "eq": 2}
+    assert renderer.computations == {"repair": 1, "match": 1, "eq": 2, "dynamics": 2}
     np.testing.assert_allclose(
         second.output, render_eq(first.matched, 16000, BellSettings(gain_db=-4)), atol=1e-12
     )
@@ -198,17 +198,18 @@ def test_sections_then_eq_roundtrip_preserves_recipe_and_output(tmp_path):
     assert loaded.stages["eq"].parameters == project.stages["eq"].parameters
 
 
-def test_missing_calibration_and_reserved_stages_do_not_silently_process():
+def test_missing_calibration_and_reserved_output_do_not_silently_process():
     audio = np.zeros((16000, 1))
     project = Project(match_mode="whole")
     with pytest.raises(ValueError, match="explicit analysis"):
         ChainRenderer(audio, 16000).render(project)
     project.match_mode = "none"
-    for stage in ("dynamics", "output"):
-        altered = copy.deepcopy(project)
-        altered.stages[stage].bypassed = False
-        with pytest.raises(ValueError, match="not implemented"):
-            ChainRenderer(audio, 16000).render(altered)
+    altered = copy.deepcopy(project)
+    altered.stages["output"].bypassed = False
+    with pytest.raises(ValueError, match="not implemented"):
+        ChainRenderer(audio, 16000).render(altered)
+    project.stages["dynamics"].bypassed = False
+    assert ChainRenderer(audio, 16000).render(project).compression is not None
 
 
 @pytest.mark.parametrize("taps", [129, 4097])
