@@ -1,7 +1,7 @@
 # Broadband compression
 
 The processing order is repair -> learned matching -> manual EQ -> stereo-linked
-compressor -> export. The compressor can run without matching or EQ. Its settings
+compressor -> output gain -> export. The compressor can run without matching or EQ. Its settings
 live in the saved project; it never relearns reference filters during rendering.
 
 ## Detector and static curve
@@ -63,7 +63,7 @@ like this:
 ```
 
 The cache key includes the equalized input, bypass state and these parameters.
-Editing compression rerenders only the last stage. Earlier matching calibration
+Editing compression rerenders compression and the later output stage. Earlier matching calibration
 and manual EQ remain available. Old project files with bypassed reserved dynamics
 settings retain those settings. An enabled unknown processor fails explicitly.
 

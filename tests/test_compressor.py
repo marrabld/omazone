@@ -137,7 +137,7 @@ def test_downstream_cache_recipe_roundtrip_and_unsupported_dynamics(tmp_path):
     project.stages["dynamics"].parameters = compressor_parameters(new_settings)
     second = renderer.render(project)
     assert second.equalized is first.equalized
-    assert renderer.computations == {"repair": 1, "match": 1, "eq": 1, "dynamics": 2}
+    assert renderer.computations == {"repair": 1, "match": 1, "eq": 1, "dynamics": 2, "output": 2}
     assert np.any(first.output != second.output)
     saved = tmp_path / "mix.omazone.json"
     save_project(saved, project)

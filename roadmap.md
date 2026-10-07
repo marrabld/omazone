@@ -63,8 +63,13 @@ optional View action and a persistent seek/time display. See
    with preview-only level matching. Preserve whole-chain comparison as an option.
 5. **Manual section EQ, #26.** First new effect: bell bands with fixed frequency/Q
    and region-limited, smoothly automated gain after matching. Preserve all earlier work.
-6. **Dynamics and output.** Broadband compression is implemented; LUFS/true-peak
-   metering, output gain and a limiter follow. Dynamic EQ can use the detector foundation.
+6. **Output safety, #11 → #9/#44 → #45.** Add explicit output gain and source/final
+   sample-peak warnings first. Measure integrated loudness and oversampled true
+   peaks next. Add a modest final limiter only after those measurements are clear.
+   Preview loudness matching must never change export gain.
+7. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
+   three-band compressor from the tested broadband detector. Verify crossover
+   recombination before expanding multiband processing.
 
 Initial processing order is fixed. Advanced reordering, multiband dynamics, and
 real-time/plugin integration follow once this workflow is stable and understandable.
@@ -101,6 +106,9 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#25](https://github.com/marrabld/omazone/issues/25) | Guided workflow navigation and skipped-stage handling | #23, #24, #1 |
 | [#26](https://github.com/marrabld/omazone/issues/26) | Manual parametric EQ limited to named regions | #23, #1, #6; #24/#27 for integration |
 | [#27](https://github.com/marrabld/omazone/issues/27) | Aligned before/after-this-step comparison | #23, #1, #24 |
+| [#44](https://github.com/marrabld/omazone/issues/44) | Oversampled true-peak metering | #11; alongside #9 |
+| [#45](https://github.com/marrabld/omazone/issues/45) | Final lookahead limiter and ceiling | #11, #9, #44 |
+| [#46](https://github.com/marrabld/omazone/issues/46) | Three-band stereo-linked compressor | #7, #11, #44, #45 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -123,9 +131,10 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
 - [x] Versioned saved project, stable regions/assignments, repair replay, retained calibration, and source relinking.
-- [x] Fixed repair/matching/manual-EQ/compressor chain with prefix caches and retained calibration.
+- [x] Fixed repair/matching/manual-EQ/compressor/output-gain chain with prefix caches and retained calibration.
 - [x] Up to 12 region-limited bells, saved settings, smooth fades, and EQ-only A/B.
 - [x] Stereo-linked broadband compressor, measured gain history, and compressor-only A/B.
+- [x] Explicit output gain, three sample-peak readings, and output-only A/B.
 - [x] Shared song viewer/overview, independent reference pane, and selection-scoped background spectrum analysis.
 
 ## 1. Inspection and selected-region repair
@@ -169,7 +178,8 @@ Keep one application, with independently usable and testable processing modules.
   processing, latency, and tail handling. Extend the existing FIR contract.
 - [x] Add controls/bypass and stage A/B for repair, matching, and manual EQ.
 - [x] Extend stage comparisons and measured rendering to broadband compression.
-- [ ] Extend stage comparisons and measured rendering to output processors.
+- [x] Extend stage comparisons and sample-peak readings to output gain.
+- [ ] Extend measured rendering to true peaks, LUFS and limiting.
 - [ ] Show measurements before and after each stage.
 - [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
@@ -204,35 +214,50 @@ Verify the static gain curve, attack/release behaviour, stereo linking, and
 block-size independence. Listen to drums, sustained material, and mixes with
 large level changes. Plot detector behaviour so the controls have visible meaning.
 
-## 4. Dynamic EQ
+## 4. Output safety, metering, and audition quality
 
-Begin with a single downward-acting bell band for intermittent excess energy.
+Work in small stages so a louder export cannot be mistaken for a safer one:
 
-- [ ] Frequency, bandwidth, detector threshold, and maximum attenuation.
-- [ ] Attack/release controls and live or rendered gain-envelope plots.
-- [ ] A filter design with stable, smooth gain changes.
-- [ ] Per-band bypass and stereo-linked detection.
-- [ ] Multiple bands and upward processing after validating the first band.
+1. **Output gain and sample peaks, #11.** Show original, pre-output, and final
+   sample peaks separately, with clear warnings above 0 dBFS. Add explicit
+   saved output gain after compression, output-stage bypass, and aligned A/B.
+   A gain change rerenders only the final prefix. Attenuation can make an
+   over-range float signal fit, but cannot restore previously flattened peaks.
+2. **Measure loudness and reconstructed peaks, #9/#44.** Add integrated LUFS
+   with tested silence/short-audio handling, LUFS-matched *preview-only* A/B,
+   and separately calibrated oversampled true-peak readings. Do not call sample
+   peaks true peaks or normalise exports implicitly.
+3. **Control final peaks, #45.** Add a modest lookahead limiter with an explicit
+   ceiling and reduction display. Document its latency and verify ceiling and
+   overshoot against the new true-peak meter.
 
-Check that quiet passages remain unaffected, gain stays within its bounds, and
-time-varying processing does not introduce clicks or instability. Compare with
-a fixed EQ cut on a passage containing both normal and excessive band energy.
-
-## 5. Metering, output control, and audition quality
-
-These improvements can be developed alongside the processing modules.
-
+- [x] Output gain and original/pre-output/final sample-peak overload indicators.
 - [ ] LUFS metering and perceptual loudness-matched A/B.
 - [ ] Oversampled true-peak estimation.
-- [ ] Output gain and clear overload indication.
 - [ ] A modest lookahead limiter with ceiling and gain-reduction display.
-- [ ] Crossfaded A/B changes and smoother seek transitions.
+- [ ] Crossfaded A/B changes and smoother seek transitions (#10).
 - [ ] Audio output-device selection.
 - [ ] Export options for bit depth, headroom, and deliberate dither when quantising.
 
-A limiter prevents new overload; declipping treats existing damage. Evaluate
-them separately. Check metering against known reference results and inspect
-limiter overshoot, transient distortion, and reported latency.
+A limiter prevents new overload; declipping treats existing damage. Check
+metering against known reference results, then inspect limiter overshoot,
+transient distortion, and reported latency.
+
+## 5. Advanced dynamics
+
+Start with one downward-acting dynamic-EQ bell (#8) for intermittent excess
+energy. A three-band compressor (#46) is a separate follow-up that must first
+prove its crossover paths recombine without unintended changes.
+
+- [ ] Dynamic EQ: frequency, bandwidth, threshold, maximum cut, and attack/release.
+- [ ] Dynamic EQ: stable time-varying gain, stereo-linked detection, bypass and
+  rendered gain-envelope plots. Add upward processing or more bands later.
+- [ ] Three-band compression: two draggable crossovers with verified phase,
+  latency and uncompressed reconstruction, plus per-band gain-reduction plots.
+
+Check quiet passages, bounded attenuation, release recovery, stereo preservation,
+block equivalence and rapid changes near frequency limits. Compare dynamic EQ
+with a fixed EQ cut; listen for clicks, pumping and crossover colouration.
 
 ## 6. Section matching and further experiments
 

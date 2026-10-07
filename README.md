@@ -35,10 +35,12 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Persistent song overview and shared waveform/spectrum viewer across tool pages.
 - Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
 - Stereo-linked broadband compression with peak/RMS detection, timed gain reduction and step A/B.
-- Cached repair/matching/EQ/compression prefixes rendered from the original and saved recipe.
+- Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
+- Cached repair/matching/EQ/compression/output prefixes rendered from the original and saved recipe.
 
-Next priorities are output metering/limiting and guided navigation. Three-band
-compression and dynamic EQ can follow the tested broadband detector. See the [approved workflow](docs/workflow.md) and
+Next priorities are integrated LUFS and oversampled true-peak metering, then a
+final limiter and guided navigation. Three-band compression and dynamic EQ can
+follow those output checks. See the [approved workflow](docs/workflow.md) and
 [roadmap](roadmap.md) for the implementation priorities and contribution tasks.
 
 ## Quick start
@@ -158,11 +160,11 @@ can still be used when its reference recording is unavailable. Moving an earlier
 processing choice marks later calibration as needing analysis, but stored curves
 remain available when their configuration still matches. Updating matching
 settings or assignments requires explicit analysis for newly requested matching
-curves. Manual EQ and compressor edits only need rendering; they do not relearn matching.
+curves. Manual EQ, compressor, and output-gain edits only need rendering; they do not relearn matching.
 
-The implemented chain is repair -> learned matching -> manual EQ -> compressor.
-Reserved output settings are preserved in the schema; an enabled unsupported
-output stage cannot be silently rendered as though implemented. Save explicitly before
+The implemented chain is repair -> learned matching -> manual EQ -> compressor
+-> output gain. Old reserved output metadata is retained; enabling an unknown
+output processor fails rather than silently acting like a limiter. Save explicitly before
 closing; loading a new recording/New project starts a new session. Audio originals
 are not overwritten by saving projects. Session JSON files are ignored by Git.
 
@@ -543,6 +545,31 @@ only invalidates its final preview/export; the EQ and learned matching are kept.
 This causal compressor has no lookahead or limiter and may exceed 0 dBFS after
 manual makeup. See [the compressor design](docs/compressor.md).
 
+## Check the final output
+
+The Output tab sits after compression. It shows three **sample peaks**: the
+original recording, the signal before output gain, and the final float-WAV export.
+They are distinct measurements. Red means that stage has samples above 0 dBFS.
+
+1. Open **Output**. If the original peak is already red, it came from the source.
+   If **Before gain** first turns red, earlier processing introduced the overload.
+2. Set **Output gain**, for example -6 dB, and click **Apply output gain and render**.
+   Changing a nonzero gain enables the stage. A new project skips it by default.
+3. Check the three measurements again and use **Loop and compare output gain**
+   for aligned before/after listening. A/B level matching only affects playback;
+   your chosen gain is what **Export WAV** writes.
+
+![Original, pre-output and final sample-peak readings](docs/images/omazone-output-peaks.png)
+
+**View → Both** places the waveform beside the peak display:
+
+![Waveform and output-stage sample peaks](docs/images/omazone-output-waveform.png)
+
+Attenuating floating-point samples above 0 dBFS can restore headroom. It cannot
+recover the missing shape of peaks flattened before import. Sample peaks do not
+detect peaks between samples, and the output gain does not limit them. See
+[output gain and peak handling](docs/output-gain.md).
+
 ## Current limitations
 
 The interface shows RMS and sample peaks, not LUFS or true peaks. Preview is
@@ -597,12 +624,14 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/project.py`: versioned recipes, source verification, calibration signatures, and repair replay.
 - `src/omazone/project_controller.py`: project menus, save/load/relink, stage bypass, and saved rendering.
 - `src/omazone/workspace.py`: persistent viewer/overview, reference companion, signal labels, and background spectra.
-- `src/omazone/pipeline.py`: fixed repair/matching/EQ chain and dependency-aware prefix caches.
+- `src/omazone/pipeline.py`: fixed repair/matching/EQ/compression/output chain and prefix caches.
 - `src/omazone/manual_eq.py`: causal bell processor, region fades, and frequency response.
 - `src/omazone/manual_eq_view.py`: band controls and before/after-this-step audition.
 - `src/omazone/eq_canvas.py`: interactive band graph and overlaid spectrum.
 - `src/omazone/compressor.py`: linked detector, static curve, block processing and diagnostics.
 - `src/omazone/compressor_view.py`: compressor controls, level curve and gain history.
+- `src/omazone/output_gain.py`: explicit final gain and raw sample peaks.
+- `src/omazone/output_view.py`: source/pre-output/final readings and output-gain A/B.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.

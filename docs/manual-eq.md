@@ -3,12 +3,13 @@
 Implemented order:
 
 ```text
-Retained original -> selected repairs -> learned matching -> manual bell EQ -> compression -> export
+Retained original -> selected repairs -> learned matching -> manual bell EQ -> compression -> output gain -> export
 ```
 
-Broadband compression follows manual EQ. The output-limiter stage remains
-reserved; enabling it fails explicitly. Numbered wizard navigation and
-continuous parameter automation remain follow-ups.
+Broadband compression and explicit output gain follow manual EQ. A limiter and
+true-peak meter are not yet implemented. Unknown output-stage recipes fail
+explicitly when enabled. Numbered wizard navigation and continuous parameter
+automation remain follow-ups.
 
 ## Bell bands
 
@@ -107,7 +108,7 @@ Manual EQ A/B compares **after repair/matching, before EQ** with **after EQ**, a
 the same cursor and loop. It uses preview-only RMS matching and common headroom.
 Changing any band disables stale output until rendering. Matching's comparison
 still isolates matching, excluding the later EQ. EQ-only A/B also excludes the
-downstream compressor. Export contains the complete
+downstream compressor and output gain. Export contains the complete
 rendered chain without preview gain.
 
 ## Verification

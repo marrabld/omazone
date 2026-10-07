@@ -1,9 +1,10 @@
 # Approved workflow and persistent song viewer
 
 This is the agreed product direction. The saved project model and persistent
-viewer are implemented for repair, matching, multi-band manual EQ and compression.
-The fixed render chain retains prefixes, and EQ/compression have step-specific A/B.
-Full numbered navigation and output processing remain planned work.
+viewer are implemented for repair, matching, multi-band manual EQ, compression
+and explicit output gain. The fixed render chain retains prefixes, and later
+stages have step-specific A/B. Full numbered navigation, LUFS/true peaks and
+limiting remain planned work.
 
 ## User journey
 
@@ -14,7 +15,7 @@ Full numbered navigation and output processing remain planned work.
 | Match, optional | Would a reference help the broad tonal balance? | Selected mix passage, reference context, spectrum and correction |
 | Manual EQ, optional | What still sounds wrong to me? | Selected passage spectrum/response and its position in the song |
 | Compression, optional | Are attacks or level changes too uneven? | Waveform, detector and gain-reduction history |
-| Output | Is the result at a useful level without introducing overload? | Song context plus loudness and peak measurements |
+| Output | Is the result at a useful level without introducing overload? | Song context plus original/pre-output/final sample peaks; LUFS/true peak follow |
 | Export | Which file should I deliver? | The same song/selection and an explicit rendered-chain summary |
 
 Marking regions is always available. It is annotation shared by processors, not
@@ -121,8 +122,8 @@ needs-render, and needs-analysis states. A skipped effect is a normal outcome.
    [guided navigation #25](https://github.com/marrabld/omazone/issues/25).
 3. [Stage comparison #27](https://github.com/marrabld/omazone/issues/27) and
    [manual section EQ #26](https://github.com/marrabld/omazone/issues/26).
-4. Integrate output checks as their processors become available; compressor graphs
-   and step comparisons now use the shared viewer.
+4. Add explicit output gain and sample-peak warnings, then LUFS and true-peak
+   metering, then a ceiling limiter. Keep export gain separate from preview matching.
 
 Prototype the shared viewer while the project contract is agreed. Keep the first
 chain order fixed: repair, match, manual corrective EQ, optional dynamics,

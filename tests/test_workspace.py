@@ -379,6 +379,9 @@ def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling()
                 if tool == 6:
                     assert window.compressor_view.canvas.isVisible()
                     assert window.compressor_view.render_button.isVisible()
+                if tool == 7:
+                    assert window.output_view.canvas.isVisible()
+                    assert window.output_view.render_button.isVisible()
                 if tool == 2:
                     assert window.workspace.reference_pane.isVisible()
                     for plot in workbench.reference_waveform.channel_plots:
