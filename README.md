@@ -64,43 +64,39 @@ last public downloads in place rather than replacing them with a partial update.
 The development release is marked **pre-release** because it follows ongoing
 changes. Numbered releases such as `v0.2.0` remain fixed snapshots.
 
-Each download includes a shared `SHA256SUMS.txt` and a per-platform `BUILD-INFO`
-file recording the exact source commit. Verify a download before running it:
+Each download includes a shared `SHA256SUMS.txt` listing all three platform
+archives, plus a per-platform `BUILD-INFO` file recording the exact source commit.
+Verify the file you downloaded by comparing only its own hash against that list:
 
 ```powershell
-Get-FileHash .\Omazone-windows-x64.zip -Algorithm SHA256   # Windows
-shasum -a 256 -c SHA256SUMS.txt                            # macOS
-sha256sum -c SHA256SUMS.txt                                # Arch
+# Windows
+Get-FileHash .\Omazone-windows-x64.zip -Algorithm SHA256
 ```
 
-To publish a numbered Windows build, update the project version in a PR with
+```bash
+# macOS and Arch: check just the archive you downloaded
+grep 'macos-arm64.zip' SHA256SUMS.txt | shasum -a 256 -c -
+grep 'arch-x86_64' SHA256SUMS.txt | sha256sum -c -
+```
+
+Each command prints the expected hash beside your download; the two agree only
+if the file is intact.
+
+To publish a numbered release, update the project version in a PR with
 `uv version 0.2.0 --no-sync` (replace the number with your intended version).
 This updates `pyproject.toml` and `uv.lock`. Merge that PR, then push a matching
 tag from the new `main` commit, such as `v0.2.0`. The tag build creates the
-numbered release and attaches its Windows zip, checksum and build information.
-Creating a release in GitHub before bumping the project version leaves it empty:
-the build refuses a mismatched tag. If an empty release with a matching tag
-already exists, the workflow can fill it. It never replaces assets on an
-existing numbered release.
+numbered release and attaches every platform archive, the checksum file and the
+build information. Creating a release in GitHub before bumping the project
+version leaves it empty: the build refuses a mismatched tag. If an empty release
+with a matching tag already exists, the workflow can fill it. It never replaces
+assets on an existing numbered release.
 
 The Windows executable is unsigned, and the Mac app is not Apple-signed or
-notarized. See [platform builds](docs/packaging.md) for details and for what a
-first Mac release can and cannot guarantee.
-
-To publish a numbered Windows build, update the project version in a PR with
-`uv version 0.2.0 --no-sync` (replace the number with your intended version).
-This updates `pyproject.toml` and `uv.lock`. Merge that PR, then push a matching
-tag from the new `main` commit, such as `v0.2.0`. The tag build creates the
-numbered release and attaches its Windows zip, checksum and build information.
-Creating a release in GitHub before bumping the project version leaves it empty:
-the build refuses a mismatched tag. If an empty release with a matching tag
-already exists, the workflow can fill it. It never replaces assets on an
-existing numbered release.
-
-The Windows executable is unsigned, so SmartScreen shows a warning
-("Windows protected your PC"). Choose "More info" then "Run anyway", and prefer
-verifying the checksum over ignoring it. On macOS, an unnotarized app is opened
-with Control-click, "Open", then "Open" again the first time.
+notarized. On macOS, an unnotarized app is opened by Control-clicking it,
+choosing **Open**, then confirming **Open** the first time. Windows SmartScreen
+shows a similar warning on first run. See [platform builds](docs/packaging.md)
+for details and for what a first Mac release can and cannot guarantee.
 
 If any platform build or its bundled self-test fails, nothing is published and the
 last public downloads remain available. See the
