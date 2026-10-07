@@ -1353,7 +1353,13 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         window.position = rate // 2
         window.update_transport()
         assert comp.canvas.cursors[0].value() == pytest.approx(0.5)
-        assert window.renderer.computations == {"repair": 1, "match": 1, "eq": 1, "dynamics": 1}
+        assert window.renderer.computations == {
+            "repair": 1,
+            "match": 1,
+            "eq": 1,
+            "dynamics": 1,
+            "output": 1,
+        }
         window.waveform.set_selection(SampleRegion(7000, 12000))
         comp.listen_button.click()
         assert window.audition_mode == "dynamics"
@@ -1370,7 +1376,13 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         assert window.output is None and window.eq_preview is not None
         comp.render_button.click()
         wait()
-        assert window.renderer.computations == {"repair": 1, "match": 1, "eq": 1, "dynamics": 2}
+        assert window.renderer.computations == {
+            "repair": 1,
+            "match": 1,
+            "eq": 1,
+            "dynamics": 2,
+            "output": 2,
+        }
         np.testing.assert_allclose(window.eq_preview[1], before_eq, atol=1e-12)
         expected = window.output[0].copy()
         project_file = tmp_path / "compressor.omazone.json"
@@ -1392,6 +1404,128 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         wait()
         np.testing.assert_array_equal(window.output[0], before)
         assert window.project.stages["dynamics"].parameters["kind"] == "compressor-v1"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    t = np.arange(rate) / rate
+    audio = (1.2 * np.sin(2 * np.pi * 440 * t))[:, None]
+    source = tmp_path / "over-range.wav"
+    sf.write(source, audio, rate, subtype="FLOAT")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        view = window.output_view
+        window.views.setCurrentWidget(view)
+        assert window.workspace.plot_stack.currentWidget() is view.canvas
+        assert "OVER 0 dBFS" in view.readouts[0].text()
+        assert "render to measure" in view.readouts[2].text()
+        view.gain.setValue(-6)
+        assert view.enabled.isChecked()
+        assert window.project.stages["output"].parameters["kind"] == "output-gain-v1"
+        view.render_button.click()
+        wait()
+        source_audio = window.source[0]
+        np.testing.assert_allclose(window.output[0], source_audio * 10 ** (-6 / 20))
+        assert window.chain_result.pre_output is source_audio
+        assert "OVER 0 dBFS" in view.readouts[0].text()
+        assert "OVER 0 dBFS" in view.readouts[1].text()
+        assert "OVER 0 dBFS" not in view.readouts[2].text()
+        assert window.renderer.computations == {
+            "repair": 1,
+            "match": 1,
+            "eq": 1,
+            "dynamics": 1,
+            "output": 1,
+        }
+        window.waveform.set_selection(SampleRegion(4000, 10000))
+        view.listen_button.click()
+        assert window.audition_mode == "output-gain"
+        block = np.empty((128, 1), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.output_preview[0][4000:4128])
+        window.toggle_ab()
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.output_preview[1][4128:4256])
+        assert window.ab_button.text() == "Listening: after output gain"
+        window.stop()
+        exported = tmp_path / "master.wav"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(exported), "")
+        )
+        window.export()
+        wait()
+        saved_audio, saved_rate = sf.read(exported, always_2d=True)
+        assert saved_rate == rate and sf.info(exported).subtype == "FLOAT"
+        np.testing.assert_allclose(saved_audio, window.output[0], atol=1e-7)
+        expected = window.output[0].copy()
+        saved_recipe = tmp_path / "output.omazone.json"
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved_recipe), "")
+        )
+        window.save_current_project()
+        wait()
+        window.new_project()
+        window.open_project_path(saved_recipe)
+        wait()
+        assert view.gain.value() == -6 and view.enabled.isChecked()
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_allclose(window.output[0], expected, atol=1e-12)
+        view.gain.setValue(6)
+        assert window.output is None and window.dynamics_preview is not None
+        assert not window.export_button.isEnabled()
+        assert "render to measure" in view.readouts[2].text()
+        window.render_saved_recipe()
+        wait()
+        assert window.renderer.computations["output"] == 2
+        assert window.renderer.computations["dynamics"] == 1
+        assert "OVER 0 dBFS" in view.readouts[2].text()
+        view.enabled.setChecked(False)
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_array_equal(window.output[0], window.source[0])
+        window.project.stages["output"].parameters = {"ceiling_db": -1}
+        view.restore()
+        view.gain.setValue(4)
+        assert view.gain.value() == 0
+        assert window.project.stages["output"].parameters == {"ceiling_db": -1}
+        view.enabled.setChecked(True)
+        assert not window.project.stages["output"].bypassed
+        assert window.project.stages["output"].parameters == {"ceiling_db": -1}
     finally:
         if window.worker is not None:
             window.worker.wait()

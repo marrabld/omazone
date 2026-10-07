@@ -1,4 +1,4 @@
-"""Fixed-order original -> repair -> matching -> manual EQ -> dynamics rendering.
+"""Fixed-order original -> repair -> matching -> EQ -> dynamics -> output rendering.
 
 Prefix caches depend on numerical recipes and upstream inputs, not GUI selection.
 Matching never relearns during rendering. Reserved stages fail if enabled.
@@ -12,6 +12,8 @@ import numpy as np
 from .compressor import CompressionResult, render_compressor, settings_from_parameters
 from .engine import render, validate_audio
 from .manual_eq import eq_from_parameters, render_eq
+from .output_gain import apply_output_gain
+from .output_gain import settings_from_parameters as output_settings
 from .project import digest_json, filter_dict, replay_repairs
 from .sections import render_sections
 
@@ -41,6 +43,7 @@ class ChainResult:
     analysis_stale: bool
     equalized: np.ndarray | None = None
     compression: CompressionResult | None = None
+    pre_output: np.ndarray | None = None
 
 
 class ChainRenderer:
@@ -53,7 +56,7 @@ class ChainRenderer:
             if self.repair_preview.shape != self.original.shape:
                 raise ValueError("Repair preview and original formats differ.")
         self.cache = {}
-        self.computations = {key: 0 for key in ("repair", "match", "eq", "dynamics")}
+        self.computations = {key: 0 for key in ("repair", "match", "eq", "dynamics", "output")}
 
     def prefix(self, stage, key, function):
         entry = self.cache.get(stage)
@@ -64,11 +67,8 @@ class ChainRenderer:
         return self.cache[stage][1]
 
     def render(self, project, block_size=4096):
-        for stage in ("output",):
-            if not project.stages[stage].bypassed:
-                raise ValueError(
-                    f"{stage.capitalize()} is not implemented; its settings are retained."
-                )
+        output_stage = project.stages["output"]
+        settings = output_settings(output_stage.parameters) if not output_stage.bypassed else None
         if project.source and (
             project.source.sample_rate != self.rate
             or project.source.frames != len(self.original)
@@ -168,12 +168,28 @@ class ChainRenderer:
                 )
             ),
         )
+        pre_output = equalized if compressed is None else compressed.audio
+        output_key = digest_json(
+            {
+                "input": dynamics_key,
+                "bypass": output_stage.bypassed,
+                "parameters": output_stage.parameters,
+            }
+        )
+        output = self.prefix(
+            "output",
+            output_key,
+            lambda: (
+                pre_output if output_stage.bypassed else apply_output_gain(pre_output, settings)
+            ),
+        )
         return ChainResult(
             self.original,
             repaired,
             matched,
-            equalized if compressed is None else compressed.audio,
+            output,
             not bypass and project.needs_reanalysis,
             equalized,
             compressed,
+            pre_output,
         )

@@ -21,6 +21,7 @@ from .engine import (
     rms_db,
 )
 from .manual_eq_view import ManualEQView
+from .output_view import OutputView
 from .pipeline import ChainRenderer
 from .playback import PlaybackCursor
 from .project import AudioReference, MatchCalibration, Project
@@ -180,6 +181,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_before = None
         self.dynamics_preview = None
         self.dynamics_before = None
+        self.output_preview = None
+        self.output_before = None
         self.match_output = None
         self.chain_result = None
         self.renderer = None
@@ -294,6 +297,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.views.addTab(self.manual_eq_view, "Manual EQ")
         self.compressor_view = CompressorView(self)
         self.views.addTab(self.compressor_view, "Compression")
+        self.output_view = OutputView(self)
+        self.views.addTab(self.output_view, "Output")
         reference_waveform = self.section_workbench.reference_waveform
         reference_layout = self.section_workbench.reference_page.layout()
         reference_layout.removeWidget(reference_waveform)
@@ -313,6 +318,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             reference_waveform,
             self.manual_eq_view.canvas,
             self.compressor_view.canvas,
+            self.output_view.canvas,
         )
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.workspace_split.addWidget(self.workspace)
@@ -370,6 +376,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.task_actions.append(self.manual_eq_view.render_button)
         self.views.action_layout.addWidget(self.compressor_view.render_button)
         self.task_actions.append(self.compressor_view.render_button)
+        self.views.action_layout.addWidget(self.output_view.render_button)
+        self.task_actions.append(self.output_view.render_button)
         for button in (
             self.clipping_inspector.analyse_button,
             self.clipping_inspector.review_button,
@@ -392,6 +400,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.clipping_inspector,
             self.manual_eq_view,
             self.compressor_view,
+            self.output_view,
         ):
             for label in page.findChildren(QtWidgets.QLabel):
                 label.setWordWrap(True)
@@ -411,6 +420,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.preview_mode.addItem("Original recording", "original")
         self.preview_mode.addItem("Before / after manual EQ", "eq")
         self.preview_mode.addItem("Before / after compression", "dynamics")
+        self.preview_mode.addItem("Before / after output gain", "output-gain")
         self.preview_mode.currentIndexChanged.connect(self.preview_mode_changed)
         row.addWidget(self.preview_mode)
         layout.addLayout(row)
@@ -544,6 +554,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                     if self.audition_mode == "eq"
                     else self.dynamics_preview is not None
                     if self.audition_mode == "dynamics"
+                    else self.output_preview is not None
+                    if self.audition_mode == "output-gain"
                     else self.mastering_preview is not None
                 )
             )
@@ -600,6 +612,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.compressor_view.listen_button.setEnabled(
             not busy and self.dynamics_preview is not None
         )
+        self.output_view.setEnabled(not busy and self.source is not None)
+        self.output_view.canvas.setEnabled(not busy and self.source is not None)
+        self.output_view.render_button.setEnabled(not busy and self.source is not None)
+        self.output_view.listen_button.setEnabled(not busy and self.output_preview is not None)
         self.update_project_actions()
         self.update_ab_hint()
         self.workspace.refresh()
@@ -613,6 +629,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         clipping = self.views.currentWidget() is self.clipping_inspector
         manual_eq = self.views.currentWidget() is self.manual_eq_view
         compressor = self.views.currentWidget() is self.compressor_view
+        output = self.views.currentWidget() is self.output_view
         self.views.action_bar.show()
         shown = set()
         if matching:
@@ -634,6 +651,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             shown.add(self.manual_eq_view.render_button)
         elif compressor:
             shown.add(self.compressor_view.render_button)
+        elif output:
+            shown.add(self.output_view.render_button)
         for button in self.task_actions:
             button.setVisible(button in shown)
         self.name_region_button.setEnabled(
@@ -686,6 +705,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 "Compression rendered. Click the listening button to compare, or export."
                 if self.dynamics_preview is not None
                 else "Adjust compression, then render. Earlier EQ is retained."
+            )
+        elif output:
+            message = (
+                "Output measured. Review sample peaks, compare or export."
+                if self.output_preview is not None
+                else "Set final gain and render to check sample peaks."
             )
         elif matching and self.reference is None and self.project.reference_target is None:
             message = "Mix loaded. Add a reference."
@@ -802,6 +827,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.manual_eq_view.draw_response()
         if self.views.currentWidget() is self.compressor_view:
             self.compressor_view.draw()
+        if self.views.currentWidget() is self.output_view:
+            self.output_view.draw()
 
     def start_job(self, function, callback, message):
         self.stop()
@@ -868,6 +895,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.renderer_key = None
             self.manual_eq_view.restore()
             self.compressor_view.restore()
+            self.output_view.restore()
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
@@ -894,6 +922,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_preview = None
         self.eq_preview = self.eq_before = self.match_output = self.chain_result = None
         self.dynamics_preview = self.dynamics_before = None
+        self.output_preview = self.output_before = None
         self.preview = self.repair_preview if self.audition_mode == "repair" else None
         self.listen_processed = False
         self.update_ab_label()
@@ -908,8 +937,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_preview = None
         self.dynamics_preview = None
         self.dynamics_before = None
+        self.output_preview = self.output_before = None
         self.chain_result = None
-        self.preview = None if self.audition_mode in ("eq", "dynamics") else self.mastering_preview
+        self.preview = (
+            None
+            if self.audition_mode in ("eq", "dynamics", "output-gain")
+            else self.mastering_preview
+        )
         self.listen_processed = False
         self.update_ab_label()
         self.workspace.completed_key = None
@@ -920,8 +954,22 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         self.output = None
         self.dynamics_preview = None
+        self.output_preview = self.output_before = None
         self.chain_result = None
-        self.preview = None if self.audition_mode == "dynamics" else self.preview
+        self.preview = None if self.audition_mode in ("dynamics", "output-gain") else self.preview
+        self.listen_processed = False
+        self.update_ab_label()
+        self.workspace.completed_key = None
+        self.update_buttons()
+
+    def invalidate_output(self):
+        self.project_changed()
+        self.stop()
+        self.output = None
+        self.output_preview = None
+        self.chain_result = None
+        if self.audition_mode == "output-gain":
+            self.preview = None
         self.listen_processed = False
         self.update_ab_label()
         self.workspace.completed_key = None
@@ -1001,7 +1049,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 audition_pair(result.repaired, result.matched),
                 result,
                 audition_pair(result.matched, result.equalized),
-                audition_pair(result.equalized, result.output),
+                audition_pair(result.equalized, result.pre_output),
+                audition_pair(result.pre_output, result.output),
             )
 
         self.invalidate()
@@ -1017,6 +1066,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.eq_preview = result[5]
             self.dynamics_before = result[4].equalized
             self.dynamics_preview = result[6]
+            self.output_before = result[4].pre_output
+            self.output_preview = result[7]
         self.audition_mode = "mastering"
         with QtCore.QSignalBlocker(self.preview_mode):
             self.preview_mode.setCurrentIndex(0)
@@ -1043,6 +1094,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
         self.workspace.render_completed()
         self.compressor_view.rendered()
+        self.output_view.rendered()
         self.focus_rendered_step()
 
     def focus_rendered_step(self):
@@ -1127,9 +1179,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                     self.dynamics_before
                     if self.audition_mode == "dynamics" and self.dynamics_before is not None
                     else (
-                        self.processing_source()[0]
-                        if self.audition_mode == "mastering"
-                        else self.source[0]
+                        self.output_before
+                        if self.audition_mode == "output-gain" and self.output_before is not None
+                        else (
+                            self.processing_source()[0]
+                            if self.audition_mode == "mastering"
+                            else self.source[0]
+                        )
                     )
                 )
             )
@@ -1234,6 +1290,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             label = "after EQ" if self.listen_processed else "before EQ"
         elif self.audition_mode == "dynamics":
             label = "after compression" if self.listen_processed else "before compression"
+        elif self.audition_mode == "output-gain":
+            label = "after output gain" if self.listen_processed else "before output gain"
         elif self.audition_mode == "repair":
             label = "repaired" if self.listen_processed else "original"
         else:
@@ -1270,6 +1328,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             if self.audition_mode == "eq"
             else self.dynamics_preview
             if self.audition_mode == "dynamics"
+            else self.output_preview
+            if self.audition_mode == "output-gain"
             else self.repair_preview
             if self.audition_mode == "repair"
             else (self.mastering_preview if self.audition_mode == "mastering" else None)

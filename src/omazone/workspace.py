@@ -26,7 +26,9 @@ class SpectrumTask(QtCore.QThread):
 
 
 class SongWorkspace(QtWidgets.QWidget):
-    def __init__(self, owner, waveform, spectra, reference, eq_canvas, compressor_canvas):
+    def __init__(
+        self, owner, waveform, spectra, reference, eq_canvas, compressor_canvas, output_canvas
+    ):
         super().__init__()
         self.owner, self.waveform, self.reference_waveform = owner, waveform, reference
         waveform.setToolTip(waveform.help_text.text())
@@ -48,7 +50,7 @@ class SongWorkspace(QtWidgets.QWidget):
         self.live_scope_end = None
         self.active_tool = owner.views.currentIndex()
         self.tool_modes = {
-            str(index): ("spectrum" if index in (0, 5, 6) else "waveform")
+            str(index): ("spectrum" if index in (0, 5, 6, 7) else "waveform")
             for index in range(owner.views.count())
         }
         self.matching_overview = False
@@ -173,6 +175,8 @@ class SongWorkspace(QtWidgets.QWidget):
         self.plot_stack.addWidget(eq_canvas)
         self.compressor_canvas = compressor_canvas
         self.plot_stack.addWidget(compressor_canvas)
+        self.output_canvas = output_canvas
+        self.plot_stack.addWidget(output_canvas)
         self.mix_detail.addWidget(self.plot_stack)
         waveform.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Expanding
@@ -270,6 +274,8 @@ class SongWorkspace(QtWidgets.QWidget):
             if tool is self.owner.manual_eq_view
             else self.compressor_canvas
             if tool is self.owner.compressor_view
+            else self.output_canvas
+            if tool is self.owner.output_view
             else self.spectra
         )
         self.plot_stack.setVisible(mode != "waveform")
@@ -286,7 +292,9 @@ class SongWorkspace(QtWidgets.QWidget):
             )
         matching = index == 0
         self.mode_actions["spectrum"].setText(
-            "Dynamics graphs"
+            "Output peaks"
+            if self.owner.views.currentWidget() is self.owner.output_view
+            else "Dynamics graphs"
             if self.owner.views.currentWidget() is self.owner.compressor_view
             else "Spectrum and filter"
         )
@@ -339,6 +347,22 @@ class SongWorkspace(QtWidgets.QWidget):
             title = "Compression" + (
                 " (bypassed)" if self.owner.project.stages["dynamics"].bypassed else ""
             )
+        elif self.owner.views.currentWidget() is self.owner.output_view:
+            before = (
+                self.owner.output_before
+                if self.owner.output_before is not None
+                else self.owner.dynamics_before
+                if self.owner.dynamics_before is not None
+                else self.owner.processing_source()[0]
+            )
+            after = (
+                self.owner.output[0]
+                if self.owner.output_preview is not None and self.owner.output is not None
+                else None
+            )
+            title = "Output gain" + (
+                " (bypassed)" if self.owner.project.stages["output"].bypassed else ""
+            )
         else:
             before = self.owner.processing_source()[0]
             after = (
@@ -369,6 +393,7 @@ class SongWorkspace(QtWidgets.QWidget):
         if self.owner.views.currentWidget() in (
             self.owner.manual_eq_view,
             self.owner.compressor_view,
+            self.owner.output_view,
         ):
             return None
         workbench = self.owner.section_workbench
@@ -409,6 +434,9 @@ class SongWorkspace(QtWidgets.QWidget):
             processed = chosen == "output" and after is not None
         elif self.owner.views.currentWidget() is self.owner.compressor_view:
             mode = self.owner.preview_mode.findData("dynamics")
+            processed = chosen == "output" and after is not None
+        elif self.owner.views.currentWidget() is self.owner.output_view:
+            mode = self.owner.preview_mode.findData("output-gain")
             processed = chosen == "output" and after is not None
         else:
             mode, processed = 0, chosen == "output" and after is not None
@@ -492,6 +520,7 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.owner.eq_plot.clear()
                 self.eq_canvas.set_spectra()
                 self.compressor_canvas.show_result(None)
+                self.output_canvas.show_peaks((None, None, None))
                 self.label.setText(
                     "Recording unavailable. Project regions and choices are retained; relink the original."
                 )
@@ -550,6 +579,8 @@ class SongWorkspace(QtWidgets.QWidget):
                     self.owner.manual_eq_view.draw_response()
                 elif self.owner.views.currentWidget() is self.owner.compressor_view:
                     self.owner.compressor_view.draw()
+                elif self.owner.views.currentWidget() is self.owner.output_view:
+                    self.owner.output_view.draw()
                 else:
                     self.waveform.set_eq_scope(None)
                 self.waveform.set_position(self.owner.position)
@@ -578,6 +609,18 @@ class SongWorkspace(QtWidgets.QWidget):
                 ):
                     messages.append(
                         "Render the chain for the compressor input after EQ. Showing earlier source context."
+                    )
+                if (
+                    self.owner.views.currentWidget() is self.owner.output_view
+                    and self.owner.output_before is None
+                    and (
+                        self.owner.project.match_mode != "none"
+                        or not self.owner.project.stages["eq"].bypassed
+                        or not self.owner.project.stages["dynamics"].bypassed
+                    )
+                ):
+                    messages.append(
+                        "Render the saved chain for the output-stage input. Showing earlier source context."
                     )
                 self.badge.setText(" | ".join(messages))
                 if self.mode.currentData() != "waveform":
@@ -702,7 +745,8 @@ class SongWorkspace(QtWidgets.QWidget):
             self.closing
             or self.mode.currentData() == "waveform"
             or self.owner.source is None
-            or self.owner.views.currentWidget() is self.owner.compressor_view
+            or self.owner.views.currentWidget()
+            in (self.owner.compressor_view, self.owner.output_view)
         ):
             return
         before, after, rate, title = self.spectral_pair()

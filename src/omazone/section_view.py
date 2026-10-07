@@ -503,7 +503,8 @@ class SectionWorkbench(QtWidgets.QWidget):
                 audition_pair(chain.repaired, chain.matched),
                 chain,
                 audition_pair(chain.matched, chain.equalized),
-                audition_pair(chain.equalized, chain.output),
+                audition_pair(chain.equalized, chain.pre_output),
+                audition_pair(chain.pre_output, chain.output),
             )
 
         self.owner.start_job(
