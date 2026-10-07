@@ -1,0 +1,37 @@
+name: PR macOS and Arch build check
+
+# Temporary: proves the Apple Silicon and Arch builds work on pull requests
+# before the coordinated release workflow exists on the default branch.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/build-desktop.yml
+      - .github/workflows/pr-desktop-check.yml
+      - .github/workflows/release-desktop.yml
+      - .github/workflows/release-windows.yml
+      - omazone.spec
+      - packaging/arch/**
+      - pyproject.toml
+      - uv.lock
+      - src/omazone/**
+
+concurrency:
+  group: pr-desktop-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Apple Silicon app
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      platform: macos
+
+  arch:
+    name: Arch x86-64 package
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      platform: arch
