@@ -4,12 +4,8 @@ Omazone is a guided, non-destructive offline mastering workbench for learning
 through measurements and listening. Its approved direction is a saved project
 and logical processing workflow, with the song visible throughout.
 
-Checked items are implemented and tested; unchecked items are planned. Some
-implemented work remains in feature PRs rather than `main`: see
-[PR #19](https://github.com/marrabld/omazone/pull/19),
-[PR #20](https://github.com/marrabld/omazone/pull/20), and
-[PR #22](https://github.com/marrabld/omazone/pull/22).
-This document describes development priorities, not a release schedule.
+Checked items are implemented and tested; unchecked items are planned. This
+document describes development priorities, not a release schedule.
 
 ## Approved user workflow
 
@@ -19,9 +15,10 @@ Load and listen → Mark sections → Repair → Match → Manual EQ
 ```
 
 Region marking remains available throughout and is shared annotation, not an
-effect. Repair, matching, EQ, and dynamics can be skipped. Each step should state
-its purpose, offer one obvious next action, and keep numerical controls optional.
-Continue moves through the workflow without baking audio or locking earlier work.
+effect. Repair, matching, EQ, dynamics, and output gain can be skipped. The Output
+check remains required. Each step should state its purpose, offer one obvious next
+action, and keep numerical controls optional. Continue moves through the workflow
+without baking audio or locking earlier work.
 
 ### Persistent visual context
 
@@ -50,24 +47,17 @@ optional View action and a persistent seek/time display. See
 
 ## Next development milestones
 
-1. **Saved project model, #23.** Retain source references, regions, target profiles,
-   repairs, and every stage's settings. Bring persistence together rather than
-   implement unrelated save formats for each tool.
-2. **Fixed-order chain, #1.** Render from the retained original and saved recipe,
-   with bypass/skip, latency/tails, and dependency-aware caches. Earlier edits
-   preserve later choices; rerendering is distinct from explicitly relearning a target.
-3. **Shared viewer and navigation, #24/#25.** Keep the song visible, reuse the
-   transport/regions, and add Back/Continue/Skip over the existing tools. Viewer
-   prototyping can proceed alongside the project model.
-4. **Step comparisons, #27.** Compare aligned input/output of the current step
-   with preview-only level matching. Preserve whole-chain comparison as an option.
-5. **Manual section EQ, #26.** First new effect: bell bands with fixed frequency/Q
-   and region-limited, smoothly automated gain after matching. Preserve all earlier work.
-6. **Output safety, #11 → #9/#44 → #45.** Add explicit output gain and source/final
-   sample-peak warnings first. Measure integrated loudness and oversampled true
-   peaks next. Add a modest final limiter only after those measurements are clear.
+1. **Workflow consolidation, #25/#27.** Make the implemented repair, matching,
+   manual EQ, compression, output, comparison, and export features behave as one
+   guided application. First correct visible stage pairs and protect unsaved work;
+   then consolidate status/comparison state, add navigation, and finish the Export
+   step. See [the workflow specification](docs/workflow-consolidation.md).
+2. **Output measurements, #9/#44.** Add integrated loudness with tested silence
+   and short-audio handling, then separately calibrated oversampled true peaks.
    Preview loudness matching must never change export gain.
-7. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
+3. **Final peak control, #45.** Add a modest final limiter only after loudness and
+   true-peak measurements are clear.
+4. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
    three-band compressor from the tested broadband detector. Verify crossover
    recombination before expanding multiband processing.
 
@@ -109,6 +99,10 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#44](https://github.com/marrabld/omazone/issues/44) | Oversampled true-peak metering | #11; alongside #9 |
 | [#45](https://github.com/marrabld/omazone/issues/45) | Final lookahead limiter and ceiling | #11, #9, #44 |
 | [#46](https://github.com/marrabld/omazone/issues/46) | Three-band stereo-linked compressor | #7, #11, #44, #45 |
+| [#51](https://github.com/marrabld/omazone/issues/51) | Protect unsaved projects before destructive actions | Workflow consolidation #25 |
+| [#52](https://github.com/marrabld/omazone/issues/52) | Use the same stage pair for playback and the viewer | Comparison #27 |
+| [#53](https://github.com/marrabld/omazone/issues/53) | Add a final Export review step | Status #54, navigation #25 |
+| [#54](https://github.com/marrabld/omazone/issues/54) | Share render and matching-analysis status across the UI | Chain #1 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -274,7 +268,7 @@ with a fixed EQ cut; listen for clicks, pumping and crossover colouration.
 - [ ] Offer longer FIR filters and show the latency/resolution tradeoff.
 - [ ] Explore minimum-phase matching as an alternative to linear phase.
 - [x] Save reference spectral profiles.
-- [ ] Save reproducible whole-song processing settings.
+- [x] Save whole-song matching settings and retained learned curves in project recipes.
 - [ ] Profile memory and render time on full-length songs.
 
 ## 7. Route to real-time

@@ -38,10 +38,11 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
 - Cached repair/matching/EQ/compression/output prefixes rendered from the original and saved recipe.
 
-Next priorities are integrated LUFS and oversampled true-peak metering, then a
-final limiter and guided navigation. Three-band compression and dynamic EQ can
-follow those output checks. See the [approved workflow](docs/workflow.md) and
-[roadmap](roadmap.md) for the implementation priorities and contribution tasks.
+The next priority is workflow consolidation: correct stage comparisons, protect
+unsaved work, unify status and comparison state, and add guided navigation and an
+Export step. LUFS, true-peak metering, and limiting follow. See the
+[approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for implementation
+priorities and contribution tasks.
 
 ## Quick start
 
@@ -148,7 +149,8 @@ Use the **Project** menu:
   matching curves, without silently relearning. Rendered audio is not stored in
   the project file. **Analyse + process** and section analysis explicitly learn
   new matching curves.
-- **Stage bypass** skips repair or matching while retaining their choices.
+- **Stage bypass** skips repair, matching, manual EQ, compression, or output gain
+  while retaining that stage's choices.
 - **Name current selection** adds a stable region independent of matching; the
   **Named regions** submenu returns to it.
 - **Relink source/reference** locates a moved original. Sample format and a byte
@@ -222,9 +224,10 @@ signal preference, panel sizes, and the existing selection/zoom/loop context.
 
 ![Clipping controls with the selected waveform still visible](docs/images/omazone-shared-clipping.png)
 
-This implements the shared visual context, not the full numbered wizard or all
-stage processing. The current steps are repair, matching, manual EQ, and compression;
-later output stages will use the same workspace.
+This implements the shared visual context and processing chain, but not the full
+guided navigation. The next milestone brings repair, matching, manual EQ,
+compression, output gain, comparison, and export into one consistent workflow.
+See [the workflow consolidation specification](docs/workflow-consolidation.md).
 
 ### First matching experiment
 

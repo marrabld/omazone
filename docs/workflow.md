@@ -3,8 +3,9 @@
 This is the agreed product direction. The saved project model and persistent
 viewer are implemented for repair, matching, multi-band manual EQ, compression
 and explicit output gain. The fixed render chain retains prefixes, and later
-stages have step-specific A/B. Full numbered navigation, LUFS/true peaks and
-limiting remain planned work.
+stages have step-specific A/B. The next milestone consolidates these features
+into one guided workflow before LUFS, true peaks, limiting, or more processors
+are added. See [the workflow consolidation specification](workflow-consolidation.md).
 
 ## User journey
 
@@ -116,15 +117,18 @@ needs-render, and needs-analysis states. A skipped effect is a normal outcome.
 
 ## Implementation sequence
 
-1. [Project model #23](https://github.com/marrabld/omazone/issues/23) and
-   [chain #1](https://github.com/marrabld/omazone/issues/1).
-2. [Shared viewer #24](https://github.com/marrabld/omazone/issues/24), followed by
-   [guided navigation #25](https://github.com/marrabld/omazone/issues/25).
-3. [Stage comparison #27](https://github.com/marrabld/omazone/issues/27) and
-   [manual section EQ #26](https://github.com/marrabld/omazone/issues/26).
-4. Add explicit output gain and sample-peak warnings, then LUFS and true-peak
-   metering, then a ceiling limiter. Keep export gain separate from preview matching.
+The project model, fixed chain, shared viewer, manual EQ, broadband compression,
+output gain, and most stage comparisons are implemented. Consolidate them in this
+order:
 
-Prototype the shared viewer while the project contract is agreed. Keep the first
-chain order fixed: repair, match, manual corrective EQ, optional dynamics,
-output gain/limiting, export. Advanced reordering and real-time/plugin work follow.
+1. Correct visible stage pairs and guard unsaved projects.
+2. Give render status and comparison state one source of truth each.
+3. Add the guided navigation from issue #25 without replacing the existing
+   processors or viewer.
+4. Add the Export step and full-session acceptance coverage.
+5. Resume LUFS and true-peak metering, then a ceiling limiter. Keep export gain
+   separate from preview matching.
+
+Keep the initial chain order fixed: repair, match, manual corrective EQ, optional
+dynamics, output gain, and export. Add limiting only after LUFS and true-peak
+measurement. Advanced reordering and real-time/plugin work follow.
