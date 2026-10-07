@@ -1100,7 +1100,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
     def focus_rendered_step(self):
         """Compare the stage that was just rendered instead of the raw recording.
 
-        Rendering EQ or compression expresses a wish to hear that step. Without
+        Rendering EQ, compression, or output expresses a wish to hear that step. Without
         this, a viewer left on the original recording kept the listening button
         disabled while the inspector reported a successful render.
         """
@@ -1109,6 +1109,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.workspace.focus_comparison("eq")
         elif tool is self.compressor_view and self.dynamics_preview is not None:
             self.workspace.focus_comparison("dynamics")
+        elif tool is self.output_view and self.output_preview is not None:
+            self.workspace.focus_comparison("output-gain")
 
     def draw_filter(self, spec):
         self.eq_plot.clear()

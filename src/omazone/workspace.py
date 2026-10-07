@@ -319,13 +319,17 @@ class SongWorkspace(QtWidgets.QWidget):
             )
         elif self.owner.views.currentWidget() is self.owner.manual_eq_view:
             before = (
-                self.owner.eq_before
+                self.owner.chain_result.matched
+                if self.owner.chain_result is not None
+                else self.owner.eq_before
                 if self.owner.eq_before is not None
                 else self.owner.processing_source()[0]
             )
             after = (
-                self.owner.output[0]
-                if self.owner.eq_preview is not None and self.owner.output is not None
+                self.owner.chain_result.equalized
+                if self.owner.eq_preview is not None and self.owner.chain_result is not None
+                else self.owner.dynamics_before
+                if self.owner.eq_preview is not None and self.owner.dynamics_before is not None
                 else None
             )
             title = "Manual EQ" + (
@@ -333,15 +337,19 @@ class SongWorkspace(QtWidgets.QWidget):
             )
         elif self.owner.views.currentWidget() is self.owner.compressor_view:
             before = (
-                self.owner.dynamics_before
+                self.owner.chain_result.equalized
+                if self.owner.chain_result is not None
+                else self.owner.dynamics_before
                 if self.owner.dynamics_before is not None
                 else self.owner.match_output
                 if self.owner.match_output is not None and self.owner.project.stages["eq"].bypassed
                 else self.owner.processing_source()[0]
             )
             after = (
-                self.owner.output[0]
-                if self.owner.dynamics_preview is not None and self.owner.output is not None
+                self.owner.chain_result.pre_output
+                if self.owner.dynamics_preview is not None and self.owner.chain_result is not None
+                else self.owner.output_before
+                if self.owner.dynamics_preview is not None and self.owner.output_before is not None
                 else None
             )
             title = "Compression" + (
@@ -349,15 +357,17 @@ class SongWorkspace(QtWidgets.QWidget):
             )
         elif self.owner.views.currentWidget() is self.owner.output_view:
             before = (
-                self.owner.output_before
+                self.owner.chain_result.pre_output
+                if self.owner.chain_result is not None
+                else self.owner.output_before
                 if self.owner.output_before is not None
                 else self.owner.dynamics_before
                 if self.owner.dynamics_before is not None
                 else self.owner.processing_source()[0]
             )
             after = (
-                self.owner.output[0]
-                if self.owner.output_preview is not None and self.owner.output is not None
+                self.owner.chain_result.output
+                if self.owner.output_preview is not None and self.owner.chain_result is not None
                 else None
             )
             title = "Output gain" + (

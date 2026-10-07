@@ -11,7 +11,7 @@ import soundfile as sf
 from PySide6 import QtCore, QtTest, QtWidgets
 from scipy import signal
 
-from omazone.engine import analyse
+from omazone.engine import analyse, audition_pair
 from omazone.gui import Window, load_audio
 from omazone.waveform import PeakIndex, SampleRegion
 
@@ -1010,6 +1010,176 @@ def test_rendering_compression_after_viewing_original_restores_comparison(tmp_pa
         assert window.audition_mode == "dynamics"
         assert window.ab_button.isEnabled()
         assert window.ab_button.text() == "Listening: before compression"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_rendering_output_after_viewing_original_restores_comparison(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(231).normal(0, 0.2, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        output = window.output_view
+        output.gain.setValue(-3)
+        window.views.setCurrentWidget(output)
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("original"))
+        app.processEvents()
+        assert not window.ab_button.isEnabled()
+
+        output.render_button.click()
+        wait()
+        assert window.output_preview is not None
+        assert window.audition_mode == "output-gain"
+        assert window.ab_button.isEnabled()
+        assert window.ab_button.text() == "Listening: before output gain"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_stage_viewer_and_playback_use_the_same_chain_prefixes(tmp_path, monkeypatch):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(232).normal(0, 0.2, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.manual_eq_view.add_band(2200, -4)
+        window.compressor_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        window.views.setCurrentWidget(window.output_view)
+        window.output_view.render_button.click()
+        wait()
+        result = window.chain_result
+        assert result is not None
+
+        cases = (
+            (
+                window.manual_eq_view,
+                result.matched,
+                result.equalized,
+                window.eq_preview,
+                "Manual EQ",
+            ),
+            (
+                window.compressor_view,
+                result.equalized,
+                result.pre_output,
+                window.dynamics_preview,
+                "Compression",
+            ),
+            (
+                window.output_view,
+                result.pre_output,
+                result.output,
+                window.output_preview,
+                "Output gain",
+            ),
+        )
+        for view, expected_before, expected_after, preview, expected_title in cases:
+            window.views.setCurrentWidget(view)
+            before, after, actual_rate, title = window.workspace.pairs()
+            assert actual_rate == rate
+            assert title == expected_title
+            np.testing.assert_array_equal(before, expected_before)
+            np.testing.assert_array_equal(after, expected_after)
+            expected_preview = audition_pair(expected_before, expected_after)
+            np.testing.assert_array_equal(preview[0], expected_preview[0])
+            np.testing.assert_array_equal(preview[1], expected_preview[1])
+
+        bypass_cases = (
+            (window.manual_eq_view.enabled, window.manual_eq_view, "Manual EQ (bypassed)"),
+            (
+                window.compressor_view.enabled,
+                window.compressor_view,
+                "Compression (bypassed)",
+            ),
+            (window.output_view.enabled, window.output_view, "Output gain (bypassed)"),
+        )
+        for enabled, view, expected_title in bypass_cases:
+            enabled.setChecked(False)
+            window.views.setCurrentWidget(window.output_view)
+            window.output_view.render_button.click()
+            wait()
+            window.views.setCurrentWidget(view)
+            before, after, _, title = window.workspace.pairs()
+            assert title == expected_title
+            np.testing.assert_array_equal(after, before)
+            enabled.setChecked(True)
+
+        # Editing a stage clears the completed chain but intentionally retains
+        # that stage's valid input. The viewer and Play must keep using it.
+        window.views.setCurrentWidget(window.output_view)
+        retained = window.output_before
+        window.output_view.gain.setValue(-4)
+        before, after, _, _ = window.workspace.pairs()
+        assert after is None
+        np.testing.assert_array_equal(before, retained)
+
+        window.views.setCurrentWidget(window.manual_eq_view)
+        before, after, _, _ = window.workspace.pairs()
+        np.testing.assert_array_equal(before, result.matched)
+        np.testing.assert_array_equal(after, result.equalized)
+        window.views.setCurrentWidget(window.compressor_view)
+        before, after, _, _ = window.workspace.pairs()
+        np.testing.assert_array_equal(before, result.equalized)
+        np.testing.assert_array_equal(after, result.pre_output)
+
+        window.views.setCurrentWidget(window.output_view)
+        window.play()
+        expected = audition_pair(retained, retained)
+        np.testing.assert_array_equal(window.preview[0], expected[0])
+        np.testing.assert_array_equal(window.preview[1], expected[1])
+        window.stop()
     finally:
         if window.worker is not None:
             window.worker.wait()
