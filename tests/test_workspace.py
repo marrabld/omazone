@@ -374,7 +374,7 @@ def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling()
                     for plot in window.waveform.channel_plots:
                             assert plot.getViewBox().height() >= 90
                 if tool == 5:
-                    assert window.workspace.spectra.isVisible()
+                    assert window.manual_eq_view.canvas.isVisible()
                     assert window.manual_eq_view.render_button.isVisible()
                 if tool == 2:
                     assert window.workspace.reference_pane.isVisible()

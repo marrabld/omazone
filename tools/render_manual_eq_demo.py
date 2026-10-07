@@ -80,8 +80,8 @@ def main():
         window.views.setCurrentWidget(window.manual_eq_view)
         eq = window.manual_eq_view
         eq.region.setCurrentIndex(eq.region.findData("guitar"))
-        eq.frequency.setValue(2200)
-        eq.gain.setValue(-3)
+        eq.canvas.placed.emit(2200, -3)
+        eq.canvas.placed.emit(320, 2)
         eq.render_button.click()
         wait()
         window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("output"))

@@ -344,12 +344,13 @@ def validate_project(project):
         if type(state.bypassed) is not bool or not isinstance(state.parameters, dict):
             raise ValueError("Invalid stage state.")
         json.dumps(state.parameters, allow_nan=False)
-    if project.stages["eq"].parameters.get("kind") == "bell-v1":
-        from .manual_eq import settings_from_parameters, validate_settings
+    if project.stages["eq"].parameters:
+        from .manual_eq import eq_from_parameters, validate_eq
 
-        band = settings_from_parameters(project.stages["eq"].parameters)
-        validate_settings(
-            band, project.source.sample_rate if project.source else 48000, project.regions
+        validate_eq(
+            eq_from_parameters(project.stages["eq"].parameters),
+            project.source.sample_rate if project.source else 48000,
+            project.regions,
         )
     if not np.isfinite(project.transition_ms) or project.transition_ms < 0:
         raise ValueError("Invalid transition duration.")

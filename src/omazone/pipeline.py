@@ -10,7 +10,7 @@ from typing import Protocol
 import numpy as np
 
 from .engine import render, validate_audio
-from .manual_eq import render_eq, settings_from_parameters
+from .manual_eq import eq_from_parameters, render_eq
 from .project import digest_json, filter_dict, replay_repairs
 from .sections import render_sections
 
@@ -144,7 +144,7 @@ class ChainRenderer:
                 else render_eq(
                     matched,
                     self.rate,
-                    settings_from_parameters(eq.parameters),
+                    eq_from_parameters(eq.parameters),
                     project.regions,
                     block_size,
                 )

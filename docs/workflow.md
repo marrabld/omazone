@@ -1,7 +1,7 @@
 # Approved workflow and persistent song viewer
 
 This is the agreed product direction. The saved project model and persistent
-viewer are implemented for repair, matching, and one manual EQ band. Their fixed
+viewer are implemented for repair, matching, and multi-band manual EQ. Their fixed
 render chain retains prefixes, and manual EQ has a before/after-this-step comparison.
 Full numbered navigation, additional processors, and dynamics remain planned work.
 

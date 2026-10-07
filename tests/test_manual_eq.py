@@ -1,5 +1,5 @@
 import copy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
@@ -7,7 +7,18 @@ import soundfile as sf
 from scipy import signal
 
 from omazone.engine import MatchSettings, analyse, design_match, render
-from omazone.manual_eq import BellProcessor, BellSettings, bell_sos, frequency_response, render_eq
+from omazone.manual_eq import (
+    MAX_BANDS,
+    BellProcessor,
+    BellSettings,
+    EQSettings,
+    bell_sos,
+    eq_from_parameters,
+    eq_parameters,
+    frequency_response,
+    render_eq,
+    validate_eq,
+)
 from omazone.pipeline import ChainRenderer
 from omazone.project import (
     AudioReference,
@@ -219,3 +230,64 @@ def test_full_chain_compensates_fir_delay_before_causal_eq_at_irregular_blocks(t
         actual = ChainRenderer(audio, rate).render(project, block_size=block)
         assert actual.output.shape == audio.shape
         np.testing.assert_allclose(actual.output, expected, atol=1e-12)
+
+
+def test_multi_band_cascade_bypass_and_shared_region_fade():
+    rate = 16000
+    audio = np.random.default_rng(140).normal(0, 0.04, (16000, 2))
+    region = NamedRegion("verse", "Verse", SampleRegion(3000, 12000))
+    bands = (
+        BellSettings(frequency=180, gain_db=3, q=0.8),
+        BellSettings(frequency=2100, gain_db=-5, q=2),
+        BellSettings(frequency=5000, gain_db=8, enabled=False),
+    )
+    settings = EQSettings(bands, "verse", 50)
+    wet = signal.sosfilt(np.vstack([bell_sos(band, rate) for band in bands[:2]]), audio, axis=0)
+    for size in (1, 137, 4096):
+        output = render_eq(audio, rate, settings, [region], block_size=size)
+        np.testing.assert_array_equal(output[:3000], audio[:3000])
+        np.testing.assert_array_equal(output[12000:], audio[12000:])
+        np.testing.assert_allclose(output[3800:11200], wet[3800:11200], atol=1e-12)
+    frequency, combined = frequency_response(settings, rate)
+    _, first = frequency_response(bands[0], rate)
+    _, second = frequency_response(bands[1], rate)
+    np.testing.assert_allclose(combined, first + second, atol=1e-10)
+    assert frequency[0] == 0
+    np.testing.assert_array_equal(
+        render_eq(audio, rate, EQSettings((replace(bands[0], enabled=False),))), audio
+    )
+
+
+def test_legacy_recipe_migrates_to_v2_and_roundtrips_without_losing_scope(tmp_path):
+    legacy = {"kind": "bell-v1", "band": asdict(BellSettings(gain_db=-3, region_id="verse"))}
+    imported = eq_from_parameters(legacy)
+    assert imported.region_id == "verse" and imported.bands[0].gain_db == -3
+    parameters = eq_parameters(imported)
+    assert parameters["kind"] == "multi-bell-v2" and len(parameters["bands"]) == 1
+    assert eq_from_parameters(parameters).bands[0].gain_db == -3
+    early = {"bands": [{"frequency": 1000, "region_id": "verse", "gain_db": -1}]}
+    assert eq_from_parameters(early).region_id == "verse"
+    with pytest.raises(ValueError, match="different scopes"):
+        eq_from_parameters({"bands": early["bands"] + [{"region_id": "chorus"}]})
+    for invalid in (
+        {**parameters, "bands": parameters["bands"] * (MAX_BANDS + 1)},
+        {**parameters, "bands": [{"q": "nonsense"}]},
+        {**parameters, "bands": [{"frequency": 1000, "enabled": 1}]},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            validate_eq(eq_from_parameters(invalid), 16000)
+    audio = np.random.default_rng(141).normal(0, 0.02, (16000, 1))
+    path = tmp_path / "song.wav"
+    sf.write(path, audio, 16000, subtype="DOUBLE")
+    project = Project(source=AudioReference.from_path(path), match_mode="none")
+    project.regions.append(NamedRegion("verse", "Verse", SampleRegion(2000, 9000)))
+    project.stages["eq"].bypassed = False
+    project.stages["eq"].parameters = eq_parameters(
+        replace(imported, bands=imported.bands + (BellSettings(frequency=500, gain_db=2),))
+    )
+    expected = ChainRenderer(audio, 16000).render(project).output
+    session = tmp_path / "multiband.omazone.json"
+    save_project(session, project)
+    loaded = load_project(session)
+    assert loaded.stages["eq"].parameters == project.stages["eq"].parameters
+    np.testing.assert_array_equal(ChainRenderer(audio, 16000).render(loaded).output, expected)

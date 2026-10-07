@@ -982,6 +982,7 @@ def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path,
         window.views.setCurrentWidget(window.manual_eq_view)
         eq = window.manual_eq_view
         eq.region.setCurrentIndex(eq.region.findData("guitar"))
+        eq.add_button.click()
         eq.frequency.setValue(2200)
         eq.gain.setValue(-4)
         assert eq.enabled.isChecked()
@@ -1059,4 +1060,88 @@ def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path,
         if window.worker is not None:
             window.worker.wait()
             app.processEvents()
+        window.close()
+
+
+def test_multiband_canvas_edits_and_shared_viewer_without_relearning(tmp_path):
+    from omazone.manual_eq import eq_from_parameters, render_eq
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    audio = np.random.default_rng(145).normal(0, 0.05, (16000, 2))
+    path = tmp_path / "song.wav"
+    sf.write(path, audio, 16000, subtype="DOUBLE")
+    try:
+        window.show()
+        app.processEvents()
+        window.loaded("source", load_audio(path))
+        eq = window.manual_eq_view
+        window.views.setCurrentWidget(eq)
+        assert window.workspace.plot_stack.currentWidget() is eq.canvas
+        assert window.workspace.mode.currentData() == "spectrum"
+        eq.canvas.placed.emit(170, 2)
+        eq.canvas.placed.emit(3200, -4)
+        position = eq.canvas.getViewBox().mapViewToScene(QtCore.QPointF(np.log10(800), -2))
+
+        class PlotClick:
+            def button(self):
+                return QtCore.Qt.MouseButton.LeftButton
+
+            def isAccepted(self):
+                return False
+
+            def scenePos(self):
+                return position
+
+        eq.canvas.plot_clicked(PlotClick())
+        assert len(eq.bands) == 3 and eq.bands[-1].frequency == pytest.approx(800)
+        eq.remove_button.click()
+        assert len(eq.bands) == len(eq.canvas.handles) == 2
+        first, second = eq.canvas.handles
+        assert eq.selected == 1 and eq.frequency.value() == 3200
+        first.setPos(np.log10(220), 3)
+        first.sigPositionChangeFinished.emit(first)
+        assert eq.selected == 0
+        assert eq.bands[0].frequency == pytest.approx(220)
+
+        class Wheel:
+            def delta(self):
+                return 120
+
+            def accept(self):
+                pass
+
+        first.wheelEvent(Wheel())
+        assert eq.q.value() == 1.1
+        window.playing = True
+        window.transport.position = 12000
+        assert window.workspace.spectrum_scope(audio, 16000, None, True) == (0, 11200)
+        window.transport.position = 14400
+        assert window.workspace.spectrum_scope(audio, 16000, None, True) == (0, 14400)
+        window.playing = False
+        eq.band_enabled.setChecked(False)
+        assert not eq.bands[0].enabled
+        eq.duplicate_button.click()
+        assert len(eq.bands) == 3
+        eq.remove_button.click()
+        assert len(eq.bands) == 2
+        params = window.project.stages["eq"].parameters
+        assert params["kind"] == "multi-bell-v2"
+        assert len(eq_from_parameters(params).bands) == 2
+        window.render_saved_recipe()
+        deadline = time.monotonic() + 10
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and window.output is not None
+        np.testing.assert_allclose(
+            window.output[0], render_eq(audio, 16000, eq.settings()), atol=1e-12
+        )
+        eq.enabled.setChecked(False)
+        np.testing.assert_allclose(eq.canvas.response.yData, 0)
+        window.views.setCurrentIndex(0)
+        assert window.workspace.plot_stack.currentWidget() is window.workspace.spectra
+    finally:
+        if window.workspace.job:
+            window.workspace.close_jobs()
         window.close()

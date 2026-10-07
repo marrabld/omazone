@@ -301,7 +301,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.section_workbench.reference_advanced_layout.addWidget(
             reference_waveform.selection_label
         )
-        self.workspace = SongWorkspace(self, self.waveform, spectra, reference_waveform)
+        self.workspace = SongWorkspace(
+            self, self.waveform, spectra, reference_waveform, self.manual_eq_view.canvas
+        )
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.workspace_split.addWidget(self.workspace)
         self.tool_scroll = self.views.scroll_area
@@ -573,6 +575,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             control.setEnabled(not busy)
         self.clipping_inspector.refresh_actions()
         self.manual_eq_view.setEnabled(not busy and self.source is not None)
+        self.manual_eq_view.canvas.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.render_button.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.listen_button.setEnabled(not busy and self.eq_preview is not None)
         self.update_project_actions()
@@ -1101,6 +1104,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if self.stream is not None and not self.playing:
             self.stop()
         self.update_transport()
+        if self.playing and self.views.currentWidget() is self.manual_eq_view:
+            if not self.workspace.timer.isActive():
+                self.workspace.timer.start()
 
     def begin_scrub(self):
         self.resume_after_scrub = self.playing

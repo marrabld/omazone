@@ -1,11 +1,11 @@
-"""One causal bell EQ, with optional region-limited gain and stereo-linked paths.
+"""Causal bell bands with a shared region and stereo-linked paths.
 
 The IIR runs with continuous history across the recording. Within a named region
 its wet output fades in/out with complementary amplitude weights. Outside the
 region samples are copied exactly, and the file retains its original length.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 from scipy import signal
@@ -20,6 +20,103 @@ class BellSettings:
     q: float = 1.0
     region_id: str | None = None
     transition_ms: float = 75.0
+    enabled: bool = True
+
+
+MAX_BANDS = 12
+
+
+@dataclass(frozen=True)
+class EQSettings:
+    bands: tuple[BellSettings, ...] = ()
+    region_id: str | None = None
+    transition_ms: float = 75.0
+
+
+def eq_parameters(settings):
+    return {
+        "kind": "multi-bell-v2",
+        "bands": [
+            {
+                key: value
+                for key, value in asdict(band).items()
+                if key not in ("region_id", "transition_ms")
+            }
+            for band in settings.bands
+        ],
+        "region_id": settings.region_id,
+        "transition_ms": settings.transition_ms,
+    }
+
+
+def eq_from_parameters(parameters):
+    if not parameters:
+        return EQSettings()
+    if set(parameters) == {"bands"} and isinstance(parameters["bands"], list):
+        # Early project files allowed a reserved band list before EQ could render.
+        # Import it only when its per-band scopes agree with the shared scope.
+        try:
+            bands = tuple(BellSettings(**band) for band in parameters["bands"])
+        except TypeError as error:
+            raise ValueError("Invalid saved EQ band settings.") from error
+        scopes = {(band.region_id, band.transition_ms) for band in bands}
+        if len(scopes) > 1:
+            raise ValueError("Saved EQ bands have different scopes; choose a shared passage.")
+        region_id, transition_ms = next(iter(scopes), (None, 75.0))
+        return EQSettings(bands, region_id, transition_ms)
+    if parameters.get("kind", "bell-v1") == "bell-v1":
+        if set(parameters) - {"kind", "band"} or not isinstance(parameters.get("band"), dict):
+            raise ValueError("Invalid saved EQ band settings.")
+        try:
+            band = BellSettings(**parameters["band"])
+        except TypeError as error:
+            raise ValueError("Invalid saved EQ band settings.") from error
+        return EQSettings((band,), band.region_id, band.transition_ms)
+    if parameters.get("kind") != "multi-bell-v2" or set(parameters) != {
+        "kind",
+        "bands",
+        "region_id",
+        "transition_ms",
+    }:
+        raise ValueError("Unrecognised saved EQ settings. They have not been replaced.")
+    bands = parameters["bands"]
+    if not isinstance(bands, list) or len(bands) > MAX_BANDS:
+        raise ValueError("EQ supports at most 12 bands.")
+    try:
+        if any(
+            not isinstance(band, dict) or set(band) - {"frequency", "gain_db", "q", "enabled"}
+            for band in bands
+        ):
+            raise ValueError("Invalid manual EQ band settings.")
+        return EQSettings(
+            tuple(BellSettings(**band) for band in bands),
+            parameters["region_id"],
+            parameters["transition_ms"],
+        )
+    except TypeError as error:
+        raise ValueError("Invalid manual EQ band settings.") from error
+
+
+def validate_eq(settings, rate, regions=None):
+    if len(settings.bands) > MAX_BANDS or not isinstance(settings.region_id, (str, type(None))):
+        raise ValueError("Invalid manual EQ scope or band count.")
+    if (
+        not isinstance(settings.transition_ms, (int, float, np.number))
+        or isinstance(settings.transition_ms, (bool, np.bool_))
+        or not np.isfinite(settings.transition_ms)
+        or not 0 <= settings.transition_ms <= 5000
+    ):
+        raise ValueError("EQ transition must be between zero and 5000 ms.")
+    if (
+        regions is not None
+        and settings.region_id is not None
+        and settings.region_id not in {item.id for item in regions}
+    ):
+        raise ValueError("The EQ region is missing. Choose an existing region or Whole recording.")
+    for band in settings.bands:
+        validate_settings(band, rate)
+        if type(band.enabled) is not bool:
+            raise ValueError("Invalid EQ band bypass.")
 
 
 def settings_from_parameters(parameters):
@@ -36,6 +133,11 @@ def settings_from_parameters(parameters):
 
 
 def validate_settings(settings, rate, regions=None):
+    if any(
+        not isinstance(value, (int, float, np.number)) or isinstance(value, (bool, np.bool_))
+        for value in (settings.frequency, settings.gain_db, settings.q, settings.transition_ms)
+    ):
+        raise ValueError("EQ settings must be numeric.")
     if not all(
         np.isfinite(value)
         for value in (settings.frequency, settings.gain_db, settings.q, settings.transition_ms)
@@ -119,18 +221,20 @@ def region_envelope(length, rate, settings, regions):
 
 def render_eq(audio, rate, settings, regions=(), block_size=4096):
     audio = validate_audio(audio)
-    validate_settings(settings, rate, regions)
+    if isinstance(settings, BellSettings):
+        settings = EQSettings((settings,), settings.region_id, settings.transition_ms)
+    validate_eq(settings, rate, regions)
     if type(block_size) is not int or block_size <= 0:
         raise ValueError("EQ block size must be a positive integer.")
-    if settings.gain_db == 0:
+    active = [band for band in settings.bands if band.enabled and band.gain_db != 0]
+    if not active:
         return audio.copy()
-    processor = BellProcessor()
-    processor.prepare(rate, audio.shape[1], block_size)
-    processor.set_settings(settings)
+    sos = np.vstack([bell_sos(band, rate) for band in active])
+    state = np.zeros((len(sos), 2, audio.shape[1]))
     wet = np.empty_like(audio)
     for start in range(0, len(audio), block_size):
         block = audio[start : start + block_size]
-        wet[start : start + len(block)] = processor.process_block(block)
+        wet[start : start + len(block)], state = signal.sosfilt(sos, block, axis=0, zi=state)
     assignment = region_envelope(len(audio), rate, settings, regions)
     if assignment is None:
         return wet
@@ -143,5 +247,13 @@ def render_eq(audio, rate, settings, regions=(), block_size=4096):
 
 
 def frequency_response(settings, rate):
-    frequency, response = signal.sosfreqz(bell_sos(settings, rate), worN=8192, fs=rate)
+    if isinstance(settings, EQSettings):
+        active = [band for band in settings.bands if band.enabled and band.gain_db != 0]
+        if not active:
+            frequency = np.linspace(0, rate / 2, 8192, endpoint=False)
+            return frequency, np.zeros_like(frequency)
+        sos = np.vstack([bell_sos(band, rate) for band in active])
+    else:
+        sos = bell_sos(settings, rate)
+    frequency, response = signal.sosfreqz(sos, worN=8192, fs=rate)
     return frequency, 20 * np.log10(np.maximum(np.abs(response), 1e-12))

@@ -7,17 +7,21 @@ Retained original -> selected repairs -> learned matching -> manual bell EQ -> e
 ```
 
 Dynamics and output-limiter stages remain reserved. Enabling them fails explicitly
-instead of silently omitting them. Numbered wizard navigation, multiple bands,
-and continuous live parameter automation remain follow-ups.
+instead of silently omitting them. Numbered wizard navigation and continuous
+parameter automation remain follow-ups.
 
-## One bell band
+## Bell bands
 
 The processor uses digital peaking-EQ biquad equations with frequency, gain, and
 Q, represented as second-order sections. Frequency must be at least 20 Hz and
-below Nyquist; gain supports +/-18 dB and Q 0.1-20. Zero gain is an exact identity
-in the offline renderer.
+below Nyquist; gain supports +/-18 dB and Q 0.1-20. Up to 12 bands are cascaded
+in saved order. Bypassed or zero-gain bands are skipped; when none are active,
+the offline renderer copies the input exactly. Individual dB response curves
+sum to the combined response.
 
-`BellProcessor` has prepare, set_settings, reset and process_block operations.
+`BellProcessor` provides a single-band reference with prepare, set_settings,
+reset and process_block operations. The multi-band offline renderer runs the
+stacked SOS coefficients over irregular blocks with continuous state.
 The common `BlockProcessor` protocol specifies prepare, reset, process_block and
 reported fixed latency. Configuration remains processor-specific; render wrappers
 own compensation and the policy for finite versus infinite tails.
@@ -42,10 +46,11 @@ in/out. The requested duration is **per edge**, initially 75 ms. Each fade is ca
 at half the region length, preventing overlap. File edges do not fade toward
 nonexistent adjacent dry audio. Outside the region the input samples are copied.
 
-This blends a fixed filtered path with dry audio instead of changing coefficients
-every sample. Intermediate gain is not linear dB interpolation of the band setting.
-Purple waveform windows show effective fades; the response plot shows the fully
-applied bell, or unity when bypassed. Zero transition can click; short regions may
+This blends the full filtered path with dry audio instead of changing coefficients
+every sample. Intermediate gain is not linear dB interpolation of the band settings.
+Purple waveform windows show effective fades; the graph shows the combined
+response and selected band's curve, or unity when the whole EQ is bypassed.
+Zero transition can click; short regions may
 have little fully-applied area after fades shorten.
 
 Outside-region samples remain bitwise identical **to this stage's input**, which
@@ -53,24 +58,33 @@ may already differ from the original due to earlier processing.
 
 ## Saved recipe and caching
 
-The existing version-1 project stage parameters store:
+New stage parameters use `multi-bell-v2` inside the existing project format:
 
 ```json
 {
-  "kind": "bell-v1",
-  "band": {
-    "frequency": 2200.0,
-    "gain_db": -3.0,
-    "q": 1.0,
-    "region_id": "a-stable-region-id",
-    "transition_ms": 75.0
-  }
+  "kind": "multi-bell-v2",
+  "bands": [
+    {"frequency": 2200.0, "gain_db": -3.0, "q": 1.0, "enabled": true},
+    {"frequency": 180.0, "gain_db": 2.0, "q": 0.8, "enabled": true}
+  ],
+  "region_id": "a-stable-region-id",
+  "transition_ms": 75.0
 }
 ```
 
-Use `null` region_id for the whole recording. Bypass is separate. Older reserved
-EQ metadata is retained; unsupported multi-band configurations are not silently
-processed or overwritten.
+Use `null` region_id for the whole recording. All bands share the same scope and
+fade; each has its own bypass, while the stage bypass skips the whole EQ. Opening
+an older `bell-v1` recipe creates one band with its original scope and fade.
+Early reserved `bands` lists with a common region also remain readable. Lists
+with conflicting per-band scopes fail explicitly rather than silently changing
+their effect.
+
+The main graph puts the EQ response on top of an auto-scaled input spectrum,
+with a post-EQ spectrum after rendering. Its left dB axis applies to the EQ
+curve, not the background analyzer. While playing, a rolling one-second window
+follows the playhead; when stopped, it shows the selected passage or whole song.
+Click to add a band, drag a dot for frequency/gain, or scroll on it for Q. The
+inspector edits the selected band's exact values.
 
 `ChainRenderer` exposes aligned original, repaired, matched and final arrays.
 Prefix caches depend on numerical recipes and their upstream keys. EQ changes
@@ -91,14 +105,15 @@ preventing repeated effect application.
 
 Manual EQ A/B compares **after repair/matching, before EQ** with **after EQ**, at
 the same cursor and loop. It uses preview-only RMS matching and common headroom.
-Changing the band disables stale output until rendering. Matching's comparison
+Changing any band disables stale output until rendering. Matching's comparison
 still isolates matching, excluding the later EQ. Export contains the complete
 rendered chain without preview gain.
 
 ## Verification
 
 Tests measure center gain, DC/Nyquist unity, stable poles, state/reset and block
-equivalence, exact dry masks, boundary-impulse history, shortened fades, stereo
+equivalence, multi-band cascade/response, bypass, exact dry masks, boundary-impulse
+history, shortened fades, stereo
 relationships, invalid settings, prefix-cache reuse, upstream bypass, retained
 calibration, and project round trips. GUI checks cover actual A/B samples through
 loops, full-chain WAV export, save/reopen, bypass and reset.

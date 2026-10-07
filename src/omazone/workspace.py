@@ -26,7 +26,7 @@ class SpectrumTask(QtCore.QThread):
 
 
 class SongWorkspace(QtWidgets.QWidget):
-    def __init__(self, owner, waveform, spectra, reference):
+    def __init__(self, owner, waveform, spectra, reference, eq_canvas):
         super().__init__()
         self.owner, self.waveform, self.reference_waveform = owner, waveform, reference
         waveform.setToolTip(waveform.help_text.text())
@@ -44,6 +44,8 @@ class SongWorkspace(QtWidgets.QWidget):
         self.completed_key = None
         self.peak_cache = []
         self.pending_key = None
+        self.live_spectrum = None
+        self.live_scope_end = None
         self.active_tool = owner.views.currentIndex()
         self.tool_modes = {
             str(index): ("spectrum" if index in (0, 5) else "waveform")
@@ -165,7 +167,11 @@ class SongWorkspace(QtWidgets.QWidget):
         mix_layout.setContentsMargins(0, 0, 0, 0)
         self.mix_detail = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.mix_detail.addWidget(waveform)
-        self.mix_detail.addWidget(spectra)
+        self.plot_stack = QtWidgets.QStackedWidget()
+        self.plot_stack.addWidget(spectra)
+        self.eq_canvas = eq_canvas
+        self.plot_stack.addWidget(eq_canvas)
+        self.mix_detail.addWidget(self.plot_stack)
         waveform.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Expanding
         )
@@ -256,7 +262,9 @@ class SongWorkspace(QtWidgets.QWidget):
         if mode == "both" and not self.syncing:
             self.mix_detail.setSizes([max(1, self.width() // 2), max(1, self.width() // 2)])
         self.waveform.setVisible(mode != "spectrum")
-        self.spectra.setVisible(mode != "waveform")
+        eq = self.owner.views.currentWidget() is self.owner.manual_eq_view
+        self.plot_stack.setCurrentWidget(self.eq_canvas if eq else self.spectra)
+        self.plot_stack.setVisible(mode != "waveform")
         self.refresh()
         if mode != "waveform":
             self.timer.start()
@@ -272,6 +280,7 @@ class SongWorkspace(QtWidgets.QWidget):
         self.view_controls.hide()
         self.view_menu_button.show()
         self.overview.setVisible(not matching or self.matching_overview)
+        self.mode_changed()
 
     def toggle_matching_overview(self, visible):
         self.matching_overview = visible
@@ -424,6 +433,7 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.peak_cache = []
                 self.owner.spectrum_plot.clear()
                 self.owner.eq_plot.clear()
+                self.eq_canvas.set_spectra()
                 self.label.setText(
                     "Recording unavailable. Project regions and choices are retained; relink the original."
                 )
@@ -621,18 +631,24 @@ class SongWorkspace(QtWidgets.QWidget):
             return
         before, after, rate, title = self.spectral_pair()
         selected = self.waveform.selection
-        region = (selected.start, selected.end) if selected else (0, len(before))
+        eq = self.owner.views.currentWidget() is self.owner.manual_eq_view
+        region = self.spectrum_scope(before, rate, selected, eq)
         if region[1] - region[0] < max(2, round(rate * 0.1)):
             self.requested_key = None
-            self.owner.spectrum_plot.clear()
-            self.owner.spectrum_plot.setTitle("Choose at least 0.1 seconds for a stable spectrum")
+            if eq:
+                self.eq_canvas.set_spectra()
+            else:
+                self.owner.spectrum_plot.clear()
+                self.owner.spectrum_plot.setTitle(
+                    "Choose at least 0.1 seconds for a stable spectrum"
+                )
             return
         target = self.reference_target() if self.owner.views.currentIndex() != 4 else None
         key = (id(before), id(after), rate, region, id(target), title)
         self.requested_key = key
         if key != self.completed_key and key != self.pending_key:
-            self.owner.spectrum_plot.clear()
-            self.owner.spectrum_plot.setTitle("Updating selected-scope spectrum…")
+            if not eq:
+                self.owner.spectrum_plot.setTitle("Updating selected-scope spectrum…")
             self.pending_key = key
         if key == self.completed_key or self.job is not None:
             return
@@ -647,13 +663,28 @@ class SongWorkspace(QtWidgets.QWidget):
             return
         actual_before, actual_after, rate, title = self.spectral_pair()
         selection = self.waveform.selection
-        region = (
-            (selection.start, selection.end)
-            if selection
-            else ((0, len(actual_before)) if actual_before is not None else None)
-        )
+        eq = self.owner.views.currentWidget() is self.owner.manual_eq_view
+        region = self.spectrum_scope(actual_before, rate, selection, eq)
         target = self.reference_target() if self.owner.views.currentIndex() != 4 else None
         if key != (id(actual_before), id(actual_after), rate, region, id(target), title):
+            return
+        if eq:
+            if error:
+                self.eq_canvas.set_spectra()
+            else:
+                previous = (
+                    self.live_spectrum
+                    if self.owner.playing
+                    and self.live_scope_end is not None
+                    and 0 < region[1] - self.live_scope_end <= rate // 3
+                    else None
+                )
+                self.eq_canvas.set_spectra(before, after, previous)
+                self.live_spectrum = (
+                    self.eq_canvas.input_curve.yData if self.owner.playing else None
+                )
+                self.live_scope_end = region[1] if self.owner.playing else None
+            self.completed_key = key
             return
         self.owner.spectrum_plot.clear()
         if error:
@@ -671,6 +702,13 @@ class SongWorkspace(QtWidgets.QWidget):
             if target:
                 self.owner.draw_spectrum(target.spectrum, "Reference target", "#eabb6b")
         self.completed_key = key
+
+    def spectrum_scope(self, before, rate, selection, eq):
+        if eq and self.owner.playing:
+            end = min(len(before), max(round(rate * 0.1), self.owner.transport.position))
+            end = min(len(before), (end // max(1, rate // 10)) * max(1, rate // 10))
+            return max(0, end - rate), end
+        return (selection.start, selection.end) if selection else (0, len(before))
 
     def spectral_pair(self):
         before, after, rate, title = self.pairs()

@@ -33,7 +33,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - 32-bit floating-point WAV export.
 - Versioned saved project recipes, verified source relinking, and retained learned curves.
 - Persistent song overview and shared waveform/spectrum viewer across tool pages.
-- One manual bell EQ band, global or region-limited, after matching with per-step A/B.
+- Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
 - Cached repair/matching/EQ prefixes rendered from the original and saved recipe.
 
 Next priorities are broadband compression, output metering/limiting, and guided
@@ -427,7 +427,7 @@ recording when available. See [the algorithm and experiment](docs/declipping.md)
 
 ## Correct a named passage with manual EQ
 
-Manual EQ adds one bell band **after** whole-song or section matching. It does not
+Manual EQ adds up to 12 bell bands **after** whole-song or section matching. It does not
 erase repairs, targets, section assignments, or learned matching curves. The
 original source file remains unchanged.
 
@@ -436,16 +436,21 @@ original source file remains unchanged.
 2. For a local correction, select the passage in **Regions**, name it, and save it
    with **Name current selection**. Matching sections already have named regions.
 3. Open **Manual EQ** and choose the passage under **Apply to**, or **Whole recording**.
-4. Set **Frequency** and a modest **Gain** cut, such as -2 dB. A nonzero gain edit
-   enables **Apply this EQ**. New bands start at zero gain.
-5. **Width and transitions** contains Q and fade duration. Lower Q affects a
-   broader band; higher Q is narrower. Defaults are Q=1 and 75 ms per entry/exit.
+   All bands share this scope and its fade duration.
+4. Click the graph to add a band, or use **Add band**. Drag a coloured dot left/right
+   for frequency and up/down for gain. Scroll over the dot for width (Q). The
+   inspector offers exact values for the selected band. Start with a small cut,
+   such as -2 dB; new bands start at zero gain.
+5. Add more bands for independent corrections. Select a dot or list entry to
+   edit it; duplicate, remove, or bypass individual bands. Lower Q affects a
+   broader range; higher Q is narrower. **Region transition** sets the shared
+   entry/exit fade, initially 75 ms.
 6. Click **Apply EQ and render** to render the saved chain without relearning matching.
 7. Click **Loop and compare this step**, then use the listening button for
    **before EQ / after EQ**. Both include the same earlier repair/matching work.
 8. **Export WAV** saves the full chain, not just the audition pair.
 
-![Manual EQ after matching with selected-scope spectra and a bell-response plot](docs/images/omazone-manual-eq.png)
+![Manual EQ graph with draggable bands and a combined response over the spectrum](docs/images/omazone-manual-eq.png)
 
 **View → Both** shows the region and spectrum together. Purple dashed windows mark
 entry/exit fades inside the selected region. They shorten if the passage is too
@@ -454,13 +459,15 @@ audio. Samples outside the region remain exactly unchanged by this EQ stage.
 
 ![Region-limited EQ with waveform boundaries and purple fade windows](docs/images/omazone-manual-eq-region.png)
 
-Uncheck **Apply this EQ** to bypass without losing settings. **Reset band to neutral**
-sets gain to zero. Project save/open retains the band, named region, Q, fade, and
+Uncheck **Apply this EQ** to bypass all bands without losing settings. **Reset selected band to neutral**
+sets its gain to zero. Project save/open retains the bands, named region, Q, fade, and
 bypass state. Editing EQ makes the final preview/export stale, while earlier
 matching previews and calibration remain available. Rendering reuses valid prefixes.
 
-This first version is one fixed-frequency/Q bell. Region amount is smoothly
-blended between filtered and dry paths, not a free-form automation lane. It is
+The live background spectrum follows the playhead while listening. The analyzer
+is auto-scaled; the left dB axis measures EQ gain, not the spectrum's absolute level.
+Band settings are fixed during rendering. Region amount is smoothly blended
+between filtered and dry paths, not a free-form automation lane. The EQ is
 causal and changes phase around the band, with shared stereo coefficients and no
 lookahead. It is not compression or limiting; boosts can exceed full scale.
 Preview gain matching/headroom is not exported. See [the chain and EQ design](docs/manual-eq.md).
@@ -522,6 +529,7 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/pipeline.py`: fixed repair/matching/EQ chain and dependency-aware prefix caches.
 - `src/omazone/manual_eq.py`: causal bell processor, region fades, and frequency response.
 - `src/omazone/manual_eq_view.py`: band controls and before/after-this-step audition.
+- `src/omazone/eq_canvas.py`: interactive band graph and overlaid spectrum.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.

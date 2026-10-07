@@ -124,7 +124,7 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Float-WAV export and automated DSP/GUI checks.
 - [x] Versioned saved project, stable regions/assignments, repair replay, retained calibration, and source relinking.
 - [x] Fixed repair/matching/manual-EQ chain with prefix caches and retained calibration.
-- [x] One region-limited bell, saved settings, smooth fades, and EQ-only A/B.
+- [x] Up to 12 region-limited bells, saved settings, smooth fades, and EQ-only A/B.
 - [x] Shared song viewer/overview, independent reference pane, and selection-scoped background spectrum analysis.
 
 ## 1. Inspection and selected-region repair
@@ -173,7 +173,8 @@ Keep one application, with independently usable and testable processing modules.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
 - [ ] Add parametric bell and shelving EQ bands.
 - [x] Region-limited manual bell EQ after matching, with smooth dry/wet region automation.
-- [ ] Multiple bands and free-form gain/frequency automation after validating the one-band workflow.
+- [x] Multiple manually adjustable bell bands with a shared named-region scope.
+- [ ] Free-form gain/frequency automation.
 
 The approved initial processing chain is:
 
