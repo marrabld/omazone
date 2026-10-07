@@ -123,6 +123,8 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
 - [x] Versioned saved project, stable regions/assignments, repair replay, retained calibration, and source relinking.
+- [x] Fixed repair/matching/manual-EQ chain with prefix caches and retained calibration.
+- [x] Up to 12 region-limited bells, saved settings, smooth fades, and EQ-only A/B.
 - [x] Shared song viewer/overview, independent reference pane, and selection-scoped background spectrum analysis.
 
 ## 1. Inspection and selected-region repair
@@ -162,14 +164,17 @@ Keep one application, with independently usable and testable processing modules.
 - [x] Save/load and revisit earlier choices without discarding other stages.
 - [x] Identify dependent renders/analyses as stale; keep explicit target relearning
   separate from rendering the existing choices.
-- [ ] Define a common processor contract for preparation, state reset, block
+- [x] Define a common processor contract for preparation, state reset, block
   processing, latency, and tail handling. Extend the existing FIR contract.
-- [ ] Add per-module controls and bypass alongside whole-chain A/B.
+- [x] Add controls/bypass and stage A/B for repair, matching, and manual EQ.
+- [ ] Extend stage comparisons and measured rendering to later dynamics/output processors.
 - [ ] Show measurements before and after each stage.
 - [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
 - [ ] Add parametric bell and shelving EQ bands.
-- [ ] Region-limited manual bell EQ after matching, with smooth gain automation.
+- [x] Region-limited manual bell EQ after matching, with smooth dry/wet region automation.
+- [x] Multiple manually adjustable bell bands with a shared named-region scope.
+- [ ] Free-form gain/frequency automation.
 
 The approved initial processing chain is:
 

@@ -1,5 +1,6 @@
 """Desktop project actions. Recipes are separate from transient rendered audio."""
 
+import copy
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -7,7 +8,7 @@ from uuid import uuid4
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .engine import MatchFilter, MatchSettings, analyse, audition_pair, render
+from .engine import MatchFilter, MatchSettings, analyse, audition_pair
 from .project import (
     MatchCalibration,
     NamedRegion,
@@ -16,7 +17,6 @@ from .project import (
     load_project,
     save_project,
 )
-from .sections import render_sections
 from .waveform import SampleRegion
 
 
@@ -51,7 +51,7 @@ class ProjectController:
         for key, title in (
             ("repair", "Skip repair"),
             ("match", "Skip matching"),
-            ("eq", "Skip manual EQ (reserved)"),
+            ("eq", "Skip manual EQ"),
             ("dynamics", "Skip dynamics (reserved)"),
             ("output", "Skip output processing (reserved)"),
         ):
@@ -145,7 +145,8 @@ class ProjectController:
             with QtCore.QSignalBlocker(item):
                 item.setChecked(self.project.stages[key].bypassed)
             item.setEnabled(
-                not busy and (key in ("repair", "match") or not self.project.stages[key].bypassed)
+                not busy
+                and (key in ("repair", "match", "eq") or not self.project.stages[key].bypassed)
             )
 
     def refresh_named_regions(self):
@@ -162,6 +163,8 @@ class ProjectController:
         if hasattr(self, "workspace"):
             self.workspace.refresh()
             self.section_workbench.refresh_overlays()
+        if hasattr(self, "manual_eq_view"):
+            self.manual_eq_view.refresh_regions()
 
     def name_selection(self):
         region = self.waveform.selection
@@ -194,6 +197,8 @@ class ProjectController:
         self.restoring_project = True
         try:
             self.project = Project()
+            self.renderer = None
+            self.renderer_key = None
             self.project_path = None
             for control, value in (
                 (self.amount, 50),
@@ -225,6 +230,7 @@ class ProjectController:
         finally:
             self.restoring_project = False
         self.refresh_named_regions()
+        self.manual_eq_view.restore()
         self.update_project_title()
         self.refresh_file_labels()
         self.plot_spectra()
@@ -286,6 +292,8 @@ class ProjectController:
         self.restoring_project = True
         try:
             self.project = project
+            self.renderer = None
+            self.renderer_key = None
             self.project_path = Path(path) if path else None
             self.source = self.reference = None
             self.repair_result = self.repaired_source = self.repair_preview = None
@@ -369,6 +377,7 @@ class ProjectController:
         self.project.needs_render = True
         self.refresh_named_regions()
         self.update_project_title()
+        self.manual_eq_view.restore()
         self.plot_spectra()
         self.refresh_file_labels()
         self.update_transport()
@@ -406,7 +415,11 @@ class ProjectController:
 
     def set_stage_bypass(self, stage, checked):
         self.project.stages[stage].bypassed = checked
-        self.invalidate()
+        if stage == "eq":
+            self.invalidate_eq()
+            self.manual_eq_view.restore()
+        else:
+            self.invalidate()
         self.plot_spectra()
         self.status.setText(
             f"{stage.capitalize()} {'skipped' if checked else 'enabled'}. Choices retained; output needs rendering."
@@ -419,16 +432,6 @@ class ProjectController:
             self.error("Relink the original recording first. Saved choices are retained.")
             return
         self.sync_project()
-        unsupported = [
-            key for key in ("eq", "dynamics", "output") if not self.project.stages[key].bypassed
-        ]
-        if unsupported:
-            self.error(
-                "Enabled stages are not implemented yet: "
-                + ", ".join(unsupported)
-                + ". Their settings are retained."
-            )
-            return
         if (
             self.project.match_mode != "none"
             and not self.project.stages["match"].bypassed
@@ -438,53 +441,37 @@ class ProjectController:
                 "Matching configuration needs analysis. Existing calibration is retained; use Analyse explicitly to update it."
             )
             return
-        source = self.processing_source()
-        calibration = self.project.calibration
-        mode = self.project.match_mode
-        bypassed = self.project.stages["match"].bypassed or mode == "none"
+        snapshot = copy.deepcopy(self.project)
+        renderer = self.get_renderer()
 
         def calculate():
-            if bypassed:
-                spec = MatchFilter(
-                    np.ones(1), np.asarray([0, source[1] / 2]), np.zeros(2), source[1]
-                )
-                output = source[0].copy()
-                return "whole", (
-                    output,
-                    analyse(output, source[1]),
-                    spec,
-                    audition_pair(source[0], output),
-                )
-            if mode == "whole":
+            result = renderer.render(snapshot)
+            calibration = snapshot.calibration
+            if calibration and calibration.whole and snapshot.match_mode == "whole":
                 spec = calibration.whole
-                output = render(source[0], spec)
-                return "whole", (
-                    output,
-                    analyse(output, source[1]),
-                    spec,
-                    audition_pair(source[0], output),
+            elif calibration and calibration.sections and snapshot.match_mode == "sections":
+                spec = calibration.sections[0].filter
+            else:
+                spec = MatchFilter(
+                    np.ones(1), np.asarray([0, renderer.rate / 2]), np.zeros(2), renderer.rate
                 )
-            result = render_sections(
-                source[0],
-                source[1],
-                self.project.sections,
-                self.project.targets,
-                self.project.transition_ms,
-                learned_curves=calibration.sections,
-            )
-            return "sections", (
+            return (
+                result.output,
+                analyse(result.output, renderer.rate),
+                spec,
+                audition_pair(result.repaired, result.matched),
                 result,
-                analyse(result.audio, source[1]),
-                audition_pair(source[0], result.audio),
+                audition_pair(result.matched, result.output),
             )
 
         def completed(payload):
-            kind, result = payload
-            if kind == "whole":
-                self.processed(result, learn=False)
-            else:
-                self.sections_rendered(result, learn=False)
+            self.processed(payload, learn=False)
             self.project.needs_render = False
+            if self.views.currentWidget() is self.manual_eq_view:
+                self.manual_eq_view.draw_response()
+                self.manual_eq_view.summary.setText(
+                    "Rendered. Compare before/after this EQ step; export contains the full chain."
+                )
             self.status.setText(
                 "Rendered saved recipe without relearning."
                 + (
@@ -506,7 +493,7 @@ class ProjectController:
             )
             return False
         unsupported = [
-            key for key in ("eq", "dynamics", "output") if not self.project.stages[key].bypassed
+            key for key in ("dynamics", "output") if not self.project.stages[key].bypassed
         ]
         if unsupported:
             self.error(

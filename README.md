@@ -33,10 +33,11 @@ developers, and people who enjoy building audio interfaces are welcome.
 - 32-bit floating-point WAV export.
 - Versioned saved project recipes, verified source relinking, and retained learned curves.
 - Persistent song overview and shared waveform/spectrum viewer across tool pages.
+- Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
+- Cached repair/matching/EQ prefixes rendered from the original and saved recipe.
 
-Next priorities are a complete prefix-processing chain,
-guided navigation, and manual section EQ. Compression, dynamic EQ, and output
-checks follow. See the [approved workflow](docs/workflow.md) and
+Next priorities are broadband compression, output metering/limiting, and guided
+navigation. Dynamic EQ follows the simpler EQ/detector foundation. See the [approved workflow](docs/workflow.md) and
 [roadmap](roadmap.md) for the implementation priorities and contribution tasks.
 
 ## Quick start
@@ -124,12 +125,12 @@ Use the **Project** menu:
 Paths are relative to the project where possible. A cached reference spectrum
 can still be used when its reference recording is unavailable. Moving an earlier
 processing choice marks later calibration as needing analysis, but stored curves
-remain available when their configuration still matches. Updating EQ settings or
-assignments requires explicit analysis before those newly requested curves are
-available.
+remain available when their configuration still matches. Updating matching
+settings or assignments requires explicit analysis for newly requested matching
+curves. Manual EQ edits only need rendering; they do not relearn matching.
 
-This is the project foundation, not the full processor chain. Reserved manual EQ,
-dynamics, and output settings are preserved in the schema; enabled unsupported
+The implemented chain is repair -> learned matching -> manual EQ. Reserved
+dynamics and output settings are preserved in the schema; enabled unsupported
 stages cannot be silently rendered as though implemented. Save explicitly before
 closing; loading a new recording/New project starts a new session. Audio originals
 are not overwritten by saving projects. Session JSON files are ignored by Git.
@@ -189,8 +190,8 @@ signal preference, panel sizes, and the existing selection/zoom/loop context.
 ![Clipping controls with the selected waveform still visible](docs/images/omazone-shared-clipping.png)
 
 This implements the shared visual context, not the full numbered wizard or all
-stage-prefix processing. The current steps are repair and matching; later EQ,
-dynamics, and output stages will use the same workspace.
+stage processing. The current steps are repair, matching, and manual EQ; later
+dynamics and output stages will use the same workspace.
 
 ### First matching experiment
 
@@ -424,6 +425,53 @@ sine/harmonic examples, but an intentionally flat-topped waveform can be made wo
 Compare by listening, especially on guitar attacks, and use the isolated guitar
 recording when available. See [the algorithm and experiment](docs/declipping.md).
 
+## Correct a named passage with manual EQ
+
+Manual EQ adds up to 12 bell bands **after** whole-song or section matching. It does not
+erase repairs, targets, section assignments, or learned matching curves. The
+original source file remains unchanged.
+
+1. Do reference matching, if wanted. Manual EQ also works without a reference when
+   matching mode is `none`, or when matching is deliberately bypassed.
+2. For a local correction, select the passage in **Regions**, name it, and save it
+   with **Name current selection**. Matching sections already have named regions.
+3. Open **Manual EQ** and choose the passage under **Apply to**, or **Whole recording**.
+   All bands share this scope and its fade duration.
+4. Click the graph to add a band, or use **Add band**. Drag a coloured dot left/right
+   for frequency and up/down for gain. Scroll over the dot for width (Q). The
+   inspector offers exact values for the selected band. Start with a small cut,
+   such as -2 dB; new bands start at zero gain.
+5. Add more bands for independent corrections. Select a dot or list entry to
+   edit it; duplicate, remove, or bypass individual bands. Lower Q affects a
+   broader range; higher Q is narrower. **Region transition** sets the shared
+   entry/exit fade, initially 75 ms.
+6. Click **Apply EQ and render** to render the saved chain without relearning matching.
+7. Click **Loop and compare this step**, then use the listening button for
+   **before EQ / after EQ**. Both include the same earlier repair/matching work.
+8. **Export WAV** saves the full chain, not just the audition pair.
+
+![Manual EQ graph with draggable bands and a combined response over the spectrum](docs/images/omazone-manual-eq.png)
+
+**View → Both** shows the region and spectrum together. Purple dashed windows mark
+entry/exit fades inside the selected region. They shorten if the passage is too
+short for the requested duration. File edges do not need a fade to adjacent dry
+audio. Samples outside the region remain exactly unchanged by this EQ stage.
+
+![Region-limited EQ with waveform boundaries and purple fade windows](docs/images/omazone-manual-eq-region.png)
+
+Uncheck **Apply this EQ** to bypass all bands without losing settings. **Reset selected band to neutral**
+sets its gain to zero. Project save/open retains the bands, named region, Q, fade, and
+bypass state. Editing EQ makes the final preview/export stale, while earlier
+matching previews and calibration remain available. Rendering reuses valid prefixes.
+
+The live background spectrum follows the playhead while listening. The analyzer
+is auto-scaled; the left dB axis measures EQ gain, not the spectrum's absolute level.
+Band settings are fixed during rendering. Region amount is smoothly blended
+between filtered and dry paths, not a free-form automation lane. The EQ is
+causal and changes phase around the band, with shared stereo coefficients and no
+lookahead. It is not compression or limiting; boosts can exceed full scale.
+Preview gain matching/headroom is not exported. See [the chain and EQ design](docs/manual-eq.md).
+
 ## Current limitations
 
 The interface shows RMS and sample peaks, not LUFS or true peaks. Preview is
@@ -478,6 +526,10 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `src/omazone/project.py`: versioned recipes, source verification, calibration signatures, and repair replay.
 - `src/omazone/project_controller.py`: project menus, save/load/relink, stage bypass, and saved rendering.
 - `src/omazone/workspace.py`: persistent viewer/overview, reference companion, signal labels, and background spectra.
+- `src/omazone/pipeline.py`: fixed repair/matching/EQ chain and dependency-aware prefix caches.
+- `src/omazone/manual_eq.py`: causal bell processor, region fades, and frequency response.
+- `src/omazone/manual_eq_view.py`: band controls and before/after-this-step audition.
+- `src/omazone/eq_canvas.py`: interactive band graph and overlaid spectrum.
 - `tests/test_engine.py`: identity, streaming equivalence, spectral improvement,
   stereo preservation, gain limits, and preview headroom.
 - `tests/test_gui.py`: render/export workflow, seeking, and shared A/B cursor.

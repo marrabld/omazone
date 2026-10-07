@@ -1,11 +1,13 @@
 """Reference-target capture and section-assignment controls for the workbench."""
 
+import copy
 from dataclasses import replace
 from uuid import uuid4
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .engine import MatchSettings, analyse, audition_pair
+from .project import MatchCalibration
 from .sections import (
     SectionAssignment,
     capture_target,
@@ -413,8 +415,17 @@ class SectionWorkbench(QtWidgets.QWidget):
         self.form_loading = False
         self.draft_dirty = False
         self.owner.waveform.set_selection(section.region)
-        if self.owner.section_result is not None:
-            for curve in self.owner.section_result.curves:
+        curves = (
+            self.owner.section_result.curves
+            if self.owner.section_result is not None
+            else (
+                self.owner.project.calibration.sections
+                if self.owner.project.can_render_saved_match
+                else ()
+            )
+        )
+        if curves:
+            for curve in curves:
                 if curve.section.id == section.id:
                     self.owner.show_section_curve(curve, switch_view=False)
                     break
@@ -477,12 +488,22 @@ class SectionWorkbench(QtWidgets.QWidget):
         transition_ms = self.owner.project.transition_ms
         self.owner.project.match_mode = "sections"
         self.owner.invalidate()
+        snapshot = copy.deepcopy(self.owner.project)
+        renderer = self.owner.get_renderer()
 
         def calculate():
             result = render_sections(source[0], source[1], sections, targets, transition_ms)
-            if self.owner.project.stages["match"].bypassed:
-                result = replace(result, audio=source[0].copy())
-            return result, analyse(result.audio, source[1]), audition_pair(source[0], result.audio)
+            snapshot.calibration = MatchCalibration(
+                snapshot.config_key(), snapshot.input_key(), sections=result.curves
+            )
+            chain = renderer.render(snapshot)
+            return (
+                result,
+                analyse(chain.output, source[1]),
+                audition_pair(chain.repaired, chain.matched),
+                chain,
+                audition_pair(chain.matched, chain.output),
+            )
 
         self.owner.start_job(
             calculate,

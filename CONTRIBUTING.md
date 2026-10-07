@@ -51,7 +51,7 @@ After packaging and the bundled executable's smoke test succeed, the workflow
 updates the `development` prerelease and the README's direct download link.
 There is no separate publishing button or routine version-tag step.
 
-PRs that change packaging files also exercise the Windows build, but never publish.
+PRs that change app or packaging files also exercise the Windows build, but never publish.
 Manual runs on `main` publish; manual feature-branch runs produce temporary artifacts
 only. A queued build whose source is no longer the current `main` skips publishing,
 so an old rerun cannot replace newer code. The Windows workflow serialises runs

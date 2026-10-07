@@ -1,9 +1,9 @@
 # Approved workflow and persistent song viewer
 
 This is the agreed product direction. The saved project model and persistent
-viewer are implemented for the current repair/matching tools. The full numbered
-navigation, arbitrary stage-prefix comparisons, manual EQ, and dynamics remain
-planned work.
+viewer are implemented for repair, matching, and multi-band manual EQ. Their fixed
+render chain retains prefixes, and manual EQ has a before/after-this-step comparison.
+Full numbered navigation, additional processors, and dynamics remain planned work.
 
 ## User journey
 
