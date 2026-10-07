@@ -419,6 +419,7 @@ class SongWorkspace(QtWidgets.QWidget):
             self.owner.update_ab_label()
         finally:
             self.syncing = False
+        self.owner.update_ab_hint()
 
     def follow_audition(self):
         if self.syncing:
@@ -433,6 +434,27 @@ class SongWorkspace(QtWidgets.QWidget):
             self.signal.setCurrentIndex(self.signal.findData(key))
         finally:
             self.syncing = False
+        self.refresh()
+
+    def focus_comparison(self, key):
+        """Show and play one step's comparison, overriding an original-only view.
+
+        Rendering a stage is a request to hear that stage, so it must not leave
+        the viewer comparing against the untouched recording, which silently
+        disables the listening button while the inspector reports success.
+        """
+        if self.owner.preview_mode.findData(key) < 0:
+            return
+        self.syncing = True
+        try:
+            self.owner.preview_mode.setCurrentIndex(self.owner.preview_mode.findData(key))
+            index = self.signal.findData("input")
+            if index >= 0:
+                self.signal.setCurrentIndex(index)
+        finally:
+            self.syncing = False
+        self.owner.listen_processed = False
+        self.owner.update_ab_label()
         self.refresh()
 
     def render_completed(self):

@@ -918,6 +918,134 @@ def test_project_open_preserves_hidden_matching_precision_and_rejects_invalid_vi
         window.close()
 
 
+def test_rendering_after_viewing_original_restores_a_usable_comparison(tmp_path, monkeypatch):
+    """Regression: rendering a stage while viewing the original must not strand A/B.
+
+    The inspector said "EQ rendered" while the listening button stayed disabled,
+    because the viewer was still showing the untouched original recording.
+    """
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(228).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        eq = window.manual_eq_view
+        eq.add_band(2200, -4)
+        window.views.setCurrentWidget(eq)
+        # The user browses the untouched recording before rendering the stage.
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("original"))
+        app.processEvents()
+        assert window.audition_mode == "original"
+        assert not window.ab_button.isEnabled()
+
+        eq.render_button.click()
+        wait()
+        assert window.eq_preview is not None
+        assert window.audition_mode == "eq"
+        assert window.ab_button.isEnabled()
+        assert window.ab_button.text() == "Listening: before EQ"
+        window.toggle_ab()
+        assert window.ab_button.text() == "Listening: after EQ"
+        assert window.preview is window.eq_preview
+
+        # Viewing the original stays available as an explicit choice, and returning
+        # to the step comparison must work again.
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("original"))
+        app.processEvents()
+        assert window.audition_mode == "original" and not window.ab_button.isEnabled()
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("input"))
+        app.processEvents()
+        assert window.audition_mode == "eq" and window.ab_button.isEnabled()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_rendering_compression_after_viewing_original_restores_comparison(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(229).normal(0, 0.2, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        comp = window.compressor_view
+        comp.enabled.setChecked(True)
+        window.views.setCurrentWidget(comp)
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("original"))
+        app.processEvents()
+        assert not window.ab_button.isEnabled()
+
+        comp.render_button.click()
+        wait()
+        assert window.dynamics_preview is not None
+        assert window.audition_mode == "dynamics"
+        assert window.ab_button.isEnabled()
+        assert window.ab_button.text() == "Listening: before compression"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_comparison_button_explains_why_it_is_unavailable(tmp_path):
+    """A disabled comparison must say what to do, not look broken."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(230).normal(0, 0.1, (16000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        assert "load a recording" in window.ab_button.toolTip().lower()
+        window.loaded("source", load_audio(source))
+        app.processEvents()
+        # A recording is loaded but nothing has been rendered for this step yet.
+        assert "render" in window.ab_button.toolTip().lower()
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("original"))
+        app.processEvents()
+        assert not window.ab_button.isEnabled()
+        assert "step input" in window.ab_button.toolTip().lower()
+        window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("input"))
+        app.processEvents()
+        # Nothing has been rendered yet, so there is no second signal to compare
+        # and the hint must point back at rendering rather than at the view.
+        assert not window.ab_button.isEnabled()
+        assert "render" in window.ab_button.toolTip().lower()
+    finally:
+        window.close()
+
+
 def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path, monkeypatch):
     import copy
 

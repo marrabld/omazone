@@ -477,9 +477,16 @@ original source file remains unchanged.
    broader range; higher Q is narrower. **Region transition** sets the shared
    entry/exit fade, initially 75 ms.
 6. Click **Apply EQ and render** to render the saved chain without relearning matching.
-7. Click **Loop and compare this step**, then use the listening button for
-   **before EQ / after EQ**. Both include the same earlier repair/matching work.
+   Playback switches to this step automatically, and the listening button becomes
+   **before EQ**. It may already be active, so you can click **Play** right away.
+7. Use the listening button to switch **before EQ / after EQ**. Both include the same
+   earlier repair and matching work, so you hear only the manual EQ difference.
+   **Loop and compare this step** also selects the region and enables looping.
 8. **Export WAV** saves the full chain, not just the audition pair.
+
+To hear the untouched recording instead, choose **View → Original recording**. That
+freezes playback on the original and disables comparison, which is why the listening
+button then reads "Listening: original"; choose **View → Step input** to come back.
 
 ![Manual EQ graph with draggable bands and a combined response over the spectrum](docs/images/omazone-manual-eq.png)
 
@@ -517,8 +524,10 @@ without a reference or EQ. It does not split the song into frequency bands.
 3. **Timing, knee and detector** holds attack, release, soft knee and peak/RMS
    detector selection. Attack controls how quickly the linked envelope rises;
    release controls how it falls. Both stereo channels receive the same gain.
-4. Click **Loop and compare compression** for the same-position A/B. Both sides
-   include the previous repair, matching and manual EQ steps. The inspector shows
+4. Rendering switches playback to this step, so the listening button becomes
+   **before compression**; click it for **after compression**. Both sides include
+   the previous repair, matching and manual EQ steps. **Loop and compare
+   compression** also selects the region and enables looping. The inspector shows
    maximum gain reduction and output sample peak.
 5. Add **Manual makeup gain** only if wanted. It is exported; preview-only
    level matching is not. Check peaks before **Export WAV**.

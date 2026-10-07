@@ -479,7 +479,8 @@ class ProjectController:
             if self.views.currentWidget() is self.manual_eq_view:
                 self.manual_eq_view.draw_response()
                 self.manual_eq_view.summary.setText(
-                    "Rendered. Compare before/after this EQ step; export contains the full chain."
+                    "Rendered. Use the listening button to compare before/after this EQ step; "
+                    "export contains the full chain."
                 )
             self.status.setText(
                 "Rendered saved recipe without relearning."

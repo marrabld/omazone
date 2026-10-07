@@ -601,6 +601,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             not busy and self.dynamics_preview is not None
         )
         self.update_project_actions()
+        self.update_ab_hint()
         self.workspace.refresh()
         self.update_action_bar()
 
@@ -676,13 +677,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             message = self.clipping_inspector.result_heading.text()
         elif manual_eq:
             message = (
-                "EQ rendered. Compare this step or export."
+                "EQ rendered. Click the listening button to compare before/after EQ, or export."
                 if self.eq_preview is not None
                 else "Adjust the band, then render. Earlier work is retained."
             )
         elif compressor:
             message = (
-                "Compression rendered. Compare this step or export."
+                "Compression rendered. Click the listening button to compare, or export."
                 if self.dynamics_preview is not None
                 else "Adjust compression, then render. Earlier EQ is retained."
             )
@@ -1042,6 +1043,20 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
         self.workspace.render_completed()
         self.compressor_view.rendered()
+        self.focus_rendered_step()
+
+    def focus_rendered_step(self):
+        """Compare the stage that was just rendered instead of the raw recording.
+
+        Rendering EQ or compression expresses a wish to hear that step. Without
+        this, a viewer left on the original recording kept the listening button
+        disabled while the inspector reported a successful render.
+        """
+        tool = self.views.currentWidget()
+        if tool is self.manual_eq_view and self.eq_preview is not None:
+            self.workspace.focus_comparison("eq")
+        elif tool is self.compressor_view and self.dynamics_preview is not None:
+            self.workspace.focus_comparison("dynamics")
 
     def draw_filter(self, spec):
         self.eq_plot.clear()
@@ -1228,6 +1243,23 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 else ("repaired input" if self.repair_active else "original")
             )
         self.ab_button.setText(f"Listening: {label}")
+
+    def update_ab_hint(self):
+        """Say why comparison is unavailable instead of showing a dead button."""
+        if self.ab_button.isEnabled():
+            self.ab_button.setToolTip("Switch between the two compared signals.")
+        elif self.audition_mode == "original":
+            self.ab_button.setToolTip(
+                "Original recording only. Choose View -> Step input to compare a processing step."
+            )
+        elif self.worker is not None:
+            self.ab_button.setToolTip("Waiting for rendering to finish.")
+        elif self.source is None:
+            self.ab_button.setToolTip("Load a recording first.")
+        else:
+            self.ab_button.setToolTip(
+                "Render this step to compare it. Earlier stages stay available."
+            )
 
     def preview_mode_changed(self):
         resume = self.playing
