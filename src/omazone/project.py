@@ -352,6 +352,10 @@ def validate_project(project):
             project.source.sample_rate if project.source else 48000,
             project.regions,
         )
+    if project.stages["dynamics"].parameters.get("kind") == "compressor-v1":
+        from .compressor import settings_from_parameters, validate_settings
+
+        validate_settings(settings_from_parameters(project.stages["dynamics"].parameters))
     if not np.isfinite(project.transition_ms) or project.transition_ms < 0:
         raise ValueError("Invalid transition duration.")
     values = (

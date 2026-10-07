@@ -63,8 +63,8 @@ optional View action and a persistent seek/time display. See
    with preview-only level matching. Preserve whole-chain comparison as an option.
 5. **Manual section EQ, #26.** First new effect: bell bands with fixed frequency/Q
    and region-limited, smoothly automated gain after matching. Preserve all earlier work.
-6. **Dynamics and output.** Add the broadband compressor, LUFS/true-peak metering,
-   output gain, and limiter. Dynamic EQ follows the simpler EQ/detector foundation.
+6. **Dynamics and output.** Broadband compression is implemented; LUFS/true-peak
+   metering, output gain and a limiter follow. Dynamic EQ can use the detector foundation.
 
 Initial processing order is fixed. Advanced reordering, multiband dynamics, and
 real-time/plugin integration follow once this workflow is stable and understandable.
@@ -123,8 +123,9 @@ status. Numerical prototypes can often start before their GUI integration depend
 - [x] Guided clipping workflow with per-channel automatic scanning and optional advanced diagnostics.
 - [x] Float-WAV export and automated DSP/GUI checks.
 - [x] Versioned saved project, stable regions/assignments, repair replay, retained calibration, and source relinking.
-- [x] Fixed repair/matching/manual-EQ chain with prefix caches and retained calibration.
+- [x] Fixed repair/matching/manual-EQ/compressor chain with prefix caches and retained calibration.
 - [x] Up to 12 region-limited bells, saved settings, smooth fades, and EQ-only A/B.
+- [x] Stereo-linked broadband compressor, measured gain history, and compressor-only A/B.
 - [x] Shared song viewer/overview, independent reference pane, and selection-scoped background spectrum analysis.
 
 ## 1. Inspection and selected-region repair
@@ -167,7 +168,8 @@ Keep one application, with independently usable and testable processing modules.
 - [x] Define a common processor contract for preparation, state reset, block
   processing, latency, and tail handling. Extend the existing FIR contract.
 - [x] Add controls/bypass and stage A/B for repair, matching, and manual EQ.
-- [ ] Extend stage comparisons and measured rendering to later dynamics/output processors.
+- [x] Extend stage comparisons and measured rendering to broadband compression.
+- [ ] Extend stage comparisons and measured rendering to output processors.
 - [ ] Show measurements before and after each stage.
 - [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
@@ -192,10 +194,10 @@ learner workflow. Dynamic EQ can extend the corrective/dynamics tools later.
 
 Start with one stereo-linked compressor before tackling multiband crossovers.
 
-- [ ] Threshold, ratio, attack, release, soft knee, and manual makeup gain.
-- [ ] Detector-envelope and gain-reduction displays.
-- [ ] Stereo linking to avoid unintended image movement.
-- [ ] Compare peak and RMS detectors.
+- [x] Threshold, ratio, attack, release, soft knee, and manual makeup gain.
+- [x] Detector-envelope and gain-reduction displays.
+- [x] Stereo linking to avoid unintended image movement.
+- [x] Compare peak and RMS detectors.
 - [ ] Optional detector-sidechain filtering.
 
 Verify the static gain curve, attack/release behaviour, stereo linking, and
