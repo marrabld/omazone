@@ -196,6 +196,9 @@ class ProjectController:
         self.repair_unavailable = False
 
     def new_project(self):
+        self.guard_unsaved(self.reset_project)
+
+    def reset_project(self):
         self.stop()
         self.restoring_project = True
         try:
@@ -242,14 +245,34 @@ class ProjectController:
         self.update_buttons()
         self.status.setText("New project. Load a recording; saved project files are unchanged.")
 
-    def save_current_project(self, checked=False, save_as=False):
+    def guard_unsaved(self, continuation):
+        if not self.project.dirty:
+            continuation()
+            return True
+        choice = QtWidgets.QMessageBox.question(
+            self,
+            "Unsaved project",
+            "Save changes before continuing?",
+            QtWidgets.QMessageBox.StandardButton.Save
+            | QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Save,
+        )
+        if choice == QtWidgets.QMessageBox.StandardButton.Discard:
+            continuation()
+            return True
+        if choice == QtWidgets.QMessageBox.StandardButton.Save:
+            return self.save_current_project(completed=continuation)
+        return False
+
+    def save_current_project(self, checked=False, save_as=False, completed=None):
         if self.source is not None and self.project.source is None:
             self.error(
                 "This recording has no file reference. Load it from a file before saving a project."
             )
-            return
+            return False
         if self.section_workbench.draft_dirty and not self.section_workbench.update_section():
-            return
+            return False
         self.stop()
         self.sync_project()
         path = self.project_path
@@ -261,21 +284,32 @@ class ProjectController:
                 "Omazone project (*.omazone.json)",
             )
             if not chosen:
-                return
+                return False
             path = Path(chosen)
             if not str(path).endswith(".omazone.json"):
                 path = Path(str(path) + ".omazone.json")
+        saved_project = self.project
+        saved_revision = saved_project.revision
+        snapshot = copy.deepcopy(saved_project)
         self.start_job(
-            lambda: save_project(path, self.project),
-            lambda _: self.project_saved(path),
+            lambda: save_project(path, snapshot),
+            lambda _: self.project_saved(path, saved_project, saved_revision, completed),
             "Saving project recipe…",
         )
+        return True
 
-    def project_saved(self, path):
+    def project_saved(self, path, saved_project=None, saved_revision=None, completed=None):
+        saved_project = saved_project or self.project
+        saved_revision = saved_project.revision if saved_revision is None else saved_revision
+        if self.project is not saved_project or self.project.revision != saved_revision:
+            self.status.setText(f"Project snapshot saved: {path}. Newer changes remain unsaved.")
+            return
         self.project_path = Path(path)
         self.project.dirty = False
         self.update_project_title()
         self.status.setText(f"Project saved: {path}")
+        if completed is not None:
+            completed()
 
     def choose_project(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -285,6 +319,9 @@ class ProjectController:
             self.open_project_path(path)
 
     def open_project_path(self, path):
+        self.guard_unsaved(lambda: self.load_project_path(path))
+
+    def load_project_path(self, path):
         self.start_job(
             lambda: hydrate_project(load_project(path)),
             lambda loaded: self.install_project(loaded, path),
@@ -540,4 +577,5 @@ class ProjectController:
         )
         self.project.needs_render = False
         self.project.dirty = True
+        self.project.revision += 1
         self.update_project_title()

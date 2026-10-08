@@ -35,18 +35,17 @@ from .workspace import SongWorkspace
 
 
 class Worker(QtCore.QThread):
-    result = QtCore.Signal(object)
-    failed = QtCore.Signal(str)
-
     def __init__(self, function):
         super().__init__()
         self.function = function
+        self.value = None
+        self.failure = None
 
     def run(self):
         try:
-            self.result.emit(self.function())
+            self.value = self.function()
         except Exception as error:  # noqa: BLE001 -- surface worker errors at the UI boundary
-            self.failed.emit(str(error))
+            self.failure = str(error)
 
 
 class SeekSlider(QtWidgets.QSlider):
@@ -830,20 +829,30 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if self.views.currentWidget() is self.output_view:
             self.output_view.draw()
 
-    def start_job(self, function, callback, message):
+    def start_job(self, function, callback, message, failed=None):
+        if self.worker is not None:
+            raise RuntimeError("Another operation is already in progress.")
         self.stop()
         self.status.setText(message)
-        self.worker = Worker(function)
-        self.worker.result.connect(callback)
-        self.worker.failed.connect(self.error)
-        self.worker.finished.connect(self.job_finished)
+        worker = Worker(function)
+        self.worker = worker
+        worker.finished.connect(lambda: self.job_finished(worker, callback, failed or self.error))
         self.update_buttons()
-        self.worker.start()
+        worker.start()
 
-    def job_finished(self):
-        self.worker.deleteLater()
-        self.worker = None
-        self.update_buttons()
+    def job_finished(self, worker, callback, failed):
+        if self.worker is worker:
+            self.worker = None
+        worker.deleteLater()
+        try:
+            if worker.failure is not None:
+                failed(worker.failure)
+            else:
+                callback(worker.value)
+        except Exception as error:  # noqa: BLE001 -- callback failures belong at the UI boundary
+            self.error(str(error))
+        finally:
+            self.update_buttons()
 
     def error(self, message):
         self.status.setText("Operation failed.")
@@ -857,11 +866,21 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self, "Load audio", "", "Audio (*.wav *.flac *.aiff *.aif);;All files (*)"
         )
         if path:
-            self.start_job(
-                lambda: load_audio(path),
-                lambda data: self.loaded(target, data),
-                "Loading and analysing…",
-            )
+
+            def action():
+                self.load_audio_path(target, path)
+
+            if target == "source":
+                self.guard_unsaved(action)
+            else:
+                action()
+
+    def load_audio_path(self, target, path):
+        self.start_job(
+            lambda: load_audio(path),
+            lambda data: self.loaded(target, data),
+            "Loading and analysing…",
+        )
 
     def loaded(self, target, data):
         if not self.restoring_project:
@@ -1522,13 +1541,26 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event):
+        if getattr(self, "close_approved", False):
+            self.stop()
+            self.workspace.close_jobs()
+            event.accept()
+            return
         if self.worker is not None:
             self.status.setText("Wait for the current operation to finish before closing.")
             event.ignore()
             return
+        if self.project.dirty:
+            event.ignore()
+            self.guard_unsaved(self.close_after_approval)
+            return
         self.stop()
         self.workspace.close_jobs()
         event.accept()
+
+    def close_after_approval(self):
+        self.close_approved = True
+        QtCore.QTimer.singleShot(0, self.close)
 
     def show_waveform(self, signal=None):
         self.views.setCurrentWidget(self.region_page)

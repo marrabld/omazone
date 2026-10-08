@@ -212,6 +212,7 @@ class Project:
             )
         setattr(self, kind, chosen)
         self.dirty = True
+        self.revision += 1
 
 
 def digest_json(data):
