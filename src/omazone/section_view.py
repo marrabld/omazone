@@ -482,6 +482,10 @@ class SectionWorkbench(QtWidgets.QWidget):
         if self.owner.source is None or not self.sections:
             self.owner.error("Load a mix and add at least one section.")
             return
+        workflow = self.owner.workflow_status()
+        if not workflow.analysis_allowed:
+            self.owner.error(workflow.render_reason)
+            return
         source = self.owner.processing_source()
         sections, targets = tuple(self.sections), dict(self.targets)
         self.owner.sync_project()

@@ -259,10 +259,16 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
         assert window.views.action_label.text() == "Load a mix."
         window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
         assert window.views.currentWidget() is window.match_page
-        assert window.views.action_label.text() == "Mix loaded. Add a reference."
+        assert (
+            window.views.action_label.text()
+            == "Matching is optional. Add a reference to analyse it; otherwise it passes unchanged."
+        )
         window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
         assert window.views.currentWidget() is window.match_page
-        assert window.views.action_label.text() == "Mix and reference ready."
+        assert (
+            window.views.action_label.text()
+            == "Mix and reference ready. Analyse Matching, or leave it unchanged."
+        )
         assert window.process_button.isEnabled()
 
         for mode in ("waveform", "spectrum", "both"):

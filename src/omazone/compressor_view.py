@@ -210,9 +210,7 @@ class CompressorView(QtWidgets.QWidget):
         self.owner.project.stages["dynamics"].bypassed = not self.enabled.isChecked()
         self.owner.invalidate_dynamics()
         self.draw()
-        self.summary.setText(
-            "Compression edited. Earlier EQ and matching are retained. Render to listen."
-        )
+        self.summary.setText(self.owner.workflow_status().stages["dynamics"].reason)
 
     def draw(self):
         self.canvas.show_settings(self.settings(), self.owner.project.stages["dynamics"].bypassed)
@@ -229,7 +227,7 @@ class CompressorView(QtWidgets.QWidget):
             self.summary.setText("Compressor skipped. Export uses the earlier chain.")
             return
         deepest = result.compression.max_reduction_db
-        peak = peak_db(result.output)
+        peak = peak_db(result.pre_output)
         self.summary.setText(
             f"Maximum reduction: {deepest:.1f} dB. Output sample peak: {peak:.1f} dBFS."
             + (

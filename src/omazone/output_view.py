@@ -167,11 +167,7 @@ class OutputView(QtWidgets.QWidget):
             stage.parameters = output_parameters(self.settings())
         stage.bypassed = not self.enabled.isChecked()
         self.owner.invalidate_output()
-        self.summary.setText(
-            "Output gain edited. Earlier processing is retained. Render before exporting."
-            if self.supported_recipe()
-            else "Unsupported saved output settings retained. Bypass or render for an explicit error."
-        )
+        self.summary.setText(self.owner.workflow_status().stages["output"].reason)
 
     @staticmethod
     def reading(name, peak):
@@ -187,7 +183,8 @@ class OutputView(QtWidgets.QWidget):
         if source is not self.cached_source:
             self.cached_source = source
             self.source_peak = sample_peak(source) if source is not None else None
-        result = self.owner.chain_result if self.owner.output_preview is not None else None
+        status = self.owner.workflow_status().stages["output"]
+        result = self.owner.chain_result if status.measurements_available else None
         if result is not self.measured_result:
             self.measured_result = result
             self.before_peak = sample_peak(result.pre_output) if result is not None else None

@@ -247,9 +247,7 @@ class ManualEQView(QtWidgets.QWidget):
         )
         if region is not None:
             self.owner.waveform.set_selection(region.bounds)
-        self.summary.setText(
-            "EQ edited. Matching and repairs are retained. Render before comparing."
-        )
+        self.summary.setText(self.owner.workflow_status().stages["eq"].reason)
 
     def draw_response(self):
         if self.owner.source is None:
