@@ -1,9 +1,13 @@
 """Persistent song context around tool controls, with independent references."""
 
+from dataclasses import replace
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .comparison import ORIGINAL as ORIGINAL_ONLY
+from .comparison import Side
 from .engine import analyse
 from .waveform import PeakIndex
 from .workflow_status import AnalysisState
@@ -308,97 +312,53 @@ class SongWorkspace(QtWidgets.QWidget):
         self.matching_overview = visible
         self.overview.setVisible(self.active_tool != 0 or visible)
 
+    def viewer_context_key(self):
+        """Which step this tab explains, independent of the selected side.
+
+        The viewer shows a tab's own pair even when playback is listening to the
+        original recording, so context and playback resolve separately.
+        """
+        widget = self.owner.views.currentWidget()
+        for view, key in (
+            (self.owner.manual_eq_view, "eq"),
+            (self.owner.compressor_view, "dynamics"),
+            (self.owner.output_view, "output-gain"),
+        ):
+            if widget is view:
+                return key
+        return "repair" if self.owner.views.currentIndex() == 4 else "mastering"
+
+    def viewer_title(self, key):
+        """Name the viewer's own context, which is separate from the pair."""
+        stages = self.owner.project.stages
+        if key == "repair" and self.owner.views.currentIndex() == 4:
+            return "Repair" + (" preview (stage skipped)" if stages["repair"].bypassed else "")
+        if key == "eq":
+            return "Manual EQ" + (" (bypassed)" if stages["eq"].bypassed else "")
+        if key == "dynamics":
+            return "Compression" + (" (bypassed)" if stages["dynamics"].bypassed else "")
+        if key == "output-gain":
+            return "Output gain" + (" (bypassed)" if stages["output"].bypassed else "")
+        tool = self.owner.views.currentIndex()
+        if tool == 1:
+            title = "Working mix"
+        elif tool == 2:
+            title = "Mix context"
+        elif tool == 3 or self.owner.project.match_mode == "sections":
+            title = "Section matching"
+        else:
+            title = "Matching"
+        return title + (" (stage skipped)" if stages["match"].bypassed else "")
+
     def pairs(self):
+        """Raw before/after arrays for the viewer, from the shared model."""
         if self.owner.source is None:
             return None, None, 1, "Recording unavailable"
-        rate = self.owner.source[1]
-        if self.owner.views.currentIndex() == 4:
-            before = self.owner.source[0]
-            after = self.owner.repair_result.audio if self.owner.repair_result else None
-            title = "Repair" + (
-                " preview (stage skipped)" if self.owner.project.stages["repair"].bypassed else ""
-            )
-        elif self.owner.views.currentWidget() is self.owner.manual_eq_view:
-            before = (
-                self.owner.chain_result.matched
-                if self.owner.chain_result is not None
-                else self.owner.eq_before
-                if self.owner.eq_before is not None
-                else self.owner.processing_source()[0]
-            )
-            after = (
-                self.owner.chain_result.equalized
-                if self.owner.eq_preview is not None and self.owner.chain_result is not None
-                else self.owner.dynamics_before
-                if self.owner.eq_preview is not None and self.owner.dynamics_before is not None
-                else None
-            )
-            title = "Manual EQ" + (
-                " (bypassed)" if self.owner.project.stages["eq"].bypassed else ""
-            )
-        elif self.owner.views.currentWidget() is self.owner.compressor_view:
-            before = (
-                self.owner.chain_result.equalized
-                if self.owner.chain_result is not None
-                else self.owner.dynamics_before
-                if self.owner.dynamics_before is not None
-                else self.owner.match_output
-                if self.owner.match_output is not None and self.owner.project.stages["eq"].bypassed
-                else self.owner.processing_source()[0]
-            )
-            after = (
-                self.owner.chain_result.pre_output
-                if self.owner.dynamics_preview is not None and self.owner.chain_result is not None
-                else self.owner.output_before
-                if self.owner.dynamics_preview is not None and self.owner.output_before is not None
-                else None
-            )
-            title = "Compression" + (
-                " (bypassed)" if self.owner.project.stages["dynamics"].bypassed else ""
-            )
-        elif self.owner.views.currentWidget() is self.owner.output_view:
-            before = (
-                self.owner.chain_result.pre_output
-                if self.owner.chain_result is not None
-                else self.owner.output_before
-                if self.owner.output_before is not None
-                else self.owner.dynamics_before
-                if self.owner.dynamics_before is not None
-                else self.owner.processing_source()[0]
-            )
-            after = (
-                self.owner.chain_result.output
-                if self.owner.output_preview is not None and self.owner.chain_result is not None
-                else None
-            )
-            title = "Output gain" + (
-                " (bypassed)" if self.owner.project.stages["output"].bypassed else ""
-            )
-        else:
-            before = self.owner.processing_source()[0]
-            after = (
-                self.owner.match_output
-                if self.owner.match_output is not None
-                else (self.owner.output[0] if self.owner.output is not None else None)
-            )
-            tool = self.owner.views.currentIndex()
-            if tool == 1:
-                title = "Working mix"
-            elif tool == 2:
-                title = "Mix context"
-            elif tool == 3:
-                title = "Section matching"
-                if self.owner.project.match_mode != "sections":
-                    after = None
-            else:
-                title = (
-                    "Section matching"
-                    if self.owner.project.match_mode == "sections"
-                    else "Matching"
-                )
-            if self.owner.project.stages["match"].bypassed:
-                title += " (stage skipped)"
-        return before, after, rate, title
+        key = self.viewer_context_key()
+        state = self.owner.comparison(key, Side.BEFORE)
+        if self.owner.views.currentIndex() == 3 and self.owner.project.match_mode != "sections":
+            state = replace(state, after=None)
+        return state.before, state.after, state.rate, self.viewer_title(key)
 
     def reference_target(self):
         if self.owner.views.currentWidget() in (
@@ -430,42 +390,40 @@ class SongWorkspace(QtWidgets.QWidget):
                 action.setChecked(key == self.signal.currentData())
 
     def sync_audio(self):
+        """Point playback at this tab's comparison for the chosen visible side.
+
+        The visible selector is the user's stated preference, so it decides the side
+        on every sync. A step whose After is missing falls back to Before, which the
+        viewer explains rather than silently dropping the request.
+        """
         if self.syncing or self.owner.source is None:
             return
-        before, after, _, _ = self.pairs()
+        key = self.viewer_context_key()
+        state = self.owner.comparison(key, Side.BEFORE)
+        if key == "repair" and self.owner.views.currentIndex() == 4 and not state.available:
+            # Repair only offers a comparison once it has been applied; until then
+            # this tab is showing the untouched recording.
+            key = ORIGINAL_ONLY
+        previous = self.owner.audition_mode
         chosen = self.signal.currentData()
-        clipping = self.owner.views.currentIndex() == 4
         if chosen == "original":
-            mode, processed = 2, False
-        elif clipping:
-            mode = 1 if self.owner.repair_preview is not None else 2
-            processed = chosen == "output" and after is not None
-        elif self.owner.views.currentWidget() is self.owner.manual_eq_view:
-            mode = self.owner.preview_mode.findData("eq")
-            processed = chosen == "output" and after is not None
-        elif self.owner.views.currentWidget() is self.owner.compressor_view:
-            mode = self.owner.preview_mode.findData("dynamics")
-            processed = chosen == "output" and after is not None
-        elif self.owner.views.currentWidget() is self.owner.output_view:
-            mode = self.owner.preview_mode.findData("output-gain")
-            processed = chosen == "output" and after is not None
+            key, side = ORIGINAL_ONLY, Side.ORIGINAL
+        elif state.available and chosen == "output":
+            side = Side.AFTER
         else:
-            mode, processed = 0, chosen == "output" and after is not None
-        self.syncing = True
-        try:
-            self.owner.preview_mode.setCurrentIndex(mode)
-            self.owner.listen_processed = processed
-            self.owner.update_ab_label()
-        finally:
-            self.syncing = False
+            side = Side.BEFORE
+        self.owner.apply_comparison(key, side)
+        self.owner.update_buttons()
         self.owner.update_ab_hint()
+        if key != previous:
+            self.follow_audition()
 
     def follow_audition(self):
         if self.syncing:
             return
         key = (
             "original"
-            if self.owner.audition_mode == "original"
+            if self.owner.audition_mode == ORIGINAL_ONLY
             else ("output" if self.owner.listen_processed else "input")
         )
         self.syncing = True
@@ -482,18 +440,17 @@ class SongWorkspace(QtWidgets.QWidget):
         the viewer comparing against the untouched recording, which silently
         disables the listening button while the inspector reports success.
         """
-        if self.owner.preview_mode.findData(key) < 0:
+        if not self.owner.comparison(key).available:
             return
         self.syncing = True
         try:
-            self.owner.preview_mode.setCurrentIndex(self.owner.preview_mode.findData(key))
             index = self.signal.findData("input")
             if index >= 0:
                 self.signal.setCurrentIndex(index)
         finally:
             self.syncing = False
-        self.owner.listen_processed = False
-        self.owner.update_ab_label()
+        self.owner.apply_comparison(key, Side.BEFORE)
+        self.owner.update_buttons()
         self.refresh()
 
     def render_completed(self):

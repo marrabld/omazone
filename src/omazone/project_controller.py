@@ -8,6 +8,7 @@ from uuid import uuid4
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .comparison import Side
 from .engine import MatchFilter, MatchSettings, analyse, audition_pair
 from .project import (
     MatchCalibration,
@@ -210,9 +211,7 @@ class ProjectController:
                     control.setValue(value)
             self.source = self.reference = None
             self.repair_result = self.repaired_source = self.repair_preview = None
-            self.audition_mode = "mastering"
-            with QtCore.QSignalBlocker(self.preview_mode):
-                self.preview_mode.setCurrentIndex(0)
+            self.apply_comparison("mastering", Side.BEFORE)
             self.invalidate(record=False)
             self.waveform.clear_audio()
             self.section_workbench.reference_waveform.clear_audio()
@@ -332,7 +331,7 @@ class ProjectController:
             self.project_path = Path(path) if path else None
             self.source = self.reference = None
             self.repair_result = self.repaired_source = self.repair_preview = None
-            self.audition_mode = "mastering"
+            self.apply_comparison("mastering", Side.BEFORE)
             self.invalidate(record=False)
             self.reset_playback_mode()
             self.waveform.clear_audio()

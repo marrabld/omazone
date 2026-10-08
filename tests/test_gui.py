@@ -11,6 +11,7 @@ import soundfile as sf
 from PySide6 import QtCore, QtTest, QtWidgets
 from scipy import signal
 
+from omazone.comparison import SPECS, Side
 from omazone.engine import analyse, audition_pair
 from omazone.gui import Window, load_audio
 from omazone.sections import SectionAssignment
@@ -713,7 +714,8 @@ def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(mon
         assert inspector.result_heading.text() == "Repair preview ready"
         assert not inspector.result_actions.isHidden()
         inspector.listen_button.click()
-        assert window.playing and window.transport.loop
+        # Choosing a comparison is a listening choice, not a transport choice.
+        assert window.playing and not window.transport.loop
         window.stream.callback(block, 32, None, None)
         np.testing.assert_array_equal(block, window.repair_preview[0][:32])
         window.toggle_ab()
@@ -1194,6 +1196,277 @@ def test_stage_viewer_and_playback_use_the_same_chain_prefixes(tmp_path, monkeyp
         window.close()
 
 
+def test_comparison_model_covers_every_stage_and_preserves_cursor_and_loop(tmp_path, monkeypatch):
+    """The one model must serve every pair, the viewer, and the transport."""
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(241).normal(0, 0.2, (32000, 2))
+    reference = np.random.default_rng(242).normal(0, 0.2, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
+        window.process()
+        wait()
+        window.manual_eq_view.add_band(2200, -4)
+        window.compressor_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        window.views.setCurrentWidget(window.output_view)
+        window.output_view.render_button.click()
+        wait()
+        result = window.chain_result
+        assert result is not None
+
+        # Every stage comparison names the same pair the viewer and transport use.
+        cases = (
+            ("mastering", window.match_page, result.repaired, result.matched),
+            ("eq", window.manual_eq_view, result.matched, result.equalized),
+            ("dynamics", window.compressor_view, result.equalized, result.pre_output),
+            ("output-gain", window.output_view, result.pre_output, result.output),
+        )
+        for key, view, expected_before, expected_after in cases:
+            window.views.setCurrentWidget(view)
+            before, after, actual_rate, _ = window.workspace.pairs()
+            state = window.comparison(key, Side.BEFORE)
+            assert actual_rate == rate == state.rate
+            np.testing.assert_array_equal(before, expected_before)
+            np.testing.assert_array_equal(after, expected_after)
+            np.testing.assert_array_equal(state.before, expected_before)
+            np.testing.assert_array_equal(state.after, expected_after)
+            assert state.available
+            assert state.aligned
+            expected = audition_pair(expected_before, expected_after)
+            np.testing.assert_array_equal(state.playback_arrays[0], expected[0])
+            np.testing.assert_array_equal(state.playback_arrays[1], expected[1])
+
+        # Bypassing a stage and rendering it again makes both sides identical.
+        window.views.setCurrentWidget(window.output_view)
+        for stage, key in (("eq", "eq"), ("dynamics", "dynamics"), ("output", "output-gain")):
+            window.set_stage_bypass(stage, True)
+            window.output_view.render_button.click()
+            wait()
+            state = window.comparison(key, Side.BEFORE)
+            assert state.available
+            assert state.bypassed
+            # The viewer names the skipped step, and both sides are the same signal.
+            assert window.workspace.viewer_title(key).endswith("(bypassed)")
+            np.testing.assert_array_equal(state.before, state.after)
+            window.set_stage_bypass(stage, False)
+        window.output_view.render_button.click()
+        wait()
+
+        # Cursor, selection, and loop belong to the transport, not to the comparison.
+        window.views.setCurrentWidget(window.output_view)
+        window.waveform.set_selection(SampleRegion(4000, 12000))
+        window.loop_selection.setChecked(True)
+        window.position = 6000
+        window.apply_comparison("eq", Side.BEFORE)
+        assert window.position == 6000
+        assert window.transport.loop
+        assert window.transport.region == SampleRegion(4000, 12000)
+        window.apply_comparison("eq", Side.AFTER)
+        assert window.position == 6000
+        assert window.transport.loop
+        window.toggle_ab()
+        assert window.position == 6000
+        assert window.transport.loop
+        assert window.ab_button.text() == "Listening: before EQ"
+
+        # Choosing a step starts on Before; original-only is a separate mode.
+        window.apply_comparison("dynamics", Side.AFTER)
+        assert window.listen_processed
+        window.apply_comparison("output-gain")
+        assert not window.listen_processed
+        window.apply_comparison("original")
+        assert window.audition_mode == "original"
+        assert not window.ab_button.isEnabled()
+
+        # A stale stage explains itself beside the control, not only on hover.
+        window.views.setCurrentWidget(window.output_view)
+        window.output_view.gain.setValue(-4)
+        window.apply_comparison("output-gain", Side.BEFORE)
+        assert not window.comparison("output-gain").available
+        assert window.ab_reason.text() == window.workflow_status().stages["output"].reason
+        assert window.ab_reason.text()
+        assert not window.ab_button.isEnabled()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_a_running_stream_always_has_a_comparable_pair(tmp_path, monkeypatch):
+    """Changing step mid-playback must not leave the callback without audio."""
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(251).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    block = np.empty((128, 2), dtype=np.float32)
+
+    def drain():
+        window.stream.callback(block, 128, None, None)
+        assert np.abs(block).max() > 0
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        # Play before anything is rendered, then visit every step comparison.
+        window.play()
+        assert window.playing
+        for view in (
+            window.manual_eq_view,
+            window.compressor_view,
+            window.output_view,
+            window.match_page,
+            window.manual_eq_view,
+        ):
+            window.views.setCurrentWidget(view)
+            app.processEvents()
+            assert window.playing, view
+            assert window.preview is not None, view
+            np.testing.assert_array_equal(window.preview[0], window.preview[1])
+            drain()
+            window.toggle_ab()
+            assert window.preview is not None
+            drain()
+        window.waveform.set_selection(SampleRegion(4000, 20000))
+        window.loop_selection.setChecked(True)
+        window.views.setCurrentWidget(window.output_view)
+        app.processEvents()
+        assert window.transport.loop
+        drain()
+        assert not errors
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_the_hidden_selector_and_the_selected_comparison_never_disagree(tmp_path):
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(252).normal(0, 0.1, (16000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        # Each comparison row in the selector must be the comparison it names.
+        for position, spec in enumerate(SPECS):
+            assert window.preview_mode.itemData(position) == spec.key
+            assert window.preview_mode.itemText(position) == (
+                f"{spec.before_label} / {spec.after_label}"
+            )
+            window.apply_comparison(spec.key, Side.BEFORE)
+            assert window.audition_mode == spec.key
+            assert window.preview_mode.currentData() == spec.key
+            assert window.preview_mode.currentIndex() == position
+            assert window.comparison().key == spec.key
+    finally:
+        window.close()
+
+
+def test_choosing_step_output_after_the_original_is_honoured(tmp_path):
+    """The visible selector is the user's preference, not a leftover side."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(253).normal(0, 0.1, (16000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def render():
+        window.views.setCurrentWidget(window.output_view)
+        window.output_view.gain.setValue(-3)
+        window.output_view.render_button.click()
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.manual_eq_view.add_band(2200, -4)
+        render()
+        assert window.comparison("output-gain").available
+
+        selector = window.workspace.signal
+        selector.setCurrentIndex(selector.findData("original"))
+        assert window.audition_mode == "original"
+        assert not window.listen_processed
+
+        # Asking for the rendered output after listening to the original must work.
+        selector.setCurrentIndex(selector.findData("output"))
+        assert window.audition_mode == "output-gain"
+        assert window.listen_processed
+        assert selector.currentData() == "output"
+        assert window.ab_button.text() == "Listening: after output gain"
+
+        selector.setCurrentIndex(selector.findData("input"))
+        assert window.audition_mode == "output-gain"
+        assert not window.listen_processed
+        assert window.ab_button.text() == "Listening: before output gain"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
 def test_comparison_button_explains_why_it_is_unavailable(tmp_path):
     """A disabled comparison must say what to do, not look broken."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -1381,7 +1654,7 @@ def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path,
         window.loaded("reference", load_audio(reference_path))
         window.process()
         wait()
-        matching_output = window.match_output.copy()
+        matching_output = window.match_after.copy()
         calibration = window.project.calibration
         coefficients = calibration.whole.coefficients.copy()
         matching_preview = window.mastering_preview
@@ -1402,15 +1675,20 @@ def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path,
         eq.render_button.click()
         wait()
         assert window.output is not None
-        np.testing.assert_array_equal(window.match_output, matching_output)
+        np.testing.assert_array_equal(window.match_after, matching_output)
         np.testing.assert_array_equal(window.project.calibration.whole.coefficients, coefficients)
         np.testing.assert_array_equal(window.output[0][:8000], matching_output[:8000])
         np.testing.assert_array_equal(window.output[0][24000:], matching_output[24000:])
         assert np.any(window.output[0][8000:24000] != matching_output[8000:24000])
         assert window.renderer.computations["match"] == 1
         assert window.views.currentWidget() is eq
+        # The user's own loop choice survives selecting a comparison.
+        window.waveform.set_selection(SampleRegion(8000, 24000))
+        window.loop_selection.setChecked(True)
+        assert window.transport.loop
         eq.listen_button.click()
-        assert window.audition_mode == "eq" and window.transport.loop
+        assert window.audition_mode == "eq"
+        assert window.transport.loop
         block = np.empty((128, 2), dtype=np.float32)
         window.stream.callback(block, 128, None, None)
         np.testing.assert_array_equal(block, window.eq_preview[0][8000:8128])

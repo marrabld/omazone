@@ -272,9 +272,8 @@ class ClippingInspector(QtWidgets.QWidget):
         self.update_table_view()
 
     def listen(self):
-        if self.owner.repair_preview is not None and self.owner.waveform.selection is not None:
-            self.owner.preview_mode.setCurrentIndex(1)
-            self.owner.loop_selection.setChecked(True)
+        if self.owner.comparison("repair").available and self.owner.waveform.selection is not None:
+            self.owner.apply_comparison("repair")
             self.owner.play_selection()
 
     def settings(self):

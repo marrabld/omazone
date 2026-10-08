@@ -277,8 +277,9 @@ class ManualEQView(QtWidgets.QWidget):
         )
         if region:
             self.owner.waveform.set_selection(region.bounds)
-            self.owner.loop_selection.setChecked(True)
-        self.owner.preview_mode.setCurrentIndex(self.owner.preview_mode.findData("eq"))
+        # Looping stays whatever the user chose: selecting a comparison must not
+        # change the transport, so this only moves the listening side.
+        self.owner.apply_comparison("eq")
         if self.owner.waveform.selection:
             self.owner.play_selection()
         else:

@@ -1,6 +1,7 @@
 """Qt desktop workbench. DSP and file loading run outside the UI thread."""
 
 import argparse
+import contextlib
 import copy
 import math
 import sys
@@ -12,6 +13,8 @@ import soundfile as sf
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .clipping_view import ClippingInspector
+from .comparison import ORIGINAL as ORIGINAL_ONLY
+from .comparison import SPECS, Side, StagePair, resolve, spec_for
 from .compressor_view import CompressorView
 from .engine import (
     analyse,
@@ -24,7 +27,7 @@ from .manual_eq_view import ManualEQView
 from .output_view import OutputView
 from .pipeline import ChainRenderer
 from .playback import PlaybackCursor
-from .project import AudioReference, MatchCalibration, Project
+from .project import STAGES, AudioReference, MatchCalibration, Project
 from .project_controller import ProjectController
 from .section_view import SectionWorkbench
 from .sections import TargetProfile
@@ -183,7 +186,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.dynamics_before = None
         self.output_preview = None
         self.output_before = None
-        self.match_output = None
+        self.match_after = None
+        self.eq_after = None
+        self.dynamics_after = None
+        self.output_after = None
         self.chain_result = None
         self.renderer = None
         self.renderer_key = None
@@ -196,6 +202,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.listen_processed = False
         self.resume_after_scrub = False
         self.resume_after_selection_edit = False
+        self._workflow_status = None
+        self._identity_playback = None
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -414,13 +422,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.play_button = self.button(row, "Play", self.play)
         self.button(row, "Stop", self.stop)
         self.ab_button = self.button(row, "Listening: original", self.toggle_ab)
+        self.ab_reason = QtWidgets.QLabel("")
+        self.ab_reason.setWordWrap(True)
+        row.addWidget(self.ab_reason, 1)
         self.preview_mode = QtWidgets.QComboBox()
-        self.preview_mode.addItem("Input / mastered", "mastering")
-        self.preview_mode.addItem("Original / repaired", "repair")
-        self.preview_mode.addItem("Original recording", "original")
-        self.preview_mode.addItem("Before / after manual EQ", "eq")
-        self.preview_mode.addItem("Before / after compression", "dynamics")
-        self.preview_mode.addItem("Before / after output gain", "output-gain")
+        for spec in SPECS:
+            self.preview_mode.addItem(f"{spec.before_label} / {spec.after_label}", spec.key)
         self.preview_mode.currentIndexChanged.connect(self.preview_mode_changed)
         row.addWidget(self.preview_mode)
         layout.addLayout(row)
@@ -532,17 +539,117 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         layout.addWidget(plot, 1)
         return plot
 
+    def stage_pair(self, stage):
+        """One stage's raw input/output and its rendered audible pair.
+
+        Outputs are cached per stage so editing a later stage keeps every earlier
+        comparison valid instead of discarding the whole chain.
+        """
+        if stage == "repair":
+            return StagePair(
+                self.source[0] if self.source is not None else None,
+                self.repair_result.audio if self.repair_result is not None else None,
+                self.repair_preview,
+            )
+        if stage == "match":
+            processing = self.processing_source()
+            return StagePair(
+                processing[0] if processing is not None else None,
+                self.match_after if self.mastering_preview is not None else None,
+                self.mastering_preview,
+            )
+        if stage == "eq":
+            return StagePair(
+                self.eq_before,
+                self.eq_after if self.eq_preview is not None else None,
+                self.eq_preview,
+            )
+        if stage == "dynamics":
+            return StagePair(
+                self.dynamics_before,
+                self.dynamics_after if self.dynamics_preview is not None else None,
+                self.dynamics_preview,
+            )
+        return StagePair(
+            self.output_before,
+            self.output_after if self.output_preview is not None else None,
+            self.output_preview,
+        )
+
+    def comparison_pairs(self):
+        return {stage: self.stage_pair(stage) for stage in STAGES}
+
+    def comparison_side(self):
+        if self.audition_mode == ORIGINAL_ONLY:
+            return Side.ORIGINAL
+        return Side.AFTER if self.listen_processed else Side.BEFORE
+
+    def comparison(self, key=None, side=None):
+        """Resolve the selected comparison through the shared model."""
+        selected = self.audition_mode if key is None else key
+        if side is None:
+            side = self.comparison_side() if selected == self.audition_mode else Side.BEFORE
+        stage = spec_for(selected).stage
+        return resolve(
+            selected,
+            self.comparison_pairs(),
+            side=self.comparison_side() if side is None else side,
+            original=self.source[0] if self.source is not None else None,
+            fallback=(self.processing_source() or (None,))[0],
+            rate=self.source[1] if self.source is not None else 1,
+            bypassed={name: item.bypassed for name, item in self.project.stages.items()},
+            reason=self.workflow_status().stages[stage].reason if stage else "",
+            input_label="repaired input" if self.repair_active else "original",
+        )
+
+    def apply_comparison(self, key=None, side=None):
+        """Point the transport at whatever the shared model resolved.
+
+        This is the only place that selects a comparison, so the listening side
+        and the hidden selector can never disagree with what is audible.
+        """
+        state = self.comparison(key, side)
+        self.audition_mode = state.key
+        self.listen_processed = state.side.processed
+        self.preview = state.rendered_playback
+        if self.preview is None and self.playing:
+            # The callback reads one cursor across a pair of arrays, so a stream
+            # that is already running must keep a usable pair when a step has
+            # nothing rendered to compare yet. Matching a full recording costs a
+            # pass over it, so keep the last identity pair rather than rebuilding
+            # it on every step change.
+            cached = self._identity_playback
+            if cached is None or cached[0] != id(state.before):
+                cached = (id(state.before), state.playback_arrays)
+                self._identity_playback = cached
+            self.preview = cached[1]
+        with QtCore.QSignalBlocker(self.preview_mode):
+            self.preview_mode.setCurrentIndex(self.preview_mode.findData(state.key))
+        self.update_ab_label()
+        self.update_ab_hint()
+
+    @contextlib.contextmanager
+    def shared_workflow_status(self):
+        """Resolve workflow status once for a burst of control updates.
+
+        Deriving it costs a config digest, and the comparison model needs a reason
+        string from it on every control it refreshes.
+        """
+        previous = self._workflow_status
+        if previous is None:
+            self._workflow_status = self.derive_workflow_status()
+        try:
+            yield self._workflow_status
+        finally:
+            self._workflow_status = previous
+
     def workflow_status(self):
-        rendered = set()
-        for stage, preview in (
-            ("repair", self.repair_preview),
-            ("match", self.mastering_preview),
-            ("eq", self.eq_preview),
-            ("dynamics", self.dynamics_preview),
-            ("output", self.output_preview),
-        ):
-            if preview is not None:
-                rendered.add(stage)
+        if self._workflow_status is not None:
+            return self._workflow_status
+        return self.derive_workflow_status()
+
+    def derive_workflow_status(self):
+        rendered = {stage for stage in STAGES if self.comparison_pairs()[stage].after is not None}
         return derive_workflow_status(
             self.project,
             source_loaded=self.source is not None,
@@ -553,8 +660,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
 
     def update_buttons(self):
+        with self.shared_workflow_status() as workflow:
+            self.refresh_controls(workflow)
+
+    def refresh_controls(self, workflow):
         busy = self.worker is not None
-        workflow = self.workflow_status()
         self.load_mix.setEnabled(not busy)
         self.load_ref.setEnabled(not busy)
         self.process_button.setEnabled(
@@ -564,13 +674,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
         self.export_button.setEnabled(not busy and workflow.export_available)
         self.play_button.setEnabled(not busy and self.source is not None)
-        self.ab_button.setEnabled(
-            not busy
-            and self.audition_mode != "original"
-            and workflow.comparison_available(self.audition_mode)
-        )
         self.preview_mode.setEnabled(not busy and self.source is not None)
-        self.preview_mode.model().item(1).setEnabled(workflow.stages["repair"].comparison_available)
+        for position, spec in enumerate(SPECS):
+            stage = spec.stage
+            self.preview_mode.model().item(position).setEnabled(
+                stage is None or self.comparison(spec.key).available
+            )
         self.seek_slider.setEnabled(not busy and self.source is not None)
         self.waveform.setEnabled(not busy and self.source is not None)
         self.region_page.setEnabled(not busy and self.source is not None)
@@ -594,7 +703,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             and bool(self.clipping_inspector.report.candidates)
         )
         self.clipping_inspector.listen_button.setEnabled(
-            not busy and has_selection and self.repair_result is not None
+            not busy and has_selection and self.comparison("repair").available
         )
         self.clipping_inspector.repair_button.setEnabled(
             not busy and bool(self.clipping_inspector.checked_intervals())
@@ -614,20 +723,18 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.manual_eq_view.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.canvas.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.render_button.setEnabled(not busy and workflow.render_allowed)
-        self.manual_eq_view.listen_button.setEnabled(
-            not busy and workflow.stages["eq"].comparison_available
-        )
+        self.manual_eq_view.listen_button.setEnabled(not busy and self.comparison("eq").available)
         self.compressor_view.setEnabled(not busy and self.source is not None)
         self.compressor_view.canvas.setEnabled(not busy and self.source is not None)
         self.compressor_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.compressor_view.listen_button.setEnabled(
-            not busy and workflow.stages["dynamics"].comparison_available
+            not busy and self.comparison("dynamics").available
         )
         self.output_view.setEnabled(not busy and self.source is not None)
         self.output_view.canvas.setEnabled(not busy and self.source is not None)
         self.output_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.output_view.listen_button.setEnabled(
-            not busy and workflow.stages["output"].comparison_available
+            not busy and self.comparison("output-gain").available
         )
         self.update_project_actions()
         if not busy:
@@ -939,9 +1046,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         setattr(self, target, data)
         if target == "source":
             self.repair_result = self.repaired_source = self.repair_preview = None
-            self.audition_mode = "mastering"
-            with QtCore.QSignalBlocker(self.preview_mode):
-                self.preview_mode.setCurrentIndex(0)
+        self.apply_comparison("mastering", Side.BEFORE)
         self.invalidate(record=False)
         if target == "source":
             self.reset_playback_mode()
@@ -978,13 +1083,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         self.output = None
         self.section_result = None
-        self.mastering_preview = None
-        self.eq_preview = self.eq_before = self.match_output = self.chain_result = None
-        self.dynamics_preview = self.dynamics_before = None
-        self.output_preview = self.output_before = None
-        self.preview = self.repair_preview if self.audition_mode == "repair" else None
-        self.listen_processed = False
-        self.update_ab_label()
+        self.mastering_preview = self.match_after = None
+        self.eq_preview = self.eq_before = self.eq_after = self.chain_result = None
+        self.dynamics_preview = self.dynamics_before = self.dynamics_after = None
+        self.output_preview = self.output_before = self.output_after = None
+        self.apply_comparison(side=Side.BEFORE)
         self.reset_filter_view()
         self.meters.setText("Process to update measurements.")
         self.update_buttons()
@@ -993,18 +1096,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.project_changed()
         self.stop()
         self.output = None
-        self.eq_preview = None
+        self.eq_preview = self.eq_after = None
         self.dynamics_preview = None
-        self.dynamics_before = None
-        self.output_preview = self.output_before = None
+        self.dynamics_before = self.dynamics_after = None
+        self.output_preview = self.output_before = self.output_after = None
         self.chain_result = None
-        self.preview = (
-            None
-            if self.audition_mode in ("eq", "dynamics", "output-gain")
-            else self.mastering_preview
-        )
-        self.listen_processed = False
-        self.update_ab_label()
+        self.apply_comparison(side=Side.BEFORE)
         self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
@@ -1013,12 +1110,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.project_changed()
         self.stop()
         self.output = None
-        self.dynamics_preview = None
-        self.output_preview = self.output_before = None
+        self.dynamics_preview = self.dynamics_after = None
+        self.output_preview = self.output_before = self.output_after = None
         self.chain_result = None
-        self.preview = None if self.audition_mode in ("dynamics", "output-gain") else self.preview
-        self.listen_processed = False
-        self.update_ab_label()
+        self.apply_comparison(side=Side.BEFORE)
         self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
@@ -1027,12 +1122,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.project_changed()
         self.stop()
         self.output = None
-        self.output_preview = None
+        self.output_preview = self.output_after = None
         self.chain_result = None
-        if self.audition_mode == "output-gain":
-            self.preview = None
-        self.listen_processed = False
-        self.update_ab_label()
+        self.apply_comparison(side=Side.BEFORE)
         self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
@@ -1127,18 +1219,17 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_preview = self.preview = result[3]
         if len(result) > 4:
             self.chain_result = result[4]
-            self.match_output = result[4].matched
+            self.match_after = result[4].matched
             self.eq_before = result[4].matched
+            self.eq_after = result[4].equalized
             self.eq_preview = result[5]
             self.dynamics_before = result[4].equalized
+            self.dynamics_after = result[4].pre_output
             self.dynamics_preview = result[6]
             self.output_before = result[4].pre_output
+            self.output_after = result[4].output
             self.output_preview = result[7]
-        self.audition_mode = "mastering"
-        with QtCore.QSignalBlocker(self.preview_mode):
-            self.preview_mode.setCurrentIndex(0)
-        self.listen_processed = False
-        self.update_ab_label()
+        self.apply_comparison("mastering", Side.BEFORE)
         self.plot_spectra()
         spec = self.output[2]
         if learn:
@@ -1171,12 +1262,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         disabled while the inspector reported a successful render.
         """
         tool = self.views.currentWidget()
-        if tool is self.manual_eq_view and self.eq_preview is not None:
-            self.workspace.focus_comparison("eq")
-        elif tool is self.compressor_view and self.dynamics_preview is not None:
-            self.workspace.focus_comparison("dynamics")
-        elif tool is self.output_view and self.output_preview is not None:
-            self.workspace.focus_comparison("output-gain")
+        key = {
+            id(self.manual_eq_view): "eq",
+            id(self.compressor_view): "dynamics",
+            id(self.output_view): "output-gain",
+        }.get(id(tool))
+        if key is not None and self.comparison(key).available:
+            self.workspace.focus_comparison(key)
 
     def draw_filter(self, spec):
         self.eq_plot.clear()
@@ -1240,24 +1332,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return
         self.stop()
         if self.preview is None:
-            source = (
-                self.eq_before
-                if self.audition_mode == "eq" and self.eq_before is not None
-                else (
-                    self.dynamics_before
-                    if self.audition_mode == "dynamics" and self.dynamics_before is not None
-                    else (
-                        self.output_before
-                        if self.audition_mode == "output-gain" and self.output_before is not None
-                        else (
-                            self.processing_source()[0]
-                            if self.audition_mode == "mastering"
-                            else self.source[0]
-                        )
-                    )
-                )
-            )
-            self.preview = audition_pair(source, source)
+            self.preview = self.comparison().playback_arrays
         if self.transport.region is not None:
             region = self.transport.region
             if not region.start <= self.position < region.end:
@@ -1352,67 +1427,38 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.workspace.follow_audition()
 
     def update_ab_label(self):
-        if self.audition_mode == "original":
-            label = "original"
-        elif self.audition_mode == "eq":
-            label = "after EQ" if self.listen_processed else "before EQ"
-        elif self.audition_mode == "dynamics":
-            label = "after compression" if self.listen_processed else "before compression"
-        elif self.audition_mode == "output-gain":
-            label = "after output gain" if self.listen_processed else "before output gain"
-        elif self.audition_mode == "repair":
-            label = "repaired" if self.listen_processed else "original"
-        else:
-            label = (
-                "processed"
-                if self.listen_processed
-                else ("repaired input" if self.repair_active else "original")
-            )
-        self.ab_button.setText(f"Listening: {label}")
+        self.ab_button.setText(f"Listening: {self.comparison().side_label}")
 
     def update_ab_hint(self):
-        """Say why comparison is unavailable instead of showing a dead button."""
-        if self.ab_button.isEnabled():
-            self.ab_button.setToolTip("Switch between the two compared signals.")
-        elif self.audition_mode == "original":
-            self.ab_button.setToolTip(
+        """Explain the comparison beside the control, not only in a tooltip."""
+        state = self.comparison()
+        if state.side is Side.ORIGINAL:
+            reason = (
                 "Original recording only. Choose View -> Step input to compare a processing step."
             )
         elif self.worker is not None:
-            self.ab_button.setToolTip("Waiting for rendering to finish.")
+            reason = "Waiting for rendering to finish."
         elif self.source is None:
-            self.ab_button.setToolTip("Load a recording first.")
+            reason = "Load a recording first."
+        elif not state.aligned:
+            reason = "Comparison sides are not the same length, so they cannot be compared."
+        elif state.available:
+            reason = f"{state.labels[0]} / {state.labels[1]}"
         else:
-            stage = {
-                "repair": "repair",
-                "eq": "eq",
-                "dynamics": "dynamics",
-                "output-gain": "output",
-                "mastering": "match",
-            }.get(self.audition_mode)
-            self.ab_button.setToolTip(
-                self.workflow_status().stages[stage].reason
-                if stage is not None
-                else "Choose a processing step to compare."
-            )
+            reason = state.reason
+        self.ab_reason.setText(reason)
+        self.ab_button.setToolTip(reason)
+        self.ab_button.setEnabled(
+            self.worker is None and state.side is not Side.ORIGINAL and state.available
+        )
 
     def preview_mode_changed(self):
+        key = self.preview_mode.currentData()
+        if key == self.audition_mode:
+            return
         resume = self.playing
         self.stop()
-        self.audition_mode = self.preview_mode.currentData()
-        self.preview = (
-            self.eq_preview
-            if self.audition_mode == "eq"
-            else self.dynamics_preview
-            if self.audition_mode == "dynamics"
-            else self.output_preview
-            if self.audition_mode == "output-gain"
-            else self.repair_preview
-            if self.audition_mode == "repair"
-            else (self.mastering_preview if self.audition_mode == "mastering" else None)
-        )
-        self.listen_processed = False
-        self.update_ab_label()
+        self.apply_comparison(key, Side.BEFORE)
         self.update_buttons()
         self.workspace.follow_audition()
         if resume:
@@ -1445,12 +1491,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
         self.repair_preview = previews
         self.invalidate()
-        with QtCore.QSignalBlocker(self.preview_mode):
-            self.preview_mode.setCurrentIndex(1)
-        self.audition_mode = "repair"
-        self.preview = previews
-        self.listen_processed = False
-        self.update_ab_label()
+        self.apply_comparison("repair", Side.BEFORE)
         self.waveform.set_repair(result)
         self.plot_spectra()
         self.views.setCurrentWidget(self.clipping_inspector)
@@ -1470,9 +1511,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.repair_result = self.repaired_source = self.repair_preview = None
         self.repair_unavailable = False
         self.project.repairs = []
-        self.audition_mode = "mastering"
-        with QtCore.QSignalBlocker(self.preview_mode):
-            self.preview_mode.setCurrentIndex(0)
+        self.apply_comparison("mastering", Side.BEFORE)
         self.invalidate()
         self.waveform.set_repair(None)
         self.clipping_inspector.reset_repair_status()

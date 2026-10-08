@@ -48,16 +48,6 @@ class WorkflowStatus:
     analysis_allowed: bool
     render_reason: str
 
-    def comparison_available(self, mode):
-        stage = {
-            "repair": "repair",
-            "eq": "eq",
-            "dynamics": "dynamics",
-            "output-gain": "output",
-            "mastering": "match",
-        }.get(mode)
-        return stage is not None and self.stages[stage].comparison_available
-
 
 def matching_analysis_state(project):
     match = project.stages["match"]
