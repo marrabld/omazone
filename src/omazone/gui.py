@@ -31,6 +31,7 @@ from .sections import TargetProfile
 from .tool_panel import ToolPanel
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
+from .workflow_status import AnalysisState, RenderState, derive_workflow_status
 from .workspace import SongWorkspace
 
 
@@ -531,36 +532,45 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         layout.addWidget(plot, 1)
         return plot
 
+    def workflow_status(self):
+        rendered = set()
+        for stage, preview in (
+            ("repair", self.repair_preview),
+            ("match", self.mastering_preview),
+            ("eq", self.eq_preview),
+            ("dynamics", self.dynamics_preview),
+            ("output", self.output_preview),
+        ):
+            if preview is not None:
+                rendered.add(stage)
+        return derive_workflow_status(
+            self.project,
+            source_loaded=self.source is not None,
+            repair_unavailable=self.repair_unavailable,
+            rendered_stages=rendered,
+            final_render_current=self.output is not None and self.chain_result is not None,
+            sample_rate=self.source[1] if self.source is not None else 48000,
+        )
+
     def update_buttons(self):
         busy = self.worker is not None
+        workflow = self.workflow_status()
         self.load_mix.setEnabled(not busy)
         self.load_ref.setEnabled(not busy)
         self.process_button.setEnabled(
             not busy
-            and self.source is not None
+            and workflow.analysis_allowed
             and (self.reference is not None or self.project.reference_target is not None)
         )
-        self.export_button.setEnabled(not busy and self.output is not None)
+        self.export_button.setEnabled(not busy and workflow.export_available)
         self.play_button.setEnabled(not busy and self.source is not None)
         self.ab_button.setEnabled(
             not busy
             and self.audition_mode != "original"
-            and (
-                self.repair_preview is not None
-                if self.audition_mode == "repair"
-                else (
-                    self.eq_preview is not None
-                    if self.audition_mode == "eq"
-                    else self.dynamics_preview is not None
-                    if self.audition_mode == "dynamics"
-                    else self.output_preview is not None
-                    if self.audition_mode == "output-gain"
-                    else self.mastering_preview is not None
-                )
-            )
+            and workflow.comparison_available(self.audition_mode)
         )
         self.preview_mode.setEnabled(not busy and self.source is not None)
-        self.preview_mode.model().item(1).setEnabled(self.repair_preview is not None)
+        self.preview_mode.model().item(1).setEnabled(workflow.stages["repair"].comparison_available)
         self.seek_slider.setEnabled(not busy and self.source is not None)
         self.waveform.setEnabled(not busy and self.source is not None)
         self.region_page.setEnabled(not busy and self.source is not None)
@@ -572,7 +582,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.clipping_inspector.setEnabled(not busy and self.source is not None)
         self.section_workbench.capture_button.setEnabled(not busy and self.reference is not None)
         self.section_workbench.render_button.setEnabled(
-            not busy and self.source is not None and bool(self.section_workbench.sections)
+            not busy and workflow.analysis_allowed and bool(self.section_workbench.sections)
         )
         has_selection = self.source is not None and self.waveform.selection is not None
         self.clipping_inspector.analyse_button.setEnabled(not busy and has_selection)
@@ -603,24 +613,41 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.clipping_inspector.refresh_actions()
         self.manual_eq_view.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.canvas.setEnabled(not busy and self.source is not None)
-        self.manual_eq_view.render_button.setEnabled(not busy and self.source is not None)
-        self.manual_eq_view.listen_button.setEnabled(not busy and self.eq_preview is not None)
+        self.manual_eq_view.render_button.setEnabled(not busy and workflow.render_allowed)
+        self.manual_eq_view.listen_button.setEnabled(
+            not busy and workflow.stages["eq"].comparison_available
+        )
         self.compressor_view.setEnabled(not busy and self.source is not None)
         self.compressor_view.canvas.setEnabled(not busy and self.source is not None)
-        self.compressor_view.render_button.setEnabled(not busy and self.source is not None)
+        self.compressor_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.compressor_view.listen_button.setEnabled(
-            not busy and self.dynamics_preview is not None
+            not busy and workflow.stages["dynamics"].comparison_available
         )
         self.output_view.setEnabled(not busy and self.source is not None)
         self.output_view.canvas.setEnabled(not busy and self.source is not None)
-        self.output_view.render_button.setEnabled(not busy and self.source is not None)
-        self.output_view.listen_button.setEnabled(not busy and self.output_preview is not None)
+        self.output_view.render_button.setEnabled(not busy and workflow.render_allowed)
+        self.output_view.listen_button.setEnabled(
+            not busy and workflow.stages["output"].comparison_available
+        )
         self.update_project_actions()
+        if not busy:
+            self.update_stage_summaries(workflow)
         self.update_ab_hint()
         self.workspace.refresh()
         self.update_action_bar()
 
+    def update_stage_summaries(self, workflow):
+        for stage, view in (
+            ("eq", self.manual_eq_view),
+            ("dynamics", self.compressor_view),
+            ("output", self.output_view),
+        ):
+            status = workflow.stages[stage]
+            if not status.comparison_available:
+                view.summary.setText(status.reason)
+
     def update_action_bar(self):
+        workflow = self.workflow_status()
         matching = self.views.currentWidget() is self.match_page
         sections = self.views.currentWidget() is self.section_workbench
         regions = self.views.currentWidget() is self.region_page
@@ -694,25 +721,26 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         elif clipping:
             message = self.clipping_inspector.result_heading.text()
         elif manual_eq:
+            stage = workflow.stages["eq"]
             message = (
                 "EQ rendered. Click the listening button to compare before/after EQ, or export."
-                if self.eq_preview is not None
-                else "Adjust the band, then render. Earlier work is retained."
+                if stage.state is RenderState.READY
+                else stage.reason
             )
         elif compressor:
+            stage = workflow.stages["dynamics"]
             message = (
                 "Compression rendered. Click the listening button to compare, or export."
-                if self.dynamics_preview is not None
-                else "Adjust compression, then render. Earlier EQ is retained."
+                if stage.state is RenderState.READY
+                else stage.reason
             )
         elif output:
+            stage = workflow.stages["output"]
             message = (
                 "Output measured. Review sample peaks, compare or export."
-                if self.output_preview is not None
-                else "Set final gain and render to check sample peaks."
+                if stage.measurements_available
+                else stage.reason
             )
-        elif matching and self.reference is None and self.project.reference_target is None:
-            message = "Mix loaded. Add a reference."
         elif sections:
             count = len(self.section_workbench.sections)
             message = (
@@ -720,8 +748,20 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 if count
                 else "Select a mix passage and add a section."
             )
-        elif self.output is not None and self.project.match_mode == "whole":
-            message = "Matching complete. Compare the result or export."
+        elif matching:
+            stage = workflow.stages["match"]
+            if workflow.matching_analysis is AnalysisState.RETAINED and stage.comparison_available:
+                message = "Matching rendered with analysis retained from an earlier input."
+            elif stage.state is RenderState.READY:
+                message = "Matching complete. Compare the result or export."
+            elif self.project.match_mode == "none" and not self.project.stages["match"].bypassed:
+                message = (
+                    "Matching is optional. Add a reference to analyse it; otherwise it passes unchanged."
+                    if self.reference is None and self.project.reference_target is None
+                    else "Mix and reference ready. Analyse Matching, or leave it unchanged."
+                )
+            else:
+                message = stage.reason
         else:
             message = "Mix and reference ready."
         self.views.action_label.setText(message)
@@ -965,6 +1005,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
         self.listen_processed = False
         self.update_ab_label()
+        self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
 
@@ -978,6 +1019,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.preview = None if self.audition_mode in ("dynamics", "output-gain") else self.preview
         self.listen_processed = False
         self.update_ab_label()
+        self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
 
@@ -991,6 +1033,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.preview = None
         self.listen_processed = False
         self.update_ab_label()
+        self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
 
@@ -1046,6 +1089,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return
         if self.reference is None and self.project.reference_target is None:
             self.error("Load a reference or open a project with a captured reference spectrum.")
+            return
+        workflow = self.workflow_status()
+        if not workflow.analysis_allowed:
+            self.error(workflow.render_reason)
             return
         self.project.match_mode = "whole"
         self.sync_project()
@@ -1336,8 +1383,17 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         elif self.source is None:
             self.ab_button.setToolTip("Load a recording first.")
         else:
+            stage = {
+                "repair": "repair",
+                "eq": "eq",
+                "dynamics": "dynamics",
+                "output-gain": "output",
+                "mastering": "match",
+            }.get(self.audition_mode)
             self.ab_button.setToolTip(
-                "Render this step to compare it. Earlier stages stay available."
+                self.workflow_status().stages[stage].reason
+                if stage is not None
+                else "Choose a processing step to compare."
             )
 
     def preview_mode_changed(self):

@@ -132,15 +132,8 @@ class ProjectController:
         self.named_regions_menu.setEnabled(not busy)
         for item in self.project_actions:
             item.setEnabled(not busy)
-        self.render_saved_action.setEnabled(
-            not busy
-            and self.source is not None
-            and (
-                self.project.match_mode == "none"
-                or self.project.stages["match"].bypassed
-                or self.project.can_render_saved_match
-            )
-        )
+        workflow = self.workflow_status()
+        self.render_saved_action.setEnabled(not busy and workflow.render_allowed)
         for key, item in self.stage_actions.items():
             with QtCore.QSignalBlocker(item):
                 item.setChecked(self.project.stages[key].bypassed)
@@ -478,18 +471,10 @@ class ProjectController:
     def render_saved_recipe(self):
         if not self.ensure_processing_ready():
             return
-        if self.source is None:
-            self.error("Relink the original recording first. Saved choices are retained.")
-            return
         self.sync_project()
-        if (
-            self.project.match_mode != "none"
-            and not self.project.stages["match"].bypassed
-            and not self.project.can_render_saved_match
-        ):
-            self.error(
-                "Matching configuration needs analysis. Existing calibration is retained; use Analyse explicitly to update it."
-            )
+        workflow = self.workflow_status()
+        if not workflow.render_allowed:
+            self.error(workflow.render_reason)
             return
         snapshot = copy.deepcopy(self.project)
         renderer = self.get_renderer()
@@ -528,8 +513,8 @@ class ProjectController:
             self.status.setText(
                 "Rendered saved recipe without relearning."
                 + (
-                    " Calibration was learned on earlier input."
-                    if self.project.needs_reanalysis
+                    " Matching analysis was retained from an earlier input."
+                    if self.workflow_status().matching_analysis.value == "retained"
                     else ""
                 )
             )

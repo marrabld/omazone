@@ -13,7 +13,9 @@ from scipy import signal
 
 from omazone.engine import analyse, audition_pair
 from omazone.gui import Window, load_audio
+from omazone.sections import SectionAssignment
 from omazone.waveform import PeakIndex, SampleRegion
+from omazone.workflow_status import AnalysisState, RenderState
 
 
 def test_load_render_export(tmp_path, monkeypatch):
@@ -828,6 +830,8 @@ def test_saved_project_restores_recipe_and_renders_without_relearning(tmp_path, 
         assert window.position == 4000 and window.transport.loop
         np.testing.assert_allclose(window.waveform.channel_plots[0].viewRange()[0], [0.03, 0.2])
         assert window.output is None and window.project.can_render_saved_match
+        assert window.workflow_status().matching_analysis is AnalysisState.CURRENT
+        assert not window.workflow_status().export_available
         window.render_saved_recipe()
         wait()
         np.testing.assert_allclose(window.output[0], expected, atol=1e-12)
@@ -837,6 +841,7 @@ def test_saved_project_restores_recipe_and_renders_without_relearning(tmp_path, 
         window.set_stage_bypass("repair", True)
         assert window.processing_source() is window.source
         assert window.project.needs_reanalysis and window.project.can_render_saved_match
+        assert window.workflow_status().matching_analysis is AnalysisState.RETAINED
         assert window.project.repairs and workbench.sections
         window.render_saved_recipe()
         wait()
@@ -844,6 +849,8 @@ def test_saved_project_restores_recipe_and_renders_without_relearning(tmp_path, 
             window.project.calibration.sections[0].filter.coefficients, coefficients
         )
         assert window.project.needs_reanalysis  # Saved rendering did not silently relearn.
+        assert window.workflow_status().matching_analysis is AnalysisState.RETAINED
+        assert window.workflow_status().export_available
 
         # Missing files retain the recipe and opaque future-stage settings.
         source_path.rename(tmp_path / "moved.wav")
@@ -1200,18 +1207,123 @@ def test_comparison_button_explains_why_it_is_unavailable(tmp_path):
         assert "load a recording" in window.ab_button.toolTip().lower()
         window.loaded("source", load_audio(source))
         app.processEvents()
-        # A recording is loaded but nothing has been rendered for this step yet.
-        assert "render" in window.ab_button.toolTip().lower()
+        assert "passes unchanged" in window.ab_button.toolTip().lower()
         window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("original"))
         app.processEvents()
         assert not window.ab_button.isEnabled()
         assert "step input" in window.ab_button.toolTip().lower()
         window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("input"))
         app.processEvents()
-        # Nothing has been rendered yet, so there is no second signal to compare
-        # and the hint must point back at rendering rather than at the view.
+        # Returning to step input explains the identity behavior.
         assert not window.ab_button.isEnabled()
-        assert "render" in window.ab_button.toolTip().lower()
+        assert "passes unchanged" in window.ab_button.toolTip().lower()
+    finally:
+        window.close()
+
+
+def test_shared_status_tracks_targeted_edits_and_clears_final_measurements(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(233).normal(0, 0.15, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    def render():
+        window.views.setCurrentWidget(window.output_view)
+        window.output_view.render_button.click()
+        wait()
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.manual_eq_view.add_band(2200, -4)
+        window.compressor_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        render()
+
+        status = window.workflow_status()
+        assert status.stages["eq"].state is RenderState.READY
+        assert status.stages["dynamics"].state is RenderState.READY
+        assert status.stages["output"].state is RenderState.READY
+        assert status.export_available and window.export_button.isEnabled()
+        assert "Output RMS" in window.meters.text()
+
+        window.output_view.gain.setValue(-4)
+        status = window.workflow_status()
+        assert status.stages["eq"].state is RenderState.READY
+        assert status.stages["dynamics"].state is RenderState.READY
+        assert status.stages["output"].state is RenderState.NEEDS_RENDER
+        assert not status.export_available and not window.export_button.isEnabled()
+        assert window.meters.text() == "Render to update measurements."
+        assert window.output_view.summary.text() == status.stages["output"].reason
+        assert window.views.action_label.text() == status.stages["output"].reason
+        window.output_view.draw()
+        assert "render to measure" in window.output_view.readouts[2].text()
+
+        render()
+        window.views.setCurrentWidget(window.compressor_view)
+        window.compressor_view.threshold.setValue(-22)
+        status = window.workflow_status()
+        assert status.stages["eq"].state is RenderState.READY
+        assert status.stages["dynamics"].state is RenderState.NEEDS_RENDER
+        assert status.stages["output"].state is RenderState.NEEDS_RENDER
+        assert not window.export_button.isEnabled()
+        assert window.compressor_view.summary.text() == status.stages["dynamics"].reason
+        assert window.views.action_label.text() == status.stages["dynamics"].reason
+
+        render()
+        window.views.setCurrentWidget(window.manual_eq_view)
+        window.manual_eq_view.gain.setValue(-5)
+        status = window.workflow_status()
+        assert status.stages["eq"].state is RenderState.NEEDS_RENDER
+        assert status.stages["dynamics"].state is RenderState.NEEDS_RENDER
+        assert status.stages["output"].state is RenderState.NEEDS_RENDER
+        assert not window.export_button.isEnabled()
+        assert window.manual_eq_view.summary.text() == status.stages["eq"].reason
+        assert window.views.action_label.text() == status.stages["eq"].reason
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_analysis_handlers_reject_an_invalid_downstream_recipe():
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(234).normal(0, 0.1, (16000, 2))
+    reference = np.random.default_rng(235).normal(0, 0.1, (16000, 2))
+    try:
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
+        window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
+        window.project.stages["eq"].bypassed = False
+        window.project.stages["eq"].parameters = {"kind": "future-eq"}
+        window.update_buttons()
+
+        assert not window.process_button.isEnabled()
+        window.process()
+        assert errors and "saved eq settings" in errors.pop().lower()
+        assert window.worker is None and window.project.match_mode == "none"
+
+        window.section_workbench.sections = [
+            SectionAssignment("verse", "Verse", SampleRegion(0, 4000), "target")
+        ]
+        window.section_workbench.render_all()
+        assert errors and "saved eq settings" in errors.pop().lower()
+        assert window.worker is None and window.project.match_mode == "none"
     finally:
         window.close()
 

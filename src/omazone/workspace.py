@@ -6,6 +6,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from .engine import analyse
 from .waveform import PeakIndex
+from .workflow_status import AnalysisState
 
 
 class SpectrumTask(QtCore.QThread):
@@ -596,10 +597,9 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.waveform.set_position(self.owner.position)
                 for plot in self.waveform.channel_plots:
                     plot.setMinimumHeight(65)
-                if self.owner.project.calibration and self.owner.project.needs_reanalysis:
-                    messages.append(
-                        "Matching calibration needs refresh; saved correction is retained."
-                    )
+                workflow = self.owner.workflow_status()
+                if workflow.matching_analysis is AnalysisState.RETAINED:
+                    messages.append("Matching analysis is retained from an earlier input.")
                 if (
                     self.owner.views.currentWidget() is self.owner.manual_eq_view
                     and self.owner.eq_before is None
