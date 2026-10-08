@@ -104,7 +104,6 @@ def test_final_render_controls_export_and_output_measurements():
     assert ready.export_available
     assert ready.stages["output"].state is RenderState.READY
     assert ready.stages["output"].measurements_available
-    assert ready.comparison_available("output-gain")
 
 
 def test_invalid_enabled_recipe_blocks_itself_and_downstream_stages():

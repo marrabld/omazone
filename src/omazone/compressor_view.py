@@ -238,9 +238,9 @@ class CompressorView(QtWidgets.QWidget):
         )
 
     def listen(self):
-        if self.owner.dynamics_preview is None:
+        if not self.owner.comparison("dynamics").available:
             return
-        self.owner.preview_mode.setCurrentIndex(self.owner.preview_mode.findData("dynamics"))
+        self.owner.apply_comparison("dynamics")
         if self.owner.waveform.selection:
             self.owner.play_selection()
         else:

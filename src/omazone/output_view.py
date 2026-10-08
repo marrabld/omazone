@@ -220,9 +220,9 @@ class OutputView(QtWidgets.QWidget):
             )
 
     def listen(self):
-        if self.owner.output_preview is None:
+        if not self.owner.comparison("output-gain").available:
             return
-        self.owner.preview_mode.setCurrentIndex(self.owner.preview_mode.findData("output-gain"))
+        self.owner.apply_comparison("output-gain")
         if self.owner.waveform.selection:
             self.owner.play_selection()
         else:

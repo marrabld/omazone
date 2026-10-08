@@ -169,7 +169,17 @@ def peak_db(audio):
 
 
 def audition_pair(source, output):
-    """RMS-match previews and apply shared headroom; never changes export audio."""
+    """RMS-match previews and apply shared headroom; never changes export audio.
+
+    Both sides must be the same length. The transport reads one cursor across
+    the pair, so unequal lengths would silently compare audio that starts at
+    different points rather than at the same moment.
+    """
+    if source.shape[0] != output.shape[0]:
+        raise ValueError(
+            "Comparison sides must be the same length to stay sample-aligned: "
+            f"{source.shape[0]} != {output.shape[0]}."
+        )
     gain = 10 ** ((rms_db(source) - rms_db(output)) / 20)
     matched = output * gain
     peak = max(np.max(np.abs(source)), np.max(np.abs(matched)), 1e-12)
