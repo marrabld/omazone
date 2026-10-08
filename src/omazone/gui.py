@@ -649,7 +649,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         return self.derive_workflow_status()
 
     def derive_workflow_status(self):
-        rendered = {stage for stage in STAGES if self.comparison_pairs()[stage].after is not None}
+        pairs = self.comparison_pairs()
+        rendered = {stage for stage in STAGES if pairs[stage].after is not None}
         return derive_workflow_status(
             self.project,
             source_loaded=self.source is not None,
