@@ -166,9 +166,10 @@ curves. Manual EQ, compressor, and output-gain edits only need rendering; they d
 
 The implemented chain is repair -> learned matching -> manual EQ -> compressor
 -> output gain. Old reserved output metadata is retained; enabling an unknown
-output processor fails rather than silently acting like a limiter. Save explicitly before
-closing; loading a new recording/New project starts a new session. Audio originals
-are not overwritten by saving projects. Session JSON files are ignored by Git.
+output processor fails rather than silently acting like a limiter. New, Open,
+source replacement, and Close offer Save, Discard, or Cancel when the project has
+unsaved changes. Audio originals are not overwritten by saving projects. Session
+JSON files are ignored by Git.
 
 ## Try it on a song
 
