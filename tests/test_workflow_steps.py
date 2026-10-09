@@ -13,6 +13,7 @@ from omazone.workflow_steps import (
     BY_KEY,
     KEYS,
     LEGACY_ORDER,
+    NAVIGATION,
     STEPS,
     WORKFLOW,
     clamp,
@@ -128,8 +129,10 @@ def test_registered_pages_match_the_step_registry():
     try:
         assert window.views.step_keys == list(KEYS)
         assert window.views.navigation.count() == window.views.count() == len(KEYS)
+        # Secondary pages belong to Match and carry no navigation entry.
+        assert window.views.visibleSteps() == [step.key for step in NAVIGATION]
         for index, step in enumerate(STEPS):
-            assert window.views.navigation.tabText(index) == step.title
+            assert window.views.navigation.tabText(index).startswith(step.title)
             window.views.setStep(step.key)
             assert window.views.currentStep() == step.key
             assert window.views.currentIndex() == index

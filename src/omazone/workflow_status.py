@@ -19,6 +19,15 @@ class RenderState(str, Enum):
     READY = "ready"
 
 
+def describe(state):
+    """The three words the navigation and every summary use for a render state."""
+    if state is RenderState.READY:
+        return "ready"
+    if state is RenderState.SKIPPED:
+        return "skipped"
+    return "action needed"
+
+
 class AnalysisState(str, Enum):
     CURRENT = "current"
     RETAINED = "retained"
