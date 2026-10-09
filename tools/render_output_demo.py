@@ -55,7 +55,7 @@ def main():
         window.loaded(
             "source", (audio, rate, analyse(audio, rate), "Generated over-range float mix")
         )
-        window.views.setCurrentWidget(window.output_view)
+        window.views.setStep("output")
         output = window.output_view
         output.gain.setValue(-6)
         output.render_button.click()

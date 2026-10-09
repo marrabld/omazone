@@ -22,6 +22,7 @@ from .sections import (
     validate_sections,
 )
 from .waveform import PeakIndex, SampleRegion
+from .workflow_steps import LEGACY_ORDER, is_legacy_step_key, is_step_key
 
 STAGES = ("repair", "match", "eq", "dynamics", "output")
 
@@ -459,11 +460,15 @@ def validate_project(project):
     if not isinstance(project.view, dict):
         raise ValueError("View preferences must be an object.")
     json.dumps(project.view, allow_nan=False)
-    if (
-        type(project.view.get("active_tool", 0)) is not int
-        or project.view.get("active_tool", 0) < 0
-    ):
-        raise ValueError("Invalid saved tool selection.")
+    step = project.view.get("active_step")
+    if step is not None and not is_step_key(step):
+        raise ValueError("Unknown saved workflow step.")
+    if step is None and "active_tool" in project.view:
+        # Only the fallback position is validated, and only against the frozen
+        # legacy order it was recorded in.
+        legacy = project.view["active_tool"]
+        if type(legacy) is not int or not 0 <= legacy < len(LEGACY_ORDER):
+            raise ValueError("Invalid saved tool selection.")
     if type(project.view.get("loop_enabled", False)) is not bool:
         raise ValueError("Invalid saved loop state.")
     for key, allowed in (
@@ -482,10 +487,11 @@ def validate_project(project):
             raise ValueError("Invalid saved viewer panel sizes.")
     modes = project.view.get("viewer_tool_modes", {})
     if not isinstance(modes, dict) or any(
-        not isinstance(key, str) or value not in ("waveform", "spectrum", "both")
+        not (is_step_key(key) or is_legacy_step_key(key))
+        or value not in ("waveform", "spectrum", "both")
         for key, value in modes.items()
     ):
-        raise ValueError("Invalid saved tool-specific viewer modes.")
+        raise ValueError("Invalid saved step-specific viewer modes.")
     if type(project.view.get("matching_overview", False)) is not bool:
         raise ValueError("Invalid saved matching overview preference.")
     reference_rate = (

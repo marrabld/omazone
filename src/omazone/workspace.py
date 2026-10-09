@@ -11,6 +11,7 @@ from .comparison import Side
 from .engine import analyse
 from .waveform import PeakIndex
 from .workflow_status import AnalysisState
+from .workflow_steps import legacy_step_key, step_for
 
 
 class SpectrumTask(QtCore.QThread):
@@ -28,6 +29,9 @@ class SpectrumTask(QtCore.QThread):
             self.ready.emit((self.key, before, after, None))
         except ValueError as error:
             self.ready.emit((self.key, None, None, str(error)))
+
+
+VIEWER_MODES = ("waveform", "spectrum", "both")
 
 
 class SongWorkspace(QtWidgets.QWidget):
@@ -53,10 +57,10 @@ class SongWorkspace(QtWidgets.QWidget):
         self.pending_key = None
         self.live_spectrum = None
         self.live_scope_end = None
-        self.active_tool = owner.views.currentIndex()
+        self.active_tool = owner.views.currentStep()
         self.tool_modes = {
-            str(index): ("spectrum" if index in (0, 5, 6, 7) else "waveform")
-            for index in range(owner.views.count())
+            key: ("spectrum" if step_for(key).spectral else "waveform")
+            for key in owner.views.step_keys
         }
         self.matching_overview = False
         self.reference_focus = False
@@ -238,16 +242,19 @@ class SongWorkspace(QtWidgets.QWidget):
     def restore_preferences(self, view):
         self.syncing = True
         try:
-            self.tool_modes.update(view.get("viewer_tool_modes", {}))
-            self.tool_modes[str(self.active_tool)] = view.get(
-                "viewer_mode", self.tool_modes[str(self.active_tool)]
+            self.tool_modes.update(
+                {
+                    step: value
+                    for key, value in view.get("viewer_tool_modes", {}).items()
+                    if (step := legacy_step_key(key)) is not None and value in VIEWER_MODES
+                }
             )
+            current = self.active_tool
+            self.tool_modes[current] = view.get("viewer_mode", self.tool_modes[current])
             self.matching_overview = bool(view.get("matching_overview", False))
             with QtCore.QSignalBlocker(self.overview_action):
                 self.overview_action.setChecked(self.matching_overview)
-            self.mode.setCurrentIndex(
-                max(0, self.mode.findData(self.tool_modes[str(self.active_tool)]))
-            )
+            self.mode.setCurrentIndex(max(0, self.mode.findData(self.tool_modes[current])))
             self.signal.setCurrentIndex(
                 max(0, self.signal.findData(view.get("viewer_signal", "input")))
             )
@@ -263,7 +270,7 @@ class SongWorkspace(QtWidgets.QWidget):
     def mode_changed(self):
         mode = self.mode.currentData()
         if not self.syncing:
-            self.tool_modes[str(self.active_tool)] = mode
+            self.tool_modes[self.active_tool] = mode
         for key, action in self.mode_actions.items():
             with QtCore.QSignalBlocker(action):
                 action.setChecked(key == mode)
@@ -289,13 +296,11 @@ class SongWorkspace(QtWidgets.QWidget):
             self.timer.start()
 
     def tool_changed(self):
-        index = self.owner.views.currentIndex()
-        if index != self.active_tool:
-            self.active_tool = index
-            self.mode.setCurrentIndex(
-                self.mode.findData(self.tool_modes.get(str(index), "waveform"))
-            )
-        matching = index == 0
+        key = self.owner.views.currentStep()
+        if key != self.active_tool:
+            self.active_tool = key
+            self.mode.setCurrentIndex(self.mode.findData(self.tool_modes.get(key, "waveform")))
+        matching = key == "match"
         self.mode_actions["spectrum"].setText(
             "Output peaks"
             if self.owner.views.currentWidget() is self.owner.output_view
@@ -310,7 +315,7 @@ class SongWorkspace(QtWidgets.QWidget):
 
     def toggle_matching_overview(self, visible):
         self.matching_overview = visible
-        self.overview.setVisible(self.active_tool != 0 or visible)
+        self.overview.setVisible(self.active_tool != "match" or visible)
 
     def viewer_context_key(self):
         """Which step this tab explains, independent of the selected side.
@@ -326,12 +331,12 @@ class SongWorkspace(QtWidgets.QWidget):
         ):
             if widget is view:
                 return key
-        return "repair" if self.owner.views.currentIndex() == 4 else "mastering"
+        return "repair" if self.owner.views.currentStep() == "repair" else "mastering"
 
     def viewer_title(self, key):
         """Name the viewer's own context, which is separate from the pair."""
         stages = self.owner.project.stages
-        if key == "repair" and self.owner.views.currentIndex() == 4:
+        if key == "repair" and self.owner.views.currentStep() == "repair":
             return "Repair" + (" preview (stage skipped)" if stages["repair"].bypassed else "")
         if key == "eq":
             return "Manual EQ" + (" (bypassed)" if stages["eq"].bypassed else "")
@@ -339,15 +344,15 @@ class SongWorkspace(QtWidgets.QWidget):
             return "Compression" + (" (bypassed)" if stages["dynamics"].bypassed else "")
         if key == "output-gain":
             return "Output gain" + (" (bypassed)" if stages["output"].bypassed else "")
-        tool = self.owner.views.currentIndex()
-        if tool == 1:
-            title = "Working mix"
-        elif tool == 2:
-            title = "Mix context"
-        elif tool == 3 or self.owner.project.match_mode == "sections":
-            title = "Section matching"
-        else:
-            title = "Matching"
+        title = {
+            "listen": "Working mix",
+            "reference": "Mix context",
+            "sections": "Section matching",
+        }.get(self.owner.views.currentStep())
+        if title is None:
+            title = (
+                "Section matching" if self.owner.project.match_mode == "sections" else "Matching"
+            )
         return title + (" (stage skipped)" if stages["match"].bypassed else "")
 
     def pairs(self):
@@ -356,7 +361,9 @@ class SongWorkspace(QtWidgets.QWidget):
             return None, None, 1, "Recording unavailable"
         key = self.viewer_context_key()
         state = self.owner.comparison(key, Side.BEFORE)
-        if self.owner.views.currentIndex() == 3 and self.owner.project.match_mode != "sections":
+        if self.owner.views.currentStep() == "sections" and (
+            self.owner.project.match_mode != "sections"
+        ):
             state = replace(state, after=None)
         return state.before, state.after, state.rate, self.viewer_title(key)
 
@@ -368,11 +375,11 @@ class SongWorkspace(QtWidgets.QWidget):
         ):
             return None
         workbench = self.owner.section_workbench
-        if self.owner.views.currentIndex() == 3:
+        if self.owner.views.currentStep() == "sections":
             section = workbench.selected_section()
             if section:
                 return workbench.targets[section.target_id]
-        if self.owner.views.currentIndex() == 2:
+        if self.owner.views.currentStep() == "reference":
             item = workbench.target_list.currentItem()
             if item:
                 return workbench.targets[item.data(QtCore.Qt.ItemDataRole.UserRole)]
@@ -400,7 +407,7 @@ class SongWorkspace(QtWidgets.QWidget):
             return
         key = self.viewer_context_key()
         state = self.owner.comparison(key, Side.BEFORE)
-        if key == "repair" and self.owner.views.currentIndex() == 4 and not state.available:
+        if key == "repair" and self.owner.views.currentStep() == "repair" and not state.available:
             # Repair only offers a comparison once it has been applied; until then
             # this tab is showing the untouched recording.
             key = ORIGINAL_ONLY
@@ -660,7 +667,7 @@ class SongWorkspace(QtWidgets.QWidget):
         self.waveform.select_seconds(*self.overview_selection.getRegion())
 
     def refresh_reference(self):
-        visible = self.owner.views.currentIndex() == 2
+        visible = self.owner.views.currentStep() == "reference"
         self.reference_pane.setVisible(visible)
         if visible and not self.reference_focus:
             self.panes.setSizes([max(1, self.width() * 2 // 5), max(1, self.width() * 3 // 5)])
@@ -730,7 +737,7 @@ class SongWorkspace(QtWidgets.QWidget):
                     "Choose at least 0.1 seconds for a stable spectrum"
                 )
             return
-        target = self.reference_target() if self.owner.views.currentIndex() != 4 else None
+        target = self.reference_target() if self.owner.views.currentStep() != "repair" else None
         key = (id(before), id(after), rate, region, id(target), title)
         self.requested_key = key
         if key != self.completed_key and key != self.pending_key:
@@ -752,7 +759,7 @@ class SongWorkspace(QtWidgets.QWidget):
         selection = self.waveform.selection
         eq = self.owner.views.currentWidget() is self.owner.manual_eq_view
         region = self.spectrum_scope(actual_before, rate, selection, eq)
-        target = self.reference_target() if self.owner.views.currentIndex() != 4 else None
+        target = self.reference_target() if self.owner.views.currentStep() != "repair" else None
         if key != (id(actual_before), id(actual_after), rate, region, id(target), title):
             return
         if eq:
@@ -785,7 +792,7 @@ class SongWorkspace(QtWidgets.QWidget):
             )
             if after:
                 self.owner.draw_spectrum(after, "Step output", "#63dfc0")
-            target = self.reference_target() if self.owner.views.currentIndex() != 4 else None
+            target = self.reference_target() if self.owner.views.currentStep() != "repair" else None
             if target:
                 self.owner.draw_spectrum(target.spectrum, "Reference target", "#eabb6b")
         self.completed_key = key

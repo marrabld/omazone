@@ -19,6 +19,7 @@ from .project import (
     save_project,
 )
 from .waveform import SampleRegion
+from .workflow_steps import clamp, is_step_key, legacy_step_key
 
 
 class ProjectController:
@@ -88,9 +89,10 @@ class ProjectController:
                 "loop_enabled": self.transport.loop,
                 "position": self.position,
                 "audition_mode": self.audition_mode,
-                "active_tool": self.views.currentIndex(),
+                "active_step": self.views.currentStep(),
             }
         )
+        self.project.view.pop("active_tool", None)
         if self.waveform.channel_plots:
             self.project.view["zoom"] = list(self.waveform.channel_plots[0].viewRange()[0])
         reference_view = self.section_workbench.reference_waveform
@@ -396,8 +398,15 @@ class ProjectController:
                 self.transport.loop = bool(view.get("loop_enabled", False))
                 with QtCore.QSignalBlocker(self.loop_selection):
                     self.loop_selection.setChecked(self.transport.loop)
-            self.views.setCurrentIndex(
-                min(max(0, int(view.get("active_tool", 0))), self.views.count() - 1)
+            # Older projects saved a tab position, which cannot survive navigation
+            # being reordered, so fall back to it only when no step name is stored.
+            saved = view.get("active_step")
+            self.views.setStep(
+                clamp(
+                    legacy_step_key(saved)
+                    if is_step_key(saved)
+                    else legacy_step_key(view.get("active_tool"))
+                )
             )
             if hasattr(self, "workspace"):
                 self.workspace.restore_preferences(view)

@@ -77,7 +77,7 @@ def main():
             NamedRegion("guitar", "Acoustic passage", SampleRegion(rate, rate * 3))
         )
         window.refresh_named_regions()
-        window.views.setCurrentWidget(window.manual_eq_view)
+        window.views.setStep("eq")
         eq = window.manual_eq_view
         eq.region.setCurrentIndex(eq.region.findData("guitar"))
         eq.canvas.placed.emit(2200, -3)

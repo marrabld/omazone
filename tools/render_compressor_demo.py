@@ -57,7 +57,7 @@ def main():
         window.show()
         window.loaded("source", (audio, rate, analyse(audio, rate), "Generated dynamic mix"))
         window.manual_eq_view.add_band(950, -2)
-        window.views.setCurrentWidget(window.compressor_view)
+        window.views.setStep("dynamics")
         compressor = window.compressor_view
         compressor.threshold.setValue(-22)
         compressor.ratio.setValue(3)
