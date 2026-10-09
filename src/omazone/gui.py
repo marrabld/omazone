@@ -35,6 +35,7 @@ from .tool_panel import ToolPanel
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
 from .workflow_status import AnalysisState, RenderState, derive_workflow_status
+from .workflow_steps import step_for
 from .workspace import SongWorkspace
 
 
@@ -246,7 +247,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.match_page = QtWidgets.QWidget()
         match_layout = QtWidgets.QVBoxLayout(self.match_page)
         match_layout.setContentsMargins(0, 0, 0, 0)
-        self.views.addTab(self.match_page, "Matching")
+        self.views.addTab(self.match_page, step_for("match"))
         self.waveform = WaveformView()
         self.waveform.seek_requested.connect(self.seek)
         self.waveform.selection_changed.connect(self.selection_changed)
@@ -295,18 +296,18 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.region_advanced_panel.hide()
         self.region_advanced_toggle.toggled.connect(self.region_advanced_panel.setVisible)
         region_layout.addStretch(1)
-        self.views.addTab(self.region_page, "Regions")
+        self.views.addTab(self.region_page, step_for("listen"))
         self.section_workbench = SectionWorkbench(self)
-        self.views.addTab(self.section_workbench.reference_page, "Reference targets")
-        self.views.addTab(self.section_workbench, "Mix sections")
+        self.views.addTab(self.section_workbench.reference_page, step_for("reference"))
+        self.views.addTab(self.section_workbench, step_for("sections"))
         self.clipping_inspector = ClippingInspector(self)
-        self.views.addTab(self.clipping_inspector, "Clipping inspection")
+        self.views.addTab(self.clipping_inspector, step_for("repair"))
         self.manual_eq_view = ManualEQView(self)
-        self.views.addTab(self.manual_eq_view, "Manual EQ")
+        self.views.addTab(self.manual_eq_view, step_for("eq"))
         self.compressor_view = CompressorView(self)
-        self.views.addTab(self.compressor_view, "Compression")
+        self.views.addTab(self.compressor_view, step_for("dynamics"))
         self.output_view = OutputView(self)
-        self.views.addTab(self.output_view, "Output")
+        self.views.addTab(self.output_view, step_for("output"))
         reference_waveform = self.section_workbench.reference_waveform
         reference_layout = self.section_workbench.reference_page.layout()
         reference_layout.removeWidget(reference_waveform)
@@ -1495,7 +1496,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.apply_comparison("repair", Side.BEFORE)
         self.waveform.set_repair(result)
         self.plot_spectra()
-        self.views.setCurrentWidget(self.clipping_inspector)
+        self.views.setStep("repair")
         self.meters.setText(
             f"Original RMS: {rms_db(self.source[0]):.1f} dBFS | Repaired RMS: {rms_db(result.audio):.1f} dBFS | Repaired sample peak: {peak_db(result.audio):.1f} dBFS"
         )
@@ -1525,8 +1526,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 )
         self.plot_spectra()
         self.status.setText("Repair reset. Subsequent matching uses the original input.")
-        if self.views.currentWidget() is self.clipping_inspector:
-            self.preview_mode.setCurrentIndex(2)
+        if self.views.currentStep() == "repair":
+            self.apply_comparison(ORIGINAL_ONLY)
 
     def export_repair(self):
         if self.repair_result is None:
@@ -1659,7 +1660,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(0, self.close)
 
     def show_waveform(self, signal=None):
-        self.views.setCurrentWidget(self.region_page)
+        self.views.setStep("listen")
         self.workspace.mode.setCurrentIndex(self.workspace.mode.findData("waveform"))
         if signal is not None:
             self.workspace.signal.setCurrentIndex(self.workspace.signal.findData(signal))

@@ -13,6 +13,7 @@ from omazone.gui import Window, load_audio
 from omazone.project import NamedRegion
 from omazone.sections import capture_target
 from omazone.waveform import SampleRegion
+from omazone.workflow_steps import KEYS
 
 
 def wait_jobs(app, window):
@@ -45,13 +46,11 @@ def test_context_survives_every_tool_and_reference_selection():
         window.position = 9000
         window.loop_selection.setChecked(True)
         window.project.regions.append(NamedRegion("guitar", "Guitar", selection))
-        window.workspace.tool_modes.update(
-            {str(index): "both" for index in range(window.views.count())}
-        )
+        window.workspace.tool_modes.update({key: "both" for key in KEYS[: window.views.count()]})
         window.workspace.overview_action.setChecked(True)
         window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("both"))
-        for index in range(window.views.count()):
-            window.views.setCurrentIndex(index)
+        for key in KEYS[: window.views.count()]:
+            window.views.setStep(key)
             app.processEvents()
             assert window.waveform.isVisible()
             assert window.workspace.overview.isVisible()
@@ -60,7 +59,7 @@ def test_context_survives_every_tool_and_reference_selection():
             assert window.position == 9000
             assert window.transport.region == selection and window.transport.loop
             assert window.workspace.mode.currentData() == "both"
-        window.views.setCurrentIndex(2)
+        window.views.setStep("reference")
         window.section_workbench.reference_waveform.select_seconds(0.1, 0.4)
         assert window.waveform.selection == selection
         assert window.position == 9000
@@ -84,19 +83,20 @@ def test_task_view_defaults_and_overrides_are_remembered():
         assert window.workspace.view_controls.isHidden()
         assert window.playback_selection_controls.isHidden()
         assert window.match_advanced_panel.isHidden()
-        for index in (1, 2, 3, 4):
-            window.views.setCurrentIndex(index)
+        for step in ("listen", "reference", "sections", "repair"):
+            window.views.setStep(step)
             assert window.workspace.mode.currentData() == "waveform"
-        window.views.setCurrentIndex(1)
+        window.views.setStep("listen")
         window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("both"))
-        window.views.setCurrentIndex(0)
+        window.views.setStep("match")
         assert window.workspace.mode.currentData() == "spectrum"
         window.workspace.mode_actions["waveform"].trigger()
-        window.views.setCurrentIndex(1)
+        window.views.setStep("listen")
         assert window.workspace.mode.currentData() == "both"
-        window.views.setCurrentIndex(0)
+        window.views.setStep("match")
         assert window.workspace.mode.currentData() == "waveform"
-        assert window.workspace.preferences()["viewer_tool_modes"]["1"] == "both"
+        # Preferences are keyed by step name, so navigation can be reordered.
+        assert window.workspace.preferences()["viewer_tool_modes"]["listen"] == "both"
     finally:
         app.processEvents()
         window.close()
@@ -163,7 +163,7 @@ def test_actual_output_visualisation_and_pending_input_context():
         window.show()
         window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
         window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
-        window.views.setCurrentIndex(0)
+        window.views.setStep("match")
         window.waveform.set_selection(SampleRegion(1000, 10000))
         window.workspace.signal.setCurrentIndex(window.workspace.signal.findData("output"))
         assert "not been rendered" in window.workspace.badge.text()
@@ -215,7 +215,7 @@ def test_profile_only_reference_keeps_mix_visible_and_project_preferences(tmp_pa
             audio, rate, SampleRegion(0, 16000), "Saved clean target", "clean", "reference.wav"
         )
         window.section_workbench.target_captured(target)
-        window.views.setCurrentIndex(2)
+        window.views.setStep("reference")
         window.section_workbench.target_list.setCurrentRow(0)
         app.processEvents()
         assert window.workspace.reference_pane.isVisible()
@@ -273,11 +273,11 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
 
         for mode in ("waveform", "spectrum", "both"):
             window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
-            for tool in range(window.views.count()):
-                window.views.setCurrentIndex(tool)
+            for key in KEYS[: window.views.count()]:
+                window.views.setStep(key)
                 window.workspace.mode.setCurrentIndex(window.workspace.mode.findData(mode))
                 window.loaded("source", (audio.copy(), rate, analyse(audio, rate), "new mix"))
-                assert window.views.currentIndex() == tool
+                assert window.views.currentStep() == key
                 assert window.workspace.mode.currentData() == mode
                 selection = SampleRegion(8000, 20000)
                 window.waveform.set_selection(selection)
@@ -287,7 +287,7 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
                 window.loaded(
                     "reference", (reference.copy(), rate, analyse(reference, rate), "new reference")
                 )
-                assert window.views.currentIndex() == tool
+                assert window.views.currentStep() == key
                 assert window.workspace.mode.currentData() == mode
                 assert window.waveform.selection == selection
                 assert window.position == 9000
@@ -365,8 +365,8 @@ def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling()
         workbench.add_section()
         for width, height in ((1024, 768), (1280, 900)):
             window.resize(width, height)
-            for tool in range(window.views.count()):
-                window.views.setCurrentIndex(tool)
+            for key in KEYS[: window.views.count()]:
+                window.views.setStep(key)
                 app.processEvents()
                 assert window.workspace_split.orientation() == QtCore.Qt.Orientation.Horizontal
                 assert window.workspace.width() >= window.width() * 0.62
@@ -375,24 +375,24 @@ def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling()
                 assert window.playback_selection_controls.isHidden()
                 assert window.tool_scroll.horizontalScrollBar().maximum() == 0
                 assert window.height() <= height
-                if tool in (1, 2, 3, 4):
+                if key in ("listen", "reference", "sections", "repair"):
                     assert window.waveform.isVisible()
                     for plot in window.waveform.channel_plots:
                         assert plot.getViewBox().height() >= 90
-                if tool == 5:
+                if key == "eq":
                     assert window.manual_eq_view.canvas.isVisible()
                     assert window.manual_eq_view.render_button.isVisible()
-                if tool == 6:
+                if key == "dynamics":
                     assert window.compressor_view.canvas.isVisible()
                     assert window.compressor_view.render_button.isVisible()
-                if tool == 7:
+                if key == "output":
                     assert window.output_view.canvas.isVisible()
                     assert window.output_view.render_button.isVisible()
-                if tool == 2:
+                if key == "reference":
                     assert window.workspace.reference_pane.isVisible()
                     for plot in workbench.reference_waveform.channel_plots:
                         assert plot.getViewBox().height() >= 90
-            window.views.setCurrentIndex(3)
+            window.views.setStep("sections")
             old_heights = [plot.getViewBox().height() for plot in window.waveform.channel_plots]
             workbench.advanced_toggle.setChecked(True)
             app.processEvents()
@@ -402,7 +402,7 @@ def test_all_tool_panels_prioritise_drawable_area_without_horizontal_scrolling()
                 for plot, old in zip(window.waveform.channel_plots, old_heights, strict=True)
             )
             workbench.advanced_toggle.setChecked(False)
-        window.views.setCurrentIndex(4)
+        window.views.setStep("repair")
         window.clipping_inspector.find_peaks()
         wait_jobs(app, window)
         inspector = window.clipping_inspector

@@ -53,7 +53,7 @@ def main():
                 time.sleep(0.01)
 
         wait()
-        assert window.views.currentWidget() is window.match_page
+        assert window.views.currentStep() == "match", "processing returns to Matching"
         assert window.process_button.isVisible() and window.process_button.isEnabled()
         if not window.grab().save(str(directory / "omazone-matching-ready.png")):
             raise RuntimeError("Could not save screenshot.")

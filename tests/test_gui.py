@@ -1,5 +1,6 @@
 """Exercise worker handoff, plot updates, and float-WAV export without a display."""
 
+import json
 import os
 import time
 
@@ -17,6 +18,7 @@ from omazone.gui import Window, load_audio
 from omazone.sections import SectionAssignment
 from omazone.waveform import PeakIndex, SampleRegion
 from omazone.workflow_status import AnalysisState, RenderState
+from omazone.workflow_steps import KEYS
 
 
 def test_load_render_export(tmp_path, monkeypatch):
@@ -732,7 +734,7 @@ def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(mon
         wait()
         assert len(inspector.report.stats) == 1
         assert inspector.report.stats[0].channel == 0
-        window.views.setCurrentIndex(0)
+        window.views.setStep("match")
         assert not window.mastering_controls.isHidden()
     finally:
         if window.worker is not None:
@@ -914,12 +916,21 @@ def test_project_open_preserves_hidden_matching_precision_and_rejects_invalid_vi
         import json
 
         data = json.loads(file.read_text())
-        data["view"]["active_tool"] = "not a tool"
+        data["view"]["active_step"] = "not a step"
         file.write_text(json.dumps(data))
         window.open_project_path(file)
         wait()
-        assert errors and "tool" in errors[0]
+        assert errors and "step" in errors.pop()
         assert window.project is original
+
+        # A stale position is ignored once the project names its step.
+        data["view"]["active_step"] = "output"
+        data["view"]["active_tool"] = len(KEYS) + 5
+        file.write_text(json.dumps(data))
+        window.open_project_path(file)
+        wait()
+        assert not errors
+        assert window.views.currentStep() == "output"
     finally:
         if window.worker is not None:
             window.worker.wait()
@@ -1467,6 +1478,71 @@ def test_choosing_step_output_after_the_original_is_honoured(tmp_path):
         window.close()
 
 
+def test_saved_session_reopens_on_the_same_named_step(tmp_path, monkeypatch):
+    """Navigation order is an implementation detail, so sessions store step names."""
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    path = tmp_path / "session.omazone.json"
+    rate = 16000
+    audio = np.random.default_rng(261).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    window = Window()
+    errors = []
+    window.error = errors.append
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            QtWidgets.QApplication.instance().processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+
+    try:
+        window.loaded("source", load_audio(source))
+        window.project.source = window.source[5]
+        window.views.setStep("listen")
+        window.workspace.mode.setCurrentIndex(window.workspace.mode.findData("both"))
+        window.waveform.set_selection(SampleRegion(4000, 20000))
+        window.loop_selection.setChecked(True)
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(path), ""))
+        window.save_current_project()
+        wait()
+        assert not errors
+
+        saved = json.loads(path.read_text())["view"]
+        assert saved["active_step"] == "listen"
+        assert saved["viewer_tool_modes"]["listen"] == "both"
+        assert "active_tool" not in saved
+
+        # A session written before steps were named still opens on the same page.
+        legacy = json.loads(path.read_text())
+        view = dict(legacy["view"])
+        view.pop("active_step")
+        view["active_tool"] = KEYS.index("listen")
+        view["viewer_tool_modes"] = {
+            str(KEYS.index("listen")): view["viewer_tool_modes"].pop("listen")
+        }
+        legacy["view"] = view
+        path.write_text(json.dumps(legacy))
+
+        reopened = Window()
+        reopened.error = errors.append
+        reopened.open_project_path(path)
+        deadline = time.monotonic() + 15
+        while reopened.worker is not None and time.monotonic() < deadline:
+            QtWidgets.QApplication.instance().processEvents()
+            time.sleep(0.005)
+        assert reopened.worker is None
+        assert not errors
+        assert reopened.views.currentStep() == "listen"
+        assert reopened.workspace.mode.currentData() == "both"
+        assert reopened.transport.loop
+        reopened.close()
+    finally:
+        window.close()
+
+
 def test_comparison_button_explains_why_it_is_unavailable(tmp_path):
     """A disabled comparison must say what to do, not look broken."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -1843,7 +1919,7 @@ def test_multiband_canvas_edits_and_shared_viewer_without_relearning(tmp_path):
         )
         eq.enabled.setChecked(False)
         np.testing.assert_allclose(eq.canvas.response.yData, 0)
-        window.views.setCurrentIndex(0)
+        window.views.setStep("match")
         assert window.workspace.plot_stack.currentWidget() is window.workspace.spectra
     finally:
         if window.workspace.job:

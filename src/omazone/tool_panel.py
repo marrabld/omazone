@@ -2,6 +2,8 @@
 
 from PySide6 import QtCore, QtWidgets
 
+from .workflow_steps import STEPS
+
 
 class CurrentPageStack(QtWidgets.QStackedWidget):
     """Size scrolling content for the selected tool, not the largest hidden page."""
@@ -43,9 +45,15 @@ class ToolPanel(QtWidgets.QWidget):
         self.action_bar.hide()
         self.navigation.currentChanged.connect(self.change_tool)
 
-    def addTab(self, page, title):
+        self.step_keys = []
+
+    def addTab(self, page, step):
+        """Register one page. The step supplies the title, so there is one source."""
+        if step is None:
+            raise ValueError("Every page must name the workflow step it shows.")
         index = self.stack.addWidget(page)
-        self.navigation.addTab(title)
+        self.navigation.addTab(step.title)
+        self.step_keys.append(step.key)
         return index
 
     def currentWidget(self):
@@ -53,6 +61,29 @@ class ToolPanel(QtWidgets.QWidget):
 
     def currentIndex(self):
         return self.navigation.currentIndex()
+
+    def currentStep(self):
+        """The step showing now, named rather than numbered.
+
+        The bar is public, so a page added or removed behind the panel's back
+        must not turn this into an error or a wrong answer.
+        """
+        index = self.navigation.currentIndex()
+        if 0 <= index < len(self.step_keys):
+            return self.step_keys[index]
+        return self.step_keys[0] if self.step_keys else STEPS[0].key
+
+    def indexOfStep(self, key):
+        try:
+            return self.step_keys.index(key)
+        except ValueError:
+            return -1
+
+    def setStep(self, key):
+        index = self.indexOfStep(key)
+        if index >= 0:
+            self.setCurrentIndex(index)
+        return index >= 0
 
     def count(self):
         return self.stack.count()
