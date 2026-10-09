@@ -41,6 +41,13 @@ class ToolPanel(QtWidgets.QWidget):
         self.action_label = QtWidgets.QLabel()
         self.action_label.setWordWrap(True)
         self.action_layout.addWidget(self.action_label, 1)
+        # Step navigation shares the action row, so moving between steps costs no
+        # vertical space the viewer needs.
+        self.controls = QtWidgets.QWidget()
+        self.control_layout = QtWidgets.QHBoxLayout(self.controls)
+        self.control_layout.setContentsMargins(0, 0, 0, 0)
+        self.control_layout.setSpacing(4)
+        self.action_layout.addWidget(self.controls, 0)
         layout.addWidget(self.action_bar)
         self.action_bar.hide()
         self.navigation.currentChanged.connect(self.change_tool)
@@ -53,6 +60,7 @@ class ToolPanel(QtWidgets.QWidget):
             raise ValueError("Every page must name the workflow step it shows.")
         index = self.stack.addWidget(page)
         self.navigation.addTab(step.title)
+        self.navigation.setTabVisible(index, not step.secondary)
         self.step_keys.append(step.key)
         return index
 
@@ -84,6 +92,14 @@ class ToolPanel(QtWidgets.QWidget):
         if index >= 0:
             self.setCurrentIndex(index)
         return index >= 0
+
+    def visibleSteps(self):
+        """The steps a learner can navigate to, in bar order."""
+        return [
+            self.step_keys[position]
+            for position in range(len(self.step_keys))
+            if self.navigation.isTabVisible(position)
+        ]
 
     def count(self):
         return self.stack.count()

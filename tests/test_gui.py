@@ -18,7 +18,7 @@ from omazone.gui import Window, load_audio
 from omazone.sections import SectionAssignment
 from omazone.waveform import PeakIndex, SampleRegion
 from omazone.workflow_status import AnalysisState, RenderState
-from omazone.workflow_steps import KEYS
+from omazone.workflow_steps import KEYS, LEGACY_ORDER, step_for
 
 
 def test_load_render_export(tmp_path, monkeypatch):
@@ -1519,9 +1519,9 @@ def test_saved_session_reopens_on_the_same_named_step(tmp_path, monkeypatch):
         legacy = json.loads(path.read_text())
         view = dict(legacy["view"])
         view.pop("active_step")
-        view["active_tool"] = KEYS.index("listen")
+        view["active_tool"] = LEGACY_ORDER.index("listen")
         view["viewer_tool_modes"] = {
-            str(KEYS.index("listen")): view["viewer_tool_modes"].pop("listen")
+            str(LEGACY_ORDER.index("listen")): view["viewer_tool_modes"].pop("listen")
         }
         legacy["view"] = view
         path.write_text(json.dumps(legacy))
@@ -1539,6 +1539,372 @@ def test_saved_session_reopens_on_the_same_named_step(tmp_path, monkeypatch):
         assert reopened.workspace.mode.currentData() == "both"
         assert reopened.transport.loop
         reopened.close()
+    finally:
+        window.close()
+
+
+def test_continue_only_moves_and_requires_the_step_to_be_ready_or_skipped(tmp_path):
+    """Navigation must never render, bake audio, or relearn a target."""
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(262).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.loaded("source", load_audio(source))
+        assert window.views.currentStep() == "listen"
+        assert not window.back_button.isEnabled()
+
+        # Listen and Mark is never skipped and always lets the learner move on.
+        assert not window.skip_button.isVisible()
+        window.go_continue()
+        assert window.views.currentStep() == "repair"
+        # Navigating must not render, bake audio, or relearn a target.
+        assert window.worker is None
+        assert window.output is None
+        assert window.chain_result is None
+        assert window.project.calibration is None
+        assert not errors
+
+        window.go_back()
+        assert window.views.currentStep() == "listen"
+
+        # Repair is optional, so it can be skipped, and skipping keeps going.
+        window.views.setStep("repair")
+        assert window.skip_button.text() == "Skip Repair"
+        window.skip_button.click()
+        assert window.project.stages["repair"].bypassed
+        assert window.views.currentStep() == "match"
+        # Skipping retains any choices already made.
+        window.project.stages["repair"].parameters = {"note": "kept"}
+        window.set_stage_bypass("repair", False)
+        assert window.project.stages["repair"].parameters == {"note": "kept"}
+
+        window.views.setStep("repair")
+        assert window.skip_button.text() == "Skip Repair", "un-skipping offers to skip again"
+        window.set_stage_bypass("repair", True)
+        assert window.skip_button.text() == "Enable Repair"
+    finally:
+        window.close()
+
+
+def test_continue_names_the_action_when_a_step_is_not_ready(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(263).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.loaded("source", load_audio(source))
+        window.manual_eq_view.enabled.setChecked(True)
+        window.manual_eq_view.add_band(2200, -4)
+        window.views.setStep("eq")
+        assert not window.continue_button.isEnabled()
+        expected = window.workflow_status().stages["eq"].reason
+        window.go_continue()
+        assert window.views.currentStep() == "eq", "Continue must not leave an unfinished step"
+        # The reason belongs beside the control, not in a status line that the
+        # narrow layout hides.
+        assert window.views.action_label.text() == expected
+        assert expected in window.continue_button.toolTip()
+        assert not errors
+
+        window.views.setStep("output")
+        window.output_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        window.output_view.render_button.click()
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert window.views.currentStep() == "output"
+        window.go_continue()
+        assert window.views.currentStep() == "export"
+        assert not window.continue_button.isEnabled(), "Export is the final step"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(264).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+
+    def titles():
+        return {
+            key: window.views.navigation.tabText(window.views.indexOfStep(key)).split(" — ")[0]
+            for key in window.views.visibleSteps()
+        }
+
+    def states():
+        return {
+            key: window.views.navigation.tabText(window.views.indexOfStep(key))
+            for key in window.views.visibleSteps()
+        }
+
+    try:
+        window.loaded("source", load_audio(source))
+        assert titles() == {
+            "listen": "Listen and Mark",
+            "repair": "Repair",
+            "match": "Match",
+            "eq": "Manual EQ",
+            "dynamics": "Dynamics",
+            "output": "Output",
+            "export": "Export",
+        }
+        assert "skipped" in states()["repair"]
+
+        window.manual_eq_view.enabled.setChecked(True)
+        window.manual_eq_view.add_band(2200, -4)
+        assert "action needed" in states()["eq"]
+
+        window.views.setStep("output")
+        window.output_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        window.output_view.render_button.click()
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert "ready" in states()["output"]
+        assert "ready" in states()["export"]
+
+        window.views.setStep("export")
+        rows = [
+            window.export_view.chain.item(i).text() for i in range(window.export_view.chain.count())
+        ]
+        assert rows == [
+            "Repair: skipped",
+            "Match: skipped",
+            "Manual EQ: ready",
+            "Dynamics: skipped",
+            "Output gain: ready",
+        ]
+        assert window.export_view.export_button.isEnabled()
+        assert window.export_view.peaks.text()
+        assert not errors
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_secondary_pages_belong_to_match_and_navigate_with_it(tmp_path):
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(265).normal(0, 0.1, (16000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        # Reference targets and Mix sections are pages of Match, not bar entries.
+        for secondary in ("reference", "sections"):
+            window.views.setStep(secondary)
+            assert not window.views.navigation.isTabVisible(window.views.indexOfStep(secondary))
+            assert window.back_button.isEnabled()
+            window.go_back()
+            assert window.views.currentStep() == "repair"
+            window.views.setStep("match")
+        assert window.views.navigation.isTabVisible(window.views.indexOfStep("match"))
+
+        # The Match step must actually reach its own pages, or target capture
+        # and section matching become unreachable.
+        window.views.setStep("match")
+        window.match_subnav_reference.click()
+        assert window.views.currentStep() == "reference"
+        assert window.workspace.reference_pane.isVisible()
+        window.match_subnav_sections.click()
+        assert window.views.currentStep() == "sections"
+        window.match_subnav_match.click()
+        assert window.views.currentStep() == "match"
+        assert window.match_subnav_match.isChecked()
+        assert not window.match_subnav_sections.isChecked()
+    finally:
+        window.close()
+
+
+def test_narrow_window_keeps_back_and_continue_and_no_horizontal_scrolling(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(266).normal(0, 0.1, (16000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        for width, height in ((700, 700), (900, 760)):
+            window.resize(width, height)
+            app.processEvents()
+            window.views.setStep("eq")
+            app.processEvents()
+            assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+            window.views.setStep("repair")
+            app.processEvents()
+            for control in (window.back_button, window.continue_button, window.skip_button):
+                assert control.isVisible(), control
+                on_window = control.mapTo(window, QtCore.QPoint(0, 0))
+                assert window.rect().contains(QtCore.QRect(on_window, control.size())), control
+            window.views.setStep("export")
+            app.processEvents()
+            assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+            assert window.minimumSizeHint().width() <= 520, window.minimumSizeHint().width()
+    finally:
+        window.close()
+
+
+def test_acceptance_journey_one_without_a_reference(tmp_path, monkeypatch):
+    """Load a mix, mark a passage, skip optional stages, set gain, export.
+
+    This is acceptance journey 1 from docs/workflow-consolidation.md: every
+    disabled primary action explains itself next to the control.
+    """
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(267).normal(0, 0.1, (32000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    export = tmp_path / "final.wav"
+
+    def wait():
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+
+    def disabled_reason(control):
+        """A disabled action must say what to do, not just look broken."""
+        assert not control.isEnabled()
+        # The reason belongs beside the control, not only in a hover tooltip.
+        assert window.views.action_label.text().strip()
+        return window.views.action_label.text()
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        assert window.views.currentStep() == "listen"
+
+        # Mark a passage without any reference loaded.
+        window.waveform.set_selection(SampleRegion(4000, 20000))
+        window.region_name.setText("Verse")
+        window.name_region_button.click()
+        assert [region.name for region in window.project.regions] == ["Verse"]
+        assert window.waveform.selection == SampleRegion(4000, 20000)
+
+        # Repair is optional: skip it and move on.
+        window.views.setStep("repair")
+        window.skip_button.click()
+        assert window.project.stages["repair"].bypassed
+        assert window.views.currentStep() == "match"
+
+        # Matching needs a reference, and says so rather than failing silently.
+        reason = disabled_reason(window.process_button)
+        assert "reference" in reason.lower()
+        window.views.setStep("match")
+        window.skip_button.click()
+        assert window.project.stages["match"].bypassed
+        assert window.views.currentStep() == "eq"
+
+        # Manual EQ and Dynamics are optional, and start out skipped until the
+        # learner turns them on, so Continue passes straight through them.
+        for step in ("eq", "dynamics"):
+            window.views.setStep(step)
+            assert window.project.stages[step].bypassed
+            assert window.skip_button.text() == f"Enable {step_for(step).title}"
+            window.go_continue()
+        assert window.views.currentStep() == "output"
+
+        # Output review stays in the workflow even with no processors at all.
+        window.output_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        window.output_view.render_button.click()
+        wait()
+        assert not errors
+        assert window.views.currentStep() == "output"
+        window.go_continue()
+        assert window.views.currentStep() == "export"
+
+        # Export writes the full-chain render, never a preview buffer.
+        monkeypatch.setattr(
+            QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(export), "")
+        )
+        assert window.export_view.export_button.isEnabled()
+        window.export_view.export_button.click()
+        wait()
+        written, written_rate = sf.read(export, always_2d=True)
+        assert written_rate == rate
+        np.testing.assert_allclose(written, window.output[0], atol=1e-6)
+        assert not errors
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_keyboard_moves_between_steps_without_touching_playback(tmp_path):
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 16000
+    audio = np.random.default_rng(268).normal(0, 0.1, (16000, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.waveform.set_selection(SampleRegion(2000, 12000))
+        window.loop_selection.setChecked(True)
+        window.position = 5000
+
+        # The offscreen platform never makes the window active, so a real key
+        # press cannot reach a shortcut here. Check what the keys are bound to,
+        # then drive the binding the platform would deliver.
+        assert window.continue_shortcut.key().toString() == "Alt+Right"
+        assert window.back_shortcut.key().toString() == "Alt+Left"
+        for shortcut in (window.continue_shortcut, window.back_shortcut):
+            assert shortcut.context() is QtCore.Qt.ShortcutContext.WindowShortcut
+
+        window.continue_shortcut.activated.emit()
+        assert window.views.currentStep() == "repair"
+        window.back_shortcut.activated.emit()
+        assert window.views.currentStep() == "listen"
+
+        # An unbound key must not move the step.
+        QtTest.QTest.keyClick(window, QtCore.Qt.Key.Key_Right)
+        assert window.views.currentStep() == "listen"
+
+        # Step context survives navigation: selection, cursor and loop are the
+        # transport's, not the step's.
+        assert window.waveform.selection == SampleRegion(2000, 12000)
+        assert window.position == 5000
+        assert window.transport.loop
+        assert not errors
     finally:
         window.close()
 
