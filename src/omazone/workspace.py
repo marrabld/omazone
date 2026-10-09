@@ -88,7 +88,8 @@ class SongWorkspace(QtWidgets.QWidget):
         self.mode = QtWidgets.QComboBox()
         for title, key in (("Waveform", "waveform"), ("Spectrum", "spectrum"), ("Both", "both")):
             self.mode.addItem(title, key)
-        self.mode.setCurrentIndex(self.mode.findData("spectrum"))
+        # The viewer opens on whatever this step is for, not a fixed choice.
+        self.mode.setCurrentIndex(self.mode.findData(self.tool_modes[self.active_tool]))
         self.mode.currentIndexChanged.connect(self.mode_changed)
         row.addWidget(self.mode)
         self.signal = QtWidgets.QComboBox()
@@ -277,8 +278,18 @@ class SongWorkspace(QtWidgets.QWidget):
         self.mix_detail.setOrientation(
             QtCore.Qt.Orientation.Horizontal if mode == "both" else QtCore.Qt.Orientation.Vertical
         )
-        if mode == "both" and not self.syncing:
-            self.mix_detail.setSizes([max(1, self.width() // 2), max(1, self.width() // 2)])
+        # A hidden pane gives its space back, so showing one later must take the
+        # room it needs rather than whatever the last split happened to be. While
+        # restoring, the saved split is the one that wins.
+        if not self.syncing:
+            vertical = max(1, self.mix_detail.height())
+            horizontal = max(1, self.mix_detail.width())
+            if mode == "both":
+                self.mix_detail.setSizes([horizontal // 2, horizontal - horizontal // 2])
+            elif mode == "spectrum":
+                self.mix_detail.setSizes([0, vertical])
+            else:
+                self.mix_detail.setSizes([vertical, 0])
         self.waveform.setVisible(mode != "spectrum")
         tool = self.owner.views.currentWidget()
         self.plot_stack.setCurrentWidget(

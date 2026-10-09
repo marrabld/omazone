@@ -23,6 +23,7 @@ from .engine import (
     peak_db,
     rms_db,
 )
+from .export_view import ExportView
 from .manual_eq_view import ManualEQView
 from .output_view import OutputView
 from .pipeline import ChainRenderer
@@ -34,8 +35,14 @@ from .sections import TargetProfile
 from .tool_panel import ToolPanel
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
-from .workflow_status import AnalysisState, RenderState, derive_workflow_status
-from .workflow_steps import step_for
+from .workflow_status import (
+    AnalysisState,
+    RenderState,
+    StageStatus,
+    derive_workflow_status,
+    describe,
+)
+from .workflow_steps import NAVIGATION, next_step, previous_step, step_for
 from .workspace import SongWorkspace
 
 
@@ -165,6 +172,11 @@ class FrequencyAxis(pg.AxisItem):
         return f"{frequency:g} Hz"
 
 
+# Continue has nothing to wait for on a step that explains no processor.
+NARROW_WIDTH = 950
+READY_STAGE = StageStatus(RenderState.READY, "Ready to move on.", "Continue")
+
+
 class Window(ProjectController, QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -247,7 +259,6 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.match_page = QtWidgets.QWidget()
         match_layout = QtWidgets.QVBoxLayout(self.match_page)
         match_layout.setContentsMargins(0, 0, 0, 0)
-        self.views.addTab(self.match_page, step_for("match"))
         self.waveform = WaveformView()
         self.waveform.seek_requested.connect(self.seek)
         self.waveform.selection_changed.connect(self.selection_changed)
@@ -296,18 +307,26 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.region_advanced_panel.hide()
         self.region_advanced_toggle.toggled.connect(self.region_advanced_panel.setVisible)
         region_layout.addStretch(1)
-        self.views.addTab(self.region_page, step_for("listen"))
         self.section_workbench = SectionWorkbench(self)
-        self.views.addTab(self.section_workbench.reference_page, step_for("reference"))
-        self.views.addTab(self.section_workbench, step_for("sections"))
         self.clipping_inspector = ClippingInspector(self)
-        self.views.addTab(self.clipping_inspector, step_for("repair"))
         self.manual_eq_view = ManualEQView(self)
-        self.views.addTab(self.manual_eq_view, step_for("eq"))
         self.compressor_view = CompressorView(self)
-        self.views.addTab(self.compressor_view, step_for("dynamics"))
         self.output_view = OutputView(self)
-        self.views.addTab(self.output_view, step_for("output"))
+        self.export_view = ExportView(self)
+        # Register every page once, in the order a learner moves through them.
+        # A step owns the navigation entry, so the order here is the workflow.
+        for page, key in (
+            (self.region_page, "listen"),
+            (self.clipping_inspector, "repair"),
+            (self.match_page, "match"),
+            (self.section_workbench.reference_page, "reference"),
+            (self.section_workbench, "sections"),
+            (self.manual_eq_view, "eq"),
+            (self.compressor_view, "dynamics"),
+            (self.output_view, "output"),
+            (self.export_view, "export"),
+        ):
+            self.views.addTab(page, step_for(key))
         reference_waveform = self.section_workbench.reference_waveform
         reference_layout = self.section_workbench.reference_page.layout()
         reference_layout.removeWidget(reference_waveform)
@@ -338,6 +357,28 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.workspace_split.setSizes([360, 260])
         layout.addWidget(self.workspace_split, 1)
         self.views.layout().removeWidget(self.views.navigation)
+        # Alt+arrow moves between steps. Plain arrows stay with the seek slider.
+        self.back_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence("Alt+Left"),
+            self,
+            context=QtCore.Qt.ShortcutContext.WindowShortcut,
+        )
+        self.back_shortcut.activated.connect(self.go_back)
+        self.continue_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence("Alt+Right"),
+            self,
+            context=QtCore.Qt.ShortcutContext.WindowShortcut,
+        )
+        self.continue_shortcut.activated.connect(self.go_continue)
+        self.back_button = QtWidgets.QPushButton("Back")
+        self.back_button.clicked.connect(self.go_back)
+        self.skip_button = QtWidgets.QPushButton("Skip this step")
+        self.skip_button.clicked.connect(self.toggle_skip_step)
+        self.continue_button = QtWidgets.QPushButton("Continue")
+        self.continue_button.clicked.connect(self.go_continue)
+        for control in (self.back_button, self.continue_button):
+            self.views.control_layout.addWidget(control)
+        self.views.control_layout.insertWidget(1, self.skip_button)
         layout.insertWidget(layout.indexOf(self.workspace_split), self.views.navigation)
 
         self.mastering_controls = QtWidgets.QWidget()
@@ -400,17 +441,30 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.clipping_inspector.review_link.clicked.connect(self.clipping_inspector.toggle_review)
         self.clipping_inspector.layout().insertWidget(3, self.clipping_inspector.review_link)
         self.process_button.setMinimumHeight(46)
+        self.match_subnav = QtWidgets.QWidget()
+        match_subnav_layout = QtWidgets.QHBoxLayout(self.match_subnav)
+        match_subnav_layout.setContentsMargins(0, 0, 0, 0)
+        match_subnav_layout.setSpacing(4)
+        for title, key, tip in (
+            ("Match", "match", "Whole-song matching settings"),
+            ("Targets", "reference", "Capture and manage reference targets"),
+            ("Sections", "sections", "Match the mix in named sections"),
+        ):
+            button = QtWidgets.QPushButton(title)
+            button.setCheckable(True)
+            button.setToolTip(tip)
+            button.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed
+            )
+            button.clicked.connect(lambda _=False, k=key: self.views.setStep(k))
+            match_subnav_layout.addWidget(button)
+            setattr(self, f"match_subnav_{key}", button)
+        match_subnav_layout.addStretch(1)
+        match_layout.addWidget(self.match_subnav)
         match_layout.addWidget(self.mastering_controls)
         match_layout.addStretch(1)
-        for page in (
-            self.region_page,
-            self.section_workbench.reference_page,
-            self.section_workbench,
-            self.clipping_inspector,
-            self.manual_eq_view,
-            self.compressor_view,
-            self.output_view,
-        ):
+        for index in range(self.views.stack.count()):
+            page = self.views.stack.widget(index)
             for label in page.findChildren(QtWidgets.QLabel):
                 label.setWordWrap(True)
                 label.setSizePolicy(
@@ -739,6 +793,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             not busy and self.comparison("output-gain").available
         )
         self.update_project_actions()
+        self.update_step_navigation(workflow)
         if not busy:
             self.update_stage_summaries(workflow)
         self.update_ab_hint()
@@ -897,7 +952,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if not hasattr(self, "match_advanced_toggle"):
             return
         matching = self.views.currentWidget() is self.match_page
-        wide = self.width() >= 950
+        wide = self.width() >= NARROW_WIDTH
         orientation = QtCore.Qt.Orientation.Horizontal if wide else QtCore.Qt.Orientation.Vertical
         if self.workspace_split.orientation() != orientation:
             self.workspace_split.setOrientation(orientation)
@@ -943,6 +998,100 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             reference = self.reference[3] if self.reference else "none"
             self.files.setText(f"Mix: {mix}    |    Reference: {reference}")
 
+    def refresh_skip_label(self):
+        """Drop the step name when the inspector column cannot afford it."""
+        verb = getattr(self, "skip_verb", None)
+        if verb is None:
+            return
+        self.skip_button.setToolTip(f"{verb} {self.skip_step_title}")
+        self.skip_button.setText(
+            f"{verb} {self.skip_step_title}" if self.width() >= NARROW_WIDTH else verb
+        )
+
+    def go_back(self):
+        """Move to the previous step. Navigation never renders or bakes audio."""
+        step = previous_step(self.views.currentStep())
+        if step is not None:
+            self.views.setStep(step.key)
+
+    def go_continue(self):
+        """Move to the next step once this one is Ready or Skipped."""
+        workflow = self.workflow_status()
+        status = self.current_step_status(workflow)
+        if not status.can_continue:
+            # The reason belongs beside the control, not in a hidden status line.
+            self.views.action_label.setText(status.reason)
+            self.continue_button.setToolTip(status.reason)
+            return
+        step = next_step(self.views.currentStep())
+        if step is not None:
+            self.views.setStep(step.key)
+
+    def toggle_skip_step(self):
+        """Bypass the current optional stage, keeping its settings for later."""
+        step = step_for(self.views.currentStep())
+        if step.stage is None:
+            self.status.setText("This step cannot be skipped.")
+            return
+        bypassing = self.project.stages[step.stage].bypassed
+        self.set_stage_bypass(step.stage, not bypassing)
+        # Skipping advances; turning a stage back on stays put so the change is
+        # made where the learner can see it.
+        following = None if bypassing else next_step(step.key)
+        if following is not None:
+            self.views.setStep(following.key)
+
+    def current_step_status(self, workflow):
+        """The render state of the step being shown, for Continue and Skip.
+
+        A step with no processing stage of its own is never waiting on a render.
+        """
+        step = step_for(self.views.currentStep())
+        if step.stage is None:
+            return READY_STAGE
+        return workflow.stages[step.stage]
+
+    def update_step_navigation(self, workflow):
+        """Show each step's state on its navigation entry, and control Continue."""
+        for step in NAVIGATION:
+            index = self.views.indexOfStep(step.key)
+            if index < 0:
+                continue
+            state = workflow.stages[step.stage].state if step.stage else None
+            if step.key == "export":
+                state = RenderState.READY if workflow.export_available else RenderState.NEEDS_RENDER
+            label = f"{step.title} — {describe(state)}" if state else step.title
+            if self.views.navigation.tabText(index) != label:
+                self.views.navigation.setTabText(index, label)
+        step = step_for(self.views.currentStep())
+        status = self.current_step_status(workflow)
+        busy = self.worker is not None
+        self.back_button.setEnabled(not busy and previous_step(step.key) is not None)
+        following = next_step(step.key)
+        self.continue_button.setEnabled(not busy and status.can_continue and following is not None)
+        self.continue_button.setToolTip(
+            f"Go to {following.title}." if following is not None else "This is the final step."
+        )
+        skippable = step.stage is not None and step.skippable
+        self.skip_button.setVisible(skippable)
+        self.skip_button.setEnabled(not busy and skippable)
+        if skippable:
+            self.skip_verb = "Enable" if self.project.stages[step.stage].bypassed else "Skip"
+            self.skip_step_title = step.title
+        else:
+            # Nothing to skip here, so leave no stale wording behind.
+            self.skip_verb = None
+            self.skip_step_title = step.title
+            self.skip_button.setText("")
+        self.refresh_skip_label()
+        for key in ("match", "reference", "sections"):
+            button = getattr(self, f"match_subnav_{key}", None)
+            if button is not None:
+                with QtCore.QSignalBlocker(button):
+                    button.setChecked(self.views.currentStep() == key)
+        if self.views.currentStep() == "export":
+            self.export_view.draw(workflow)
+
     def tab_changed(self, *args):
         self.workspace.tool_changed()
         clipping = self.views.currentWidget() is self.clipping_inspector
@@ -955,7 +1104,6 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_controls.setVisible(not repair_workflow)
         self.load_ref.setVisible(not repair_workflow)
         self.export_button.setVisible(not repair_workflow)
-        self.preview_mode.setVisible(not repair_workflow)
         self.details_toggle.setVisible(not repair_workflow)
         self.details_panel.setVisible(not repair_workflow and self.details_toggle.isChecked())
         self.meters.setVisible(not repair_workflow)
@@ -965,11 +1113,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             or (clipping and self.clipping_inspector.advanced_toggle.isChecked())
         )
         self.whole_song_button.setText("Whole recording" if repair_workflow else "Whole song")
+        self.refresh_skip_label()
         self.refresh_file_labels()
         if self.source is not None:
             self.workspace.sync_audio()
         self.workspace.refresh()
         self.update_action_bar()
+        self.update_step_navigation(self.workflow_status())
         self.configure_workflow_layout()
         if self.views.currentWidget() is self.manual_eq_view:
             self.manual_eq_view.draw_response()

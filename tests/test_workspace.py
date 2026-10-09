@@ -79,7 +79,8 @@ def test_task_view_defaults_and_overrides_are_remembered():
     window = Window()
     try:
         window.show()
-        assert window.workspace.mode.currentData() == "spectrum"
+        # The opening step marks passages, so the viewer starts on the waveform.
+        assert window.workspace.mode.currentData() == "waveform"
         assert window.workspace.view_controls.isHidden()
         assert window.playback_selection_controls.isHidden()
         assert window.match_advanced_panel.isHidden()
@@ -111,6 +112,7 @@ def test_matching_has_usable_plot_area_and_bounded_linked_frequency_axes():
         window.show()
         window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
         window.loaded("reference", (audio * 0.5, rate, analyse(audio * 0.5, rate), "reference"))
+        window.views.setStep("match")
         for width, height in ((1024, 768), (1280, 900)):
             window.resize(width, height)
             wait_jobs(app, window)
@@ -254,17 +256,19 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
     reference = audio[:16000]
     try:
         window.show()
-        assert window.views.currentWidget() is window.match_page
-        assert window.workspace.mode.currentData() == "spectrum"
+        assert window.views.currentStep() == "listen"
+        assert window.workspace.mode.currentData() == "waveform"
         assert window.views.action_label.text() == "Load a mix."
         window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
-        assert window.views.currentWidget() is window.match_page
+        assert window.views.currentStep() == "listen"
+        window.views.setStep("match")
+        assert window.views.currentStep() == "match"
         assert (
             window.views.action_label.text()
             == "Matching is optional. Add a reference to analyse it; otherwise it passes unchanged."
         )
         window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
-        assert window.views.currentWidget() is window.match_page
+        assert window.views.currentStep() == "match"
         assert (
             window.views.action_label.text()
             == "Mix and reference ready. Analyse Matching, or leave it unchanged."
