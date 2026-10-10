@@ -40,7 +40,7 @@ from .workflow_status import (
     RenderState,
     StageStatus,
     derive_workflow_status,
-    describe,
+    nav_label,
 )
 from .workflow_steps import NAVIGATION, next_step, previous_step, step_for
 from .workspace import SongWorkspace
@@ -1057,10 +1057,16 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             index = self.views.indexOfStep(step.key)
             if index < 0:
                 continue
-            state = workflow.stages[step.stage].state if step.stage else None
+            status = workflow.stages[step.stage] if step.stage else None
             if step.key == "export":
-                state = RenderState.READY if workflow.export_available else RenderState.NEEDS_RENDER
-            label = f"{step.title} — {describe(state)}" if state else step.title
+                # Export is a step rather than a stage, so name whatever is
+                # actually holding it up instead of assuming it is a render.
+                status = StageStatus(
+                    RenderState.READY if workflow.export_available else RenderState.NEEDS_RENDER,
+                    workflow.render_reason,
+                    workflow.render_action,
+                )
+            label = f"{step.title} — {nav_label(status)}" if status is not None else step.title
             if self.views.navigation.tabText(index) != label:
                 self.views.navigation.setTabText(index, label)
         step = step_for(self.views.currentStep())

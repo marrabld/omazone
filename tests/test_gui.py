@@ -1672,7 +1672,8 @@ def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path)
 
         window.manual_eq_view.enabled.setChecked(True)
         window.manual_eq_view.add_band(2200, -4)
-        assert "action needed" in states()["eq"]
+        # Settings exist, so what is outstanding is the render, not the setup.
+        assert states()["eq"] == "Manual EQ — render"
 
         window.views.setStep("output")
         window.output_view.enabled.setChecked(True)
