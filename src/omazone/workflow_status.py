@@ -20,12 +20,38 @@ class RenderState(str, Enum):
 
 
 def describe(state):
-    """The three words the navigation and every summary use for a render state."""
+    """The three words the chain summary uses for a render state."""
     if state is RenderState.READY:
         return "ready"
     if state is RenderState.SKIPPED:
         return "skipped"
     return "action needed"
+
+
+# The action a stage is waiting on, as the learner would name it. The model
+# already works this out; the navigation should not reduce it to one phrase.
+ACTION_VERB = {
+    "Load": "load",
+    "Relink": "relink",
+    "Repair": "repair",
+    "Review settings": "review",
+    "Configure": "set up",
+    "Analyse": "analyse",
+    "Render": "render",
+}
+
+
+def nav_label(status):
+    """What a navigation entry shows: a state, or the action it is waiting on.
+
+    Naming the action turns the bar into a to-do list, and reads shorter than
+    calling everything "action needed".
+    """
+    if status.state is RenderState.READY:
+        return "ready"
+    if status.state is RenderState.SKIPPED:
+        return "skipped"
+    return ACTION_VERB.get(status.action, describe(status.state))
 
 
 class AnalysisState(str, Enum):
@@ -56,6 +82,7 @@ class WorkflowStatus:
     render_allowed: bool
     analysis_allowed: bool
     render_reason: str
+    render_action: str = "Render"
 
 
 def matching_analysis_state(project):
@@ -70,7 +97,27 @@ def matching_analysis_state(project):
     return AnalysisState.CURRENT
 
 
+# What is still missing when a stage is enabled but holds no recipe of its own.
+# Only Manual EQ reaches this today: Repair and Matching pass through until used,
+# and the processor stages all default to a recipe the renderer accepts. The
+# fallback keeps a newly added stage from failing outright.
+CONFIGURE_GUIDANCE = {
+    "repair": "Find and accept peaks to repair, or skip this step.",
+    "match": "Load a reference and analyse it, or skip this step.",
+    "eq": "Add a band to use this step, or skip it.",
+    "dynamics": "Set threshold and ratio, then render.",
+    "output": "Set output gain, then render.",
+}
+
+
 def stage_configured(project, stage, sample_rate=48000):
+    """Whether a stage holds a recipe the renderer would accept.
+
+    An enabled stage with no saved parameters is not unconfigured: the settings
+    constructors return a complete default recipe for an empty one, and the
+    renderer uses it. Reporting those stages as unconfigured would block a render
+    that would work, leaving the learner staring at a disabled action.
+    """
     if stage == "repair":
         return bool(project.repairs)
     if stage == "match":
@@ -79,15 +126,14 @@ def stage_configured(project, stage, sample_rate=48000):
     if stage == "eq":
         settings = eq_from_parameters(parameters)
         validate_eq(settings, sample_rate, project.regions)
+        # Mirror the renderer's own activity rule: a muted band, or one at unity,
+        # passes audio through unchanged, so calling that configured would promise
+        # an adjustment the renderer cannot make.
         return any(band.enabled and band.gain_db != 0 for band in settings.bands)
     if stage == "dynamics":
-        if not parameters:
-            return False
         validate_compressor(compressor_settings(parameters))
         return True
     if stage == "output":
-        if not parameters:
-            return False
         validate_output(output_settings(parameters))
         return True
     return bool(parameters)
@@ -173,7 +219,8 @@ def derive_workflow_status(
                 reason, action = f"{stage_name(stage)} is skipped.", "Enable"
         elif stage in not_configured:
             state = RenderState.NOT_CONFIGURED
-            reason, action = f"Configure or skip {stage_name(stage)}.", "Configure"
+            reason = CONFIGURE_GUIDANCE.get(stage, f"Configure or skip {stage_name(stage)}.")
+            action = "Configure"
         elif stage in ("match", "eq", "dynamics", "output") and matching_blocked:
             state = RenderState.NEEDS_RENDER
             reason, action = "Analyse or skip Matching before rendering.", "Analyse"
@@ -206,17 +253,20 @@ def derive_workflow_status(
     )
     if not source_loaded:
         render_reason = source_reason
+        render_action = "Relink" if project.source else "Load"
     elif repair_blocked:
-        render_reason = statuses["repair"].reason
+        render_reason = render_action = statuses["repair"].reason, statuses["repair"].action
     elif first_invalid is not None:
         render_reason = statuses[first_invalid].reason
+        render_action = statuses[first_invalid].action
     elif not_configured:
         first_missing = next(stage for stage in STAGES if stage in not_configured)
         render_reason = statuses[first_missing].reason
+        render_action = statuses[first_missing].action
     elif matching_blocked:
-        render_reason = statuses["match"].reason
+        render_reason, render_action = statuses["match"].reason, statuses["match"].action
     else:
-        render_reason = "Render the saved recipe."
+        render_reason, render_action = "Render the saved recipe.", "Render"
     final_current = bool(final_render_current and source_loaded)
     return WorkflowStatus(
         statuses,
@@ -226,6 +276,7 @@ def derive_workflow_status(
         render_allowed,
         analysis_allowed,
         render_reason,
+        render_action,
     )
 
 
