@@ -42,7 +42,7 @@ from .workflow_status import (
     derive_workflow_status,
     nav_label,
 )
-from .workflow_steps import NAVIGATION, next_step, previous_step, step_for
+from .workflow_steps import NAVIGATION, STEPS, next_step, previous_step, step_for
 from .workspace import SongWorkspace
 
 
@@ -656,6 +656,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             reason=self.workflow_status().stages[stage].reason if stage else "",
             input_label="repaired input" if self.repair_active else "original",
         )
+
+    def step_for_stage(self, stage):
+        """The workflow step that explains a processing stage."""
+        if stage is None:
+            return None
+        return next((item for item in STEPS if item.stage == stage and not item.secondary), None)
 
     def apply_comparison(self, key=None, side=None):
         """Point the transport at whatever the shared model resolved.

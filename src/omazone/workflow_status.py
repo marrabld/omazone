@@ -83,6 +83,7 @@ class WorkflowStatus:
     analysis_allowed: bool
     render_reason: str
     render_action: str = "Render"
+    blocking_stage: str | None = None
 
 
 def matching_analysis_state(project):
@@ -251,23 +252,35 @@ def derive_workflow_status(
         and not configuration_errors
         and not (not_configured - {"match"})
     )
+    blocking = None
+    final_current = bool(final_render_current and source_loaded)
     if not source_loaded:
         render_reason = source_reason
         render_action = "Relink" if project.source else "Load"
     elif repair_blocked:
-        render_reason = render_action = statuses["repair"].reason, statuses["repair"].action
+        render_reason = statuses["repair"].reason
+        render_action, blocking = statuses["repair"].action, "repair"
     elif first_invalid is not None:
         render_reason = statuses[first_invalid].reason
-        render_action = statuses[first_invalid].action
+        render_action, blocking = statuses[first_invalid].action, first_invalid
     elif not_configured:
         first_missing = next(stage for stage in STAGES if stage in not_configured)
         render_reason = statuses[first_missing].reason
-        render_action = statuses[first_missing].action
+        render_action, blocking = statuses[first_missing].action, first_missing
     elif matching_blocked:
-        render_reason, render_action = statuses["match"].reason, statuses["match"].action
+        render_reason = statuses["match"].reason
+        render_action, blocking = statuses["match"].action, "match"
+    elif not final_current:
+        render_reason, render_action = "Render the saved recipe.", "Render"
+        # Nothing is blocking, but the audio is stale. Point at the earliest step
+        # that still owes a render. With every processor skipped the whole chain is
+        # a no-op, so Output is where the recipe gets rendered.
+        blocking = next(
+            (stage for stage in STAGES if statuses[stage].state is RenderState.NEEDS_RENDER),
+            "output",
+        )
     else:
         render_reason, render_action = "Render the saved recipe.", "Render"
-    final_current = bool(final_render_current and source_loaded)
     return WorkflowStatus(
         statuses,
         analysis,
@@ -277,6 +290,7 @@ def derive_workflow_status(
         analysis_allowed,
         render_reason,
         render_action,
+        blocking,
     )
 
 
