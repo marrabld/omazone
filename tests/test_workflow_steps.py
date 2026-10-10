@@ -4,10 +4,12 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 import pytest
+import soundfile as sf
 from PySide6 import QtWidgets
 
-from omazone.gui import Window
+from omazone.gui import Window, load_audio
 from omazone.tool_panel import ToolPanel
 from omazone.workflow_steps import (
     BY_KEY,
@@ -23,6 +25,10 @@ from omazone.workflow_steps import (
     resolve_step_key,
     step_for,
 )
+
+# Measured for seven steps carrying status labels. A window narrower than
+# this scrolls the bar and hides Export.
+STEP_BAR_BUDGET = 1100
 
 
 def test_step_names_are_unique_and_lookups_are_strict():
@@ -196,3 +202,36 @@ def test_a_saved_selection_written_as_a_comparison_name_still_lands_on_that_step
     assert clamp("output-gain") == "output"
     assert clamp("mastering") == "match"
     assert clamp("eq") == "eq"
+
+
+def test_the_step_bar_budget_covers_every_status_labelled_step(tmp_path):
+    """Status suffixes roughly double the bar, so all seven steps need real width.
+
+    Below the budget the bar scrolls and Export disappears, which is where
+    delivery happens. Nothing else notices, so pin it here rather than leaving
+    it to be discovered in a screenshot.
+    """
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(313).normal(0, 0.2, (rate, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        for _ in range(4):
+            app.processEvents()
+        bar = window.views.navigation
+        visible = [index for index in range(bar.count()) if bar.isTabVisible(index)]
+        assert len(visible) == len(NAVIGATION)
+        # tabSizeHint is the natural width; tabRect is what a full bar allows.
+        needed = sum(bar.tabSizeHint(index).width() for index in visible)
+        assert needed <= STEP_BAR_BUDGET, (
+            f"the seven steps grew to {needed}px; shorten a title or raise "
+            f"STEP_BAR_BUDGET, and check the window still works on a 1366px screen"
+        )
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
