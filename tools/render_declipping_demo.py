@@ -100,6 +100,8 @@ def main():
         if window.worker is not None:
             window.worker.wait()
             app.processEvents()
+        # The demos never save, so skip the prompt that would block a headless run.
+        window.project.mark_saved()
         window.close()
 
 

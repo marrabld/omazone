@@ -299,7 +299,7 @@ class ProjectController:
             self.status.setText(f"Project snapshot saved: {path}. Newer changes remain unsaved.")
             return
         self.project_path = Path(path)
-        self.project.dirty = False
+        self.project.mark_saved()
         self.update_project_title()
         self.status.setText(f"Project saved: {path}")
         if completed is not None:
@@ -416,7 +416,7 @@ class ProjectController:
         self.repair_unavailable = bool(
             project.repairs and loaded.source is not None and loaded.repair is None
         )
-        self.project.dirty = False
+        self.project.mark_saved()
         self.project.needs_render = True
         self.refresh_named_regions()
         self.update_project_title()
