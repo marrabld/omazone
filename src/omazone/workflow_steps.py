@@ -27,29 +27,45 @@ class Step:
     part_of: str | None = None
     spectral: bool = False
     skippable: bool = False
+    secondary: bool = False
 
     @property
     def workflow_index(self):
         return WORKFLOW.index(self.part_of or self.key)
 
 
-# Navigation order today. Reordering this tuple is the whole of a navigation
-# change; nothing else needs to move.
+# The workflow, in the order a learner moves through it. Reference targets and
+# Mix sections are secondary pages inside Match, so they carry no bar entry.
 STEPS = (
-    Step("match", "Matching", "match", spectral=True, skippable=True),
     Step("listen", "Listen and Mark"),
-    Step("reference", "Reference targets", "match", part_of="match", skippable=True),
-    Step("sections", "Mix sections", "match", part_of="match", skippable=True),
     Step("repair", "Repair", "repair", skippable=True),
+    Step("match", "Match", "match", spectral=True, skippable=True),
+    Step("reference", "Reference targets", "match", part_of="match", secondary=True),
+    Step("sections", "Mix sections", "match", part_of="match", secondary=True),
     Step("eq", "Manual EQ", "eq", spectral=True, skippable=True),
     Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True),
     Step("output", "Output", "output", spectral=True, skippable=True),
+    Step("export", "Export"),
 )
+
+# Only these appear in the navigation bar, and only these can be stepped through
+# with Continue.
+NAVIGATION = tuple(step for step in STEPS if not step.secondary)
 
 # Tab order as it stood before steps were named. Projects saved at the time
 # recorded one of these positions, so they must keep resolving to the same page
-# even after the live navigation is reordered.
-LEGACY_ORDER = tuple(step.key for step in STEPS)
+# even after the live navigation is reordered. This is a literal on purpose: it
+# records history, so it must never be derived from the live navigation.
+LEGACY_ORDER = (
+    "match",
+    "listen",
+    "reference",
+    "sections",
+    "repair",
+    "eq",
+    "dynamics",
+    "output",
+)
 
 BY_KEY = {step.key: step for step in STEPS}
 KEYS = tuple(step.key for step in STEPS)
@@ -88,4 +104,30 @@ def clamp(value):
     """Return a valid saved selection, or the first step when it is unusable."""
     if is_step_key(value):
         return value
-    return STEPS[0].key
+    return NAVIGATION[0].key
+
+
+def navigation_position(key):
+    """Where a step sits in the bar. Secondary pages answer for their parent."""
+    if not is_step_key(key):
+        return -1
+    step = step_for(key)
+    if step.part_of is not None:
+        return navigation_position(step.part_of)
+    return NAVIGATION.index(step) if step in NAVIGATION else -1
+
+
+def next_step(key):
+    """The step Continue moves to, or None from the final step."""
+    index = navigation_position(key)
+    if index < 0 or index + 1 >= len(NAVIGATION):
+        return None
+    return NAVIGATION[index + 1]
+
+
+def previous_step(key):
+    """The step Back moves to, or None from the first step."""
+    index = navigation_position(key)
+    if index <= 0:
+        return None
+    return NAVIGATION[index - 1]

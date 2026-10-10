@@ -15,6 +15,15 @@ import omazone.project_controller as project_controller
 from omazone.gui import Window, load_audio
 from omazone.project import load_project
 
+# Captured before the no-blocking fixture replaces them for each test.
+REAL_MODALS = {
+    name: getattr(QtWidgets.QMessageBox, name)
+    for name in ("question", "warning", "critical", "information")
+}
+REAL_FILE_DIALOGS = {
+    name: getattr(QtWidgets.QFileDialog, name) for name in ("getSaveFileName", "getOpenFileName")
+}
+
 
 def dirty_window(tmp_path):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -269,3 +278,48 @@ def test_job_callback_failure_restores_controls_and_rejects_overlap(tmp_path):
     finally:
         release.set()
         force_close(app, window)
+
+
+def test_an_unattended_run_never_stops_for_a_dialog(tmp_path, no_blocking_dialogs):
+    """Closing a dirty window must be answerable without a human present."""
+    app, window = dirty_window(tmp_path)
+    try:
+        assert window.project.dirty
+        window.close()
+        assert window.worker is None
+        # The prompt happened and was answered, rather than blocking on a click.
+        assert no_blocking_dialogs == ["QMessageBox.question"]
+    finally:
+        window.deleteLater()
+
+
+def test_the_no_block_guarantee_covers_every_dialog_entry_point():
+    """A message box added later must not be able to hang the suite again."""
+    for name, real in REAL_MODALS.items():
+        assert getattr(QtWidgets.QMessageBox, name) is not real, name
+    for name, real in REAL_FILE_DIALOGS.items():
+        assert getattr(QtWidgets.QFileDialog, name) is not real, name
+
+
+def test_nothing_in_a_gui_test_can_stop_the_run_for_a_click(tmp_path, no_blocking_dialogs):
+    """No per-test stubbing at all: the shared default must be enough on its own.
+
+    An error report, a file dialog, and closing a dirty project each open a modal
+    on purpose. A test that forgets to stub one of them must still finish.
+    """
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    source = tmp_path / "mix.wav"
+    tone = np.sin(2 * np.pi * 440 * (np.arange(8000) / 16000))[:, None] * 0.1
+    sf.write(source, tone, 16000, subtype="DOUBLE")
+    try:
+        window.loaded("source", load_audio(source))
+        window.error("an operation failed")
+        window.export()
+        window.close()
+        assert window.worker is None
+        assert "QMessageBox.warning" in no_blocking_dialogs
+        assert "QMessageBox.question" in no_blocking_dialogs
+        assert any(name.startswith("QFileDialog") for name in no_blocking_dialogs)
+    finally:
+        window.deleteLater()
