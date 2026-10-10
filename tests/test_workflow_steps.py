@@ -20,6 +20,7 @@ from omazone.workflow_steps import (
     is_legacy_step_key,
     is_step_key,
     legacy_step_key,
+    resolve_step_key,
     step_for,
 )
 
@@ -154,3 +155,44 @@ def test_current_step_survives_a_bar_edited_behind_the_panel():
     panel.navigation.insertTab(0, "Smuggled")
     # The panel cannot stop someone editing its public bar, but it must not lie.
     assert panel.currentStep() in BY_KEY
+
+
+def test_navigation_accepts_the_comparison_name_for_a_step():
+    """ "output" and "output-gain" name one step; neither spelling may dead-end."""
+    window = Window()
+    try:
+        for key, alias in (("output", "output-gain"), ("match", "mastering")):
+            assert window.views.indexOfStep(alias) == window.views.indexOfStep(key)
+            assert window.views.setStep(alias) is True
+            assert window.views.currentStep() == key
+            assert window.views.setStep(key) is True
+            assert window.views.currentStep() == key
+        # A stage with no comparison name still navigates by its own key.
+        assert window.views.setStep("eq") is True
+        assert window.views.currentStep() == "eq"
+        assert window.views.setStep("nonsense") is False
+    finally:
+        window.close()
+        QtWidgets.QApplication.instance().processEvents()
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("output", "output"),
+        ("output-gain", "output"),
+        ("match", "match"),
+        ("mastering", "match"),
+        ("nonsense", None),
+        (None, None),
+    ],
+)
+def test_a_comparison_name_resolves_to_its_step(given, expected):
+    assert resolve_step_key(given) == expected
+
+
+def test_a_saved_selection_written_as_a_comparison_name_still_lands_on_that_step():
+    """A session saved with the comparison spelling must not reset to the first step."""
+    assert clamp("output-gain") == "output"
+    assert clamp("mastering") == "match"
+    assert clamp("eq") == "eq"

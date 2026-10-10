@@ -2,7 +2,7 @@
 
 from PySide6 import QtCore, QtWidgets
 
-from .workflow_steps import STEPS
+from .workflow_steps import STEPS, resolve_step_key
 
 
 class CurrentPageStack(QtWidgets.QStackedWidget):
@@ -82,10 +82,9 @@ class ToolPanel(QtWidgets.QWidget):
         return self.step_keys[0] if self.step_keys else STEPS[0].key
 
     def indexOfStep(self, key):
-        try:
-            return self.step_keys.index(key)
-        except ValueError:
-            return -1
+        """Find a step by its own name or by the comparison name for it."""
+        name = resolve_step_key(key)
+        return self.step_keys.index(name) if name in self.step_keys else -1
 
     def setStep(self, key):
         index = self.indexOfStep(key)

@@ -28,6 +28,9 @@ class Step:
     spectral: bool = False
     skippable: bool = False
     secondary: bool = False
+    # The comparison model's key for the same stage. Navigation accepts either,
+    # because "output" and "output-gain" naming the same thing is a trap.
+    aliases: tuple[str, ...] = ()
 
     @property
     def workflow_index(self):
@@ -39,12 +42,12 @@ class Step:
 STEPS = (
     Step("listen", "Listen and Mark"),
     Step("repair", "Repair", "repair", skippable=True),
-    Step("match", "Match", "match", spectral=True, skippable=True),
+    Step("match", "Match", "match", spectral=True, skippable=True, aliases=("mastering",)),
     Step("reference", "Reference targets", "match", part_of="match", secondary=True),
     Step("sections", "Mix sections", "match", part_of="match", secondary=True),
     Step("eq", "Manual EQ", "eq", spectral=True, skippable=True),
     Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True),
-    Step("output", "Output", "output", spectral=True, skippable=True),
+    Step("output", "Output", "output", spectral=True, skippable=True, aliases=("output-gain",)),
     Step("export", "Export"),
 )
 
@@ -100,11 +103,23 @@ def legacy_step_key(value):
     return None
 
 
+def resolve_step_key(key):
+    """The step a key names, accepting the comparison model's name for it.
+
+    "output" and "output-gain" are the same place, and callers hold both
+    spellings, so resolve them here instead of in each caller.
+    """
+    if is_step_key(key):
+        return key
+    for step in STEPS:
+        if key in step.aliases:
+            return step.key
+    return None
+
+
 def clamp(value):
     """Return a valid saved selection, or the first step when it is unusable."""
-    if is_step_key(value):
-        return value
-    return NAVIGATION[0].key
+    return resolve_step_key(value) or NAVIGATION[0].key
 
 
 def navigation_position(key):
