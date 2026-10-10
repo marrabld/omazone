@@ -1,11 +1,17 @@
 # Approved workflow and persistent song viewer
 
-This is the agreed product direction. The saved project model and persistent
-viewer are implemented for repair, matching, multi-band manual EQ, compression
-and explicit output gain. The fixed render chain retains prefixes, and later
-stages have step-specific A/B. The next milestone consolidates these features
-into one guided workflow before LUFS, true peaks, limiting, or more processors
-are added. See [the workflow consolidation specification](workflow-consolidation.md).
+This is the agreed product direction, and the guided workflow it describes is now
+implemented. The saved project model and persistent viewer cover repair,
+matching, multi-band manual EQ, compression and explicit output gain. The fixed
+render chain retains prefixes, and every stage has step-specific A/B. Navigation
+runs `Listen and Mark`, `Repair`, `Match`, `Manual EQ`, `Dynamics`, `Output`,
+`Export`, with each step labelled by what it still needs. See
+[the workflow consolidation specification](workflow-consolidation.md) for the
+design the implementation follows.
+
+LUFS, true peaks, and limiting are the next additions, deliberately after the
+consolidation landed so they attach to one comparison and status contract rather
+than several.
 
 ## User journey
 
@@ -118,8 +124,8 @@ needs-render, and needs-analysis states. A skipped effect is a normal outcome.
 ## Implementation sequence
 
 The project model, fixed chain, shared viewer, manual EQ, broadband compression,
-output gain, and most stage comparisons are implemented. Consolidate them in this
-order:
+and output gain were built first. They were then consolidated in this order, and
+each step has landed and been tested:
 
 1. Correct visible stage pairs and guard unsaved projects.
 2. Give render status and comparison state one source of truth each.
