@@ -53,7 +53,9 @@ def main():
                 time.sleep(0.01)
 
         wait()
-        assert window.views.currentStep() == "match", "processing returns to Matching"
+        # Guided navigation no longer jumps here on load; go to Match to capture it.
+        assert window.views.setStep("match")
+        assert window.views.currentStep() == "match"
         assert window.process_button.isVisible() and window.process_button.isEnabled()
         if not window.grab().save(str(directory / "omazone-matching-ready.png")):
             raise RuntimeError("Could not save screenshot.")
@@ -64,6 +66,8 @@ def main():
             raise RuntimeError("Could not save processed screenshot.")
         print("Captured plot-focused Matching at 1024x768 and 1280x900.")
     finally:
+        # The demos never save, so skip the prompt that would block a headless run.
+        window.project.mark_saved()
         window.close()
 
 

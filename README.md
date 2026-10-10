@@ -37,12 +37,17 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Stereo-linked broadband compression with peak/RMS detection, timed gain reduction and step A/B.
 - Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
 - Cached repair/matching/EQ/compression/output prefixes rendered from the original and saved recipe.
+- A guided seven-step workflow, `Listen and Mark`, `Repair`, `Match`, `Manual EQ`,
+  `Dynamics`, `Output`, `Export`, with Back/Continue/Skip and a status label on
+  every step.
+- One comparison contract for every stage, so A/B always means "before/after
+  this step" rather than original versus the whole chain.
+- Unsaved-work prompts before any destructive action, and an Export review that
+  routes you to whichever stage is holding up delivery.
 
-The next priority is workflow consolidation: correct stage comparisons, protect
-unsaved work, unify status and comparison state, and add guided navigation and an
-Export step. LUFS, true-peak metering, and limiting follow. See the
-[approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for implementation
-priorities and contribution tasks.
+The next priority is LUFS and true-peak metering, followed by a ceiling limiter.
+See the [approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for
+implementation priorities and contribution tasks.
 
 ## Quick start
 
@@ -173,6 +178,35 @@ JSON files are ignored by Git.
 
 ## Try it on a song
 
+### Follow the seven steps
+
+Work runs left to right along the step bar at the top of the window:
+
+**Listen and Mark → Repair → Match → Manual EQ → Dynamics → Output → Export**
+
+Each step shows what it still needs, so you always know why a control is
+disabled. The labels are the step's current state:
+
+| Label | Meaning |
+| --- | --- |
+| `load` | No recording yet. Load a mix to begin. |
+| `relink` | The saved recording has moved. Point the project at it again. |
+| `repair` | Find and accept peaks to repair. |
+| `review` | Check this step's settings. |
+| `set up` | Configure this step. |
+| `analyse` | Analysis is pending; the numbers will arrive shortly. |
+| `render` | This step's audio has not been rendered since its last change. |
+| `ready` | Done; the result is cached and exportable. |
+| `skipped` | You passed this step without applying it. |
+
+**Back**, **Continue**, and **Skip** move between steps without discarding your
+choices. Repair, Match, Manual EQ, Dynamics, and output gain are optional, so
+**Skip** is a normal outcome rather than an error; reviewing Output is the only
+required step before Export. You can also click any step directly at any time,
+and selection, zoom, position, and loop survive the move.
+
+![The step bar showing each step's state above the persistent song viewer](docs/images/omazone-shared-sections.png)
+
 ### Keep the song in view
 
 Every tab follows the same plot-first layout: the audio stays large, task controls
@@ -181,7 +215,7 @@ menu and a single playback row replace duplicate toolbars. On narrow windows the
 inspector becomes a bounded lower panel; detailed controls scroll within it rather
 than reducing the plot area.
 
-| Tool | Inspector defaults | Optional details |
+| Step or view | Inspector defaults | Optional details |
 | --- | --- | --- |
 | Regions | Passage name and saved-region list | Precise times and sample counts |
 | Reference targets | Target name and short library list | Import/export/remove and precise bounds |
@@ -225,17 +259,18 @@ signal preference, panel sizes, and the existing selection/zoom/loop context.
 
 ![Clipping controls with the selected waveform still visible](docs/images/omazone-shared-clipping.png)
 
-This implements the shared visual context and processing chain, but not the full
-guided navigation. The next milestone brings repair, matching, manual EQ,
-compression, output gain, comparison, and export into one consistent workflow.
-See [the workflow consolidation specification](docs/workflow-consolidation.md).
+These are all now reachable through the guided workflow described below, and
+each one keeps the song in view. See
+[the workflow consolidation specification](docs/workflow-consolidation.md) for
+the design the implementation follows.
 
 ### First matching experiment
 
-Loading a mix or reference leaves you on your chosen tool and keeps the selected
-viewer mode. A new session starts on Matching with spectrum/filter plots. Regions,
-reference capture, section assignment, and repair start with waveforms. Each tool
-remembers an explicitly chosen view. On Matching, its compact **View** menu offers
+Loading a mix or reference leaves you on the step you are working in and keeps the
+selected viewer mode. A new session starts on **Listen and Mark**, so the song and
+its named passages are visible first. Regions, reference capture, section
+assignment, and repair start with waveforms. Each step remembers an explicitly
+chosen view. On Matching, its compact **View** menu offers
 Waveform/Spectrum/Both, original/input/output signals, and the optional overview.
 Looping and returning to whole-recording playback are also available in this menu.
 Matching starts with "Load a mix", then "Mix loaded. Add a reference",
@@ -551,7 +586,7 @@ manual makeup. See [the compressor design](docs/compressor.md).
 
 ## Check the final output
 
-The Output tab sits after compression. It shows three **sample peaks**: the
+The Output step sits after dynamics. It shows three **sample peaks**: the
 original recording, the signal before output gain, and the final float-WAV export.
 They are distinct measurements. Red means that stage has samples above 0 dBFS.
 
@@ -573,6 +608,25 @@ Attenuating floating-point samples above 0 dBFS can restore headroom. It cannot
 recover the missing shape of peaks flattened before import. Sample peaks do not
 detect peaks between samples, and the output gain does not limit them. See
 [output gain and peak handling](docs/output-gain.md).
+
+## Deliver the file
+
+The Export step closes the workflow. It writes the full-chain render, never a
+preview, and lists every stage with its current state, so the file you hand over
+matches the choices in the project. Stages you skipped are listed as skipped
+rather than quietly dropped.
+
+Export is also the honest place to discover unfinished work. If a stage still
+needs rendering or analysis, the review says which one and offers to take you
+there; it will not quietly export a stale or partial chain.
+
+1. Open **Export** and check the summary of what will be rendered.
+2. Click **Export WAV…** and choose where to write the file.
+3. Reopen the exported file if you want to confirm it against the original.
+
+Export writes 32-bit floating-point WAV from the recipe, so reopening the
+project later re-renders rather than reusing a baked intermediate. See
+[the workflow specification](docs/workflow.md) for the full journey.
 
 ## Current limitations
 

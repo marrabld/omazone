@@ -139,6 +139,10 @@ class Project:
         self.dirty = True
         self.needs_render = True
 
+    def mark_saved(self):
+        """Record that the edits are written out, so no save prompt is owed."""
+        self.dirty = False
+
     def import_sections(self, sections):
         regions = {item.id: item for item in self.regions}
         self.sections = list(sections)

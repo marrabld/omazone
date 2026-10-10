@@ -47,19 +47,21 @@ optional View action and a persistent seek/time display. See
 
 ## Next development milestones
 
-1. **Workflow consolidation, #25/#27.** Make the implemented repair, matching,
-   manual EQ, compression, output, comparison, and export features behave as one
-   guided application. First correct visible stage pairs and protect unsaved work;
-   then consolidate status/comparison state, add navigation, and finish the Export
-   step. See [the workflow specification](docs/workflow-consolidation.md).
-2. **Output measurements, #9/#44.** Add integrated loudness with tested silence
+1. **Output measurements, #9/#44.** Add integrated loudness with tested silence
    and short-audio handling, then separately calibrated oversampled true peaks.
    Preview loudness matching must never change export gain.
-3. **Final peak control, #45.** Add a modest final limiter only after loudness and
+2. **Final peak control, #45.** Add a modest final limiter only after loudness and
    true-peak measurements are clear.
-4. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
+3. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
    three-band compressor from the tested broadband detector. Verify crossover
    recombination before expanding multiband processing.
+
+Workflow consolidation (#25/#27) is complete: repair, matching, manual EQ,
+compression, output, comparison, and export now behave as one guided application,
+with guarded unsaved work, shared status and comparison state, seven-step
+navigation, an Export step, and milestone acceptance journeys. The remaining
+measurement work attaches to that single contract. See
+[the workflow specification](docs/workflow-consolidation.md).
 
 Initial processing order is fixed. Advanced reordering, multiband dynamics, and
 real-time/plugin integration follow once this workflow is stable and understandable.
