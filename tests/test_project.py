@@ -1,5 +1,7 @@
 import json
+import os
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -210,3 +212,46 @@ def test_import_existing_target_profiles_and_atomic_failure(tmp_path):
     file.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="version"):
         load_project(file)
+
+
+def test_a_saved_project_reopens_from_any_working_directory(tmp_path, monkeypatch):
+    """The stored path is relative to the project, not to wherever the app runs.
+
+    Every save/reopen test used to pass by coincidence because the suite runs
+    from the directory the relative path happens to resolve against.
+    """
+    audio_dir = tmp_path / "Audio"
+    project_dir = tmp_path / "Sessions"
+    # A different depth, so "../Audio" cannot reach the recording by accident.
+    elsewhere = tmp_path / "elsewhere" / "deeper"
+    for directory in (audio_dir, project_dir, elsewhere):
+        directory.mkdir(parents=True)
+    project, audio = session(audio_dir)
+    path = project_dir / "session.omazone.json"
+    save_project(path, project)
+    assert json.loads(path.read_text())["source"]["path"] == os.path.relpath(
+        str((audio_dir / "mix.wav").resolve()), str(project_dir.resolve())
+    )
+
+    monkeypatch.chdir(elsewhere)
+    reloaded = load_project(path)
+    assert Path(reloaded.source.path).is_absolute()
+    hydrated = hydrate_project(reloaded)
+    assert hydrated.source is not None
+    np.testing.assert_array_equal(hydrated.source[0], audio)
+    assert hydrated.messages == []
+
+
+def test_a_recording_with_no_relative_path_still_saves(tmp_path, monkeypatch):
+    """Windows has no relative path across drives, so saving must not simply fail."""
+
+    def no_relative_path(path, start):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+    monkeypatch.setattr(os.path, "relpath", no_relative_path)
+    project, _ = session(tmp_path)
+    file = tmp_path / "session.omazone.json"
+    save_project(file, project)
+    stored = json.loads(file.read_text())["source"]["path"]
+    assert stored == project.source.path
+    assert hydrate_project(load_project(file)).source is not None

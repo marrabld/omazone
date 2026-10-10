@@ -571,6 +571,20 @@ def validate_project(project):
                 raise ValueError("Saved section calibration IDs differ.")
 
 
+def project_relative(path, directory):
+    """The stored path for a recording, relative to the project file's directory.
+
+    Relative keeps a session folder portable. ``relpath`` has no answer when the
+    recording sits on another Windows drive, and raising there would make those
+    projects unsaveable, so fall back to the absolute path. ``load_project``
+    already accepts either form.
+    """
+    try:
+        return os.path.relpath(path, directory)
+    except ValueError:
+        return str(Path(path).resolve())
+
+
 def project_dict(project, path):
     validate_project(project)
     directory = Path(path).resolve().parent
@@ -579,7 +593,7 @@ def project_dict(project, path):
         if asset is None:
             return None
         data = asdict(asset)
-        data["path"] = os.path.relpath(asset.path, directory)
+        data["path"] = project_relative(asset.path, directory)
         return data
 
     calibration = None
