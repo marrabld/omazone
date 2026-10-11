@@ -104,7 +104,7 @@ def matching_analysis_state(project):
 # fallback keeps a newly added stage from failing outright.
 CONFIGURE_GUIDANCE = {
     "repair": "Find and accept peaks to repair, or skip this step.",
-    "match": "Load a reference and analyse it, or skip this step.",
+    "match": "Analyse the reference to build a filter, or skip this step.",
     "eq": "Add a band to use this step, or skip it.",
     "dynamics": "Set threshold and ratio, then render.",
     "output": "Set output gain, then render.",
@@ -144,7 +144,10 @@ def stage_skipped(project, stage):
     return (
         project.stages[stage].bypassed
         or (stage == "repair" and not project.repairs)
-        or (stage == "match" and project.match_mode == "none")
+        # A loaded reference is not a skip. Matching is only "skipped" while
+        # there is nothing to match against, otherwise the step would claim you
+        # passed on it and ask you to add a reference you already loaded.
+        or (stage == "match" and project.match_mode == "none" and project.reference_target is None)
     )
 
 

@@ -1,9 +1,13 @@
 """Shared render and matching-analysis status contracts."""
 
+import numpy as np
 import pytest
 
+from omazone.engine import analyse
 from omazone.manual_eq import BellSettings, EQSettings, eq_parameters
 from omazone.project import MatchCalibration, Project
+from omazone.sections import TargetProfile
+from omazone.waveform import SampleRegion
 from omazone.workflow_status import (
     AnalysisState,
     RenderState,
@@ -152,3 +156,30 @@ def test_unavailable_enabled_repair_blocks_export():
     )
     assert not status.render_allowed
     assert not status.export_available
+
+
+def test_a_loaded_reference_is_not_reported_as_a_skipped_match():
+    """Loading a reference must not claim you skipped Matching.
+
+    The reported symptom was a project with both files loaded showing
+    "Match — skipped" and advising "Add a reference to analyse it".
+    """
+    project = Project()
+    assert project.match_mode == "none"
+    without_reference = derive_workflow_status(project, source_loaded=True)
+    assert without_reference.stages["match"].state is RenderState.SKIPPED
+    assert "reference" in without_reference.stages["match"].reason.lower()
+
+    project.reference_target = TargetProfile(
+        "whole-reference",
+        "Reference",
+        analyse(np.random.default_rng(3).normal(0, 0.2, (48000, 2)), 48000),
+        48000,
+        SampleRegion(0, 48000),
+        "reference.wav",
+    )
+    with_reference = derive_workflow_status(project, source_loaded=True)
+    status = with_reference.stages["match"]
+    assert status.state is not RenderState.SKIPPED
+    assert "reference" not in status.reason.lower() or "analyse" in status.reason.lower()
+    assert status.action == "Configure"
