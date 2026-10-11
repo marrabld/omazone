@@ -269,9 +269,12 @@ def test_file_loading_never_changes_tool_or_view_and_reference_keeps_mix_context
         )
         window.loaded("reference", (reference, rate, analyse(reference, rate), "reference"))
         assert window.views.currentStep() == "match"
+        # The wording names the alternative route, because "Analyse Matching"
+        # read as though whole-song matching were the only kind.
         assert (
             window.views.action_label.text()
-            == "Mix and reference ready. Analyse Matching, or leave it unchanged."
+            == "Mix and reference ready. Analyse the whole song, or use Sections "
+            "to match parts separately."
         )
         assert window.process_button.isEnabled()
 

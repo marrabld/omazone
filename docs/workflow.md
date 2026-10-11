@@ -20,6 +20,10 @@ than several.
 | Load/listen and mark | What am I hearing, and where does the arrangement change? | Song waveform and named regions |
 | Repair, optional | Is damage in the recording suitable for repair? | Zoomed waveform, candidates, original/repair overlays |
 | Match, optional | Would a reference help the broad tonal balance? | Selected mix passage, reference context, spectrum and correction |
+
+Match is one step with three pages: **Whole song** for a single correction, **Targets**
+for capturing named reference passages, and **Sections** when different parts of the
+song need different targets and amounts.
 | Manual EQ, optional | What still sounds wrong to me? | Selected passage spectrum/response and its position in the song |
 | Compression, optional | Are attacks or level changes too uneven? | Waveform, detector and gain-reduction history |
 | Output | Is the result at a useful level without introducing overload? | Song context plus original/pre-output/final sample peaks; LUFS/true peak follow |

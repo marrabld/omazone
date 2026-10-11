@@ -375,6 +375,9 @@ def test_reference_targets_two_sections_render_edit_and_export(tmp_path, monkeyp
         workbench.add_section()
         assert len(workbench.sections) == 2
         assert len(window.waveform.section_items) > 0
+        # Section matching is a real mode, not just a table of rows. Until the
+        # Match step could reach this page, nothing in the interface could set it.
+        assert window.project.match_mode == "sections"
         workbench.render_button.click()
         wait()
         assert len(window.section_result.curves) == 2
@@ -1743,6 +1746,15 @@ def test_secondary_pages_belong_to_match_and_navigate_with_it(tmp_path):
         # The Match step must actually reach its own pages, or target capture
         # and section matching become unreachable.
         window.views.setStep("match")
+        # A programmatic click succeeds on an invisible widget, so require the
+        # buttons to actually occupy space before trusting them. These collapsed
+        # to zero width and left section matching with no visible way in.
+        for key in ("match", "reference", "sections"):
+            button = getattr(window, f"match_subnav_{key}")
+            assert button.isVisible()
+            assert button.width() > 0, f"the {key} sub-nav button is not on screen"
+        assert window.match_subnav_match.text() == "Whole song"
+
         window.match_subnav_reference.click()
         assert window.views.currentStep() == "reference"
         assert window.workspace.reference_pane.isVisible()
@@ -1754,6 +1766,71 @@ def test_secondary_pages_belong_to_match_and_navigate_with_it(tmp_path):
         assert not window.match_subnav_sections.isChecked()
     finally:
         window.close()
+
+
+def test_match_offers_a_route_to_sections_when_it_can_succeed(tmp_path):
+    """Selecting a passage is the moment a learner expects per-section matching.
+
+    The shortcut must appear then, carry the selection with it, and stay hidden
+    when it would dead-end on a missing target.
+    """
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    mix = np.random.default_rng(311).normal(0, 0.1, (rate * 3, 2))
+    reference = np.random.default_rng(312).normal(0, 0.1, (rate * 3, 2))
+    sf.write(tmp_path / "mix.wav", mix, rate, subtype="DOUBLE")
+    sf.write(tmp_path / "ref.wav", reference, rate, subtype="DOUBLE")
+    link = window.match_sections_link
+    try:
+        window.show()
+        window.loaded("source", load_audio(tmp_path / "mix.wav"))
+        for _ in range(4):
+            app.processEvents()
+        window.views.setStep("match")
+        # No selection and no captured target: nothing to offer.
+        assert not link.isVisible()
+
+        window.loaded("reference", load_audio(tmp_path / "ref.wav"))
+        for _ in range(4):
+            app.processEvents()
+        window.waveform.set_selection(SampleRegion(0, rate))
+        for _ in range(4):
+            app.processEvents()
+        # A selection alone is not enough; a section needs a target to reference.
+        assert not link.isVisible()
+
+        window.views.setStep("reference")
+        workbench = window.section_workbench
+        workbench.reference_waveform.set_selection(SampleRegion(0, rate))
+        workbench.target_name.setText("Clean")
+        workbench.capture_button.click()
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert len(workbench.targets) == 1
+
+        window.views.setStep("match")
+        for _ in range(4):
+            app.processEvents()
+        assert link.isVisible()
+
+        link.click()
+        for _ in range(4):
+            app.processEvents()
+        assert window.views.currentStep() == "sections"
+        # The passage comes with you, so it is not selected a second time.
+        assert workbench.start.value() == pytest.approx(0.0)
+        assert workbench.end.value() == pytest.approx(1.0)
+        assert workbench.name.text() == "Section 1"
+        workbench.add_section()
+        assert len(workbench.sections) == 1
+        assert window.project.match_mode == "sections"
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
 
 
 def test_narrow_window_keeps_back_and_continue_and_no_horizontal_scrolling(tmp_path):
@@ -2580,6 +2657,43 @@ def test_silence_reports_no_loudness_rather_than_a_floor(tmp_path):
         assert all(text.endswith("| —") for text in readings), readings
         assert not any("LUFS" in text for text in readings), readings
         assert all("dBFS sample peak" in text for text in readings), readings
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
+def test_matching_purpose_line_names_the_section_route(tmp_path):
+    """The step has to say what else it can do, not only what is missing."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    sf.write(
+        tmp_path / "m.wav",
+        np.random.default_rng(313).normal(0, 0.1, (rate, 2)),
+        rate,
+        subtype="DOUBLE",
+    )
+    sf.write(
+        tmp_path / "r.wav",
+        np.random.default_rng(314).normal(0, 0.1, (rate, 2)),
+        rate,
+        subtype="DOUBLE",
+    )
+    try:
+        window.show()
+        window.loaded("source", load_audio(tmp_path / "m.wav"))
+        for _ in range(4):
+            app.processEvents()
+        window.loaded("reference", load_audio(tmp_path / "r.wav"))
+        for _ in range(4):
+            app.processEvents()
+        window.views.setStep("match")
+        for _ in range(4):
+            app.processEvents()
+        text = window.views.action_label.text()
+        assert "whole song" in text, text
+        assert "Sections" in text, text
     finally:
         window.project.mark_saved()
         window.close()
