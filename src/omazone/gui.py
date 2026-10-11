@@ -182,6 +182,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Omazone | spectral matching playground")
         self.resize(1120, 800)
+        # Below this the stacked layout has no room left for the plots, and the
+        # window would open larger than the screen it is on.
+        self.setMinimumWidth(820)
+        self.setMinimumHeight(560)
         self.project = Project()
         self.project_path = None
         self.restoring_project = False
@@ -986,6 +990,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "workspace_split"):
             self.configure_workflow_layout()
+        # The bar holds seven labels; narrow the window and they no longer fit.
+        self.views.scheduleRefit()
 
     def refresh_file_labels(self):
         if self.views.currentWidget() is self.clipping_inspector or (
@@ -1059,10 +1065,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def update_step_navigation(self, workflow):
         """Show each step's state on its navigation entry, and control Continue."""
+        states = {}
         for step in NAVIGATION:
-            index = self.views.indexOfStep(step.key)
-            if index < 0:
-                continue
             status = workflow.stages[step.stage] if step.stage else None
             if step.key == "export":
                 # Export is a step rather than a stage, so name whatever is
@@ -1072,9 +1076,24 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                     workflow.render_reason,
                     workflow.render_action,
                 )
-            label = f"{step.title} — {nav_label(status)}" if status is not None else step.title
-            if self.views.navigation.tabText(index) != label:
-                self.views.navigation.setTabText(index, label)
+            states[step.key] = nav_label(status) if status is not None else None
+
+        def variant(title_of, with_state):
+            labels = []
+            for key in self.views.step_keys:
+                entry = step_for(key)
+                state = states.get(key)
+                labels.append(title_of(entry) + (f" — {state}" if with_state and state else ""))
+            return labels
+
+        # Roomiest first: the bar keeps each step's state visible until it cannot.
+        self.views.setLabelVariants(
+            [
+                variant(lambda step: step.title, True),
+                variant(lambda step: step.title, False),
+                variant(lambda step: step.short or step.title, False),
+            ]
+        )
         step = step_for(self.views.currentStep())
         status = self.current_step_status(workflow)
         busy = self.worker is not None

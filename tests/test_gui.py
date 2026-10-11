@@ -1652,8 +1652,16 @@ def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path)
         }
 
     def states():
+        """What each step reports about its state.
+
+        Read the tooltip rather than the tab text: a narrow window drops the
+        suffix from the label to keep every step on the bar, and the state is
+        still there. Whether it is also shown inline is covered by the narrow
+        bar tests.
+        """
+        bar = window.views.navigation
         return {
-            key: window.views.navigation.tabText(window.views.indexOfStep(key))
+            key: bar.tabToolTip(window.views.indexOfStep(key))
             for key in window.views.visibleSteps()
         }
 

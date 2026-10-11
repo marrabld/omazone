@@ -31,6 +31,9 @@ class Step:
     # The comparison model's key for the same stage. Navigation accepts either,
     # because "output" and "output-gain" naming the same thing is a trap.
     aliases: tuple[str, ...] = ()
+    # Used when the window is too narrow for the full title. Seven full titles
+    # need about 940px, so a half-screened window has to give something up.
+    short: str = ""
 
     @property
     def workflow_index(self):
@@ -40,15 +43,33 @@ class Step:
 # The workflow, in the order a learner moves through it. Reference targets and
 # Mix sections are secondary pages inside Match, so they carry no bar entry.
 STEPS = (
-    Step("listen", "Listen and Mark"),
-    Step("repair", "Repair", "repair", skippable=True),
-    Step("match", "Match", "match", spectral=True, skippable=True, aliases=("mastering",)),
-    Step("reference", "Reference targets", "match", part_of="match", secondary=True),
-    Step("sections", "Mix sections", "match", part_of="match", secondary=True),
-    Step("eq", "Manual EQ", "eq", spectral=True, skippable=True),
-    Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True),
-    Step("output", "Output", "output", spectral=True, skippable=True, aliases=("output-gain",)),
-    Step("export", "Export"),
+    Step("listen", "Listen and Mark", short="Listen"),
+    Step("repair", "Repair", "repair", skippable=True, short="Repair"),
+    Step(
+        "match",
+        "Match",
+        "match",
+        spectral=True,
+        skippable=True,
+        aliases=("mastering",),
+        short="Match",
+    ),
+    Step(
+        "reference", "Reference targets", "match", part_of="match", secondary=True, short="Targets"
+    ),
+    Step("sections", "Mix sections", "match", part_of="match", secondary=True, short="Sections"),
+    Step("eq", "Manual EQ", "eq", spectral=True, skippable=True, short="EQ"),
+    Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True, short="Dynamics"),
+    Step(
+        "output",
+        "Output",
+        "output",
+        spectral=True,
+        skippable=True,
+        aliases=("output-gain",),
+        short="Output",
+    ),
+    Step("export", "Export", short="Export"),
 )
 
 # Only these appear in the navigation bar, and only these can be stepped through
