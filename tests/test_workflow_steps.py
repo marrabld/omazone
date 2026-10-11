@@ -26,10 +26,6 @@ from omazone.workflow_steps import (
     step_for,
 )
 
-# Measured for seven steps carrying status labels. A window narrower than
-# this scrolls the bar and hides Export.
-STEP_BAR_BUDGET = 1100
-
 
 def test_step_names_are_unique_and_lookups_are_strict():
     assert len(set(KEYS)) == len(KEYS)
@@ -204,34 +200,103 @@ def test_a_saved_selection_written_as_a_comparison_name_still_lands_on_that_step
     assert clamp("eq") == "eq"
 
 
-def test_the_step_bar_budget_covers_every_status_labelled_step(tmp_path):
-    """Status suffixes roughly double the bar, so all seven steps need real width.
-
-    Below the budget the bar scrolls and Export disappears, which is where
-    delivery happens. Nothing else notices, so pin it here rather than leaving
-    it to be discovered in a screenshot.
-    """
+def open_window_with_project(tmp_path, width):
+    """A window on a real recording, so every step carries a state label."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = Window()
     rate = 16000
     audio = np.random.default_rng(313).normal(0, 0.2, (rate, 2))
     source = tmp_path / "mix.wav"
     sf.write(source, audio, rate, subtype="DOUBLE")
+    window.show()
+    window.loaded("source", load_audio(source))
+    for _ in range(4):
+        app.processEvents()
+    # A resize before the window is mapped is ignored offscreen.
+    window.resize(width, 900)
+    for _ in range(8):
+        app.processEvents()
+    return app, window
+
+
+def bar_state(window):
+    """Visible tab labels and whether they fit without scrolling."""
+    bar = window.views.navigation
+    visible = [index for index in range(bar.count()) if bar.isTabVisible(index)]
+    labels = [bar.tabText(index) for index in visible]
+    needed = sum(bar.tabSizeHint(index).width() for index in visible)
+    return labels, needed <= bar.width()
+
+
+def test_every_step_offers_a_short_title():
+    """A short title is the last way the bar fits; a step without one cannot."""
+    for step in STEPS:
+        assert step.short, f"{step.key} has no short title"
+
+
+def test_the_step_bar_keeps_every_step_visible_in_a_narrow_window(tmp_path):
+    """Half-screening used to push Export off the end of the bar.
+
+    Seven status labels need about 1085px, which a narrow window does not have.
+    The bar now drops the state and keeps the titles rather than scrolling.
+    """
+    app, window = open_window_with_project(tmp_path, 945)
     try:
-        window.show()
-        window.loaded("source", load_audio(source))
-        for _ in range(4):
-            app.processEvents()
-        bar = window.views.navigation
-        visible = [index for index in range(bar.count()) if bar.isTabVisible(index)]
-        assert len(visible) == len(NAVIGATION)
-        # tabSizeHint is the natural width; tabRect is what a full bar allows.
-        needed = sum(bar.tabSizeHint(index).width() for index in visible)
-        assert needed <= STEP_BAR_BUDGET, (
-            f"the seven steps grew to {needed}px; shorten a title or raise "
-            f"STEP_BAR_BUDGET, and check the window still works on a 1366px screen"
-        )
+        labels, fits = bar_state(window)
+        assert len(labels) == len(NAVIGATION)
+        assert fits, f"the bar still scrolls at 945px: {labels}"
+        assert any("Export" in label for label in labels)
     finally:
         window.project.mark_saved()
         window.close()
         app.processEvents()
+
+
+def test_the_full_labels_return_when_the_window_is_wide_again(tmp_path):
+    app, window = open_window_with_project(tmp_path, 945)
+    try:
+        narrow, _ = bar_state(window)
+        window.resize(1600, 900)
+        for _ in range(8):
+            app.processEvents()
+        wide, _ = bar_state(window)
+        assert wide != narrow
+        assert any("\u2014" in label for label in wide), wide
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
+def test_narrowing_the_bar_never_loses_a_step_state(tmp_path):
+    """The suffix is what goes; the state moves to the tooltip rather than away."""
+    app, window = open_window_with_project(tmp_path, 945)
+    try:
+        bar = window.views.navigation
+        visible = [index for index in range(bar.count()) if bar.isTabVisible(index)]
+        assert not any("\u2014" in bar.tabText(index) for index in visible)
+        keys = window.views.visibleSteps()
+        states = dict(zip(keys, (bar.tabToolTip(i) for i in visible), strict=True))
+        # Listen and Mark is not a processing stage, so it has no state to show.
+        with_state = [key for key in keys if BY_KEY[key].stage is not None or key == "export"]
+        assert all("\u2014" in states[key] for key in with_state), states
+        assert any("skipped" in states[key] for key in with_state), states
+        assert states["listen"] == BY_KEY["listen"].title
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
+def test_the_window_refuses_to_go_below_the_narrow_layout_floor():
+    """Below this the stacked layout has no room for the plots at all."""
+    window = Window()
+    try:
+        assert window.minimumWidth() >= 800
+        assert window.minimumWidth() <= STEP_BAR_NARROWEST + 200
+    finally:
+        window.close()
+
+
+# The tightest label set, measured. The bar must fit inside the window floor.
+STEP_BAR_NARROWEST = 620

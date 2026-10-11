@@ -53,6 +53,72 @@ class ToolPanel(QtWidgets.QWidget):
         self.navigation.currentChanged.connect(self.change_tool)
 
         self.step_keys = []
+        self._label_variants = []
+        self._refit_pending = False
+
+    def scheduleRefit(self):
+        """Re-pick labels once the layout has applied the new width.
+
+        A resize event arrives before the bar is laid out, so measuring here
+        would compare labels against the previous width and keep them too long.
+        """
+        if self._refit_pending:
+            return
+        self._refit_pending = True
+        QtCore.QTimer.singleShot(0, self._runScheduledRefit)
+
+    def _runScheduledRefit(self):
+        self._refit_pending = False
+        self.refitNavigation()
+
+    def setLabelVariants(self, variants):
+        """Hold roomiest-first label sets and apply whichever fits right now.
+
+        Seven steps carrying their state need about 1085px, which a half-screened
+        window does not have. Rather than clip or scroll Export out of sight,
+        shorten the bar and keep every step reachable. The state always stays on
+        the tooltip, so narrowing the window never loses it.
+        """
+        self._label_variants = [list(labels) for labels in variants if labels]
+        self.refitNavigation()
+
+    def navigationFits(self):
+        bar = self.navigation
+        visible = [index for index in range(bar.count()) if bar.isTabVisible(index)]
+        needed = sum(bar.tabSizeHint(index).width() for index in visible)
+        return needed <= bar.width()
+
+    def refitNavigation(self):
+        """Re-pick the label set for the current width.
+
+        The short set is expected to fit any usable window, so scrolling is a
+        last resort rather than the normal way Export disappears.
+        """
+        if not self._label_variants:
+            return
+        labels = self._label_variants[-1]
+        for candidate in self._label_variants:
+            self._applyLabels(candidate)
+            if self.navigationFits():
+                labels = candidate
+                break
+        self._applyLabels(labels)
+        self._applyTooltips(self._label_variants[0])
+
+    def _applyLabels(self, labels):
+        if len(labels) != len(self.step_keys):
+            return
+        for index, text in enumerate(labels):
+            if self.navigation.tabText(index) != text:
+                self.navigation.setTabText(index, text)
+
+    def _applyTooltips(self, labels):
+        """The roomiest label doubles as the tooltip, so state is never lost."""
+        if len(labels) != len(self.step_keys):
+            return
+        for index, text in enumerate(labels):
+            if self.navigation.tabToolTip(index) != text:
+                self.navigation.setTabToolTip(index, text)
 
     def addTab(self, page, step):
         """Register one page. The step supplies the title, so there is one source."""
