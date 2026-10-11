@@ -17,6 +17,7 @@ from omazone.engine import analyse, audition_pair
 from omazone.gui import Window, load_audio
 from omazone.loudness import integrated_lufs
 from omazone.sections import SectionAssignment
+from omazone.truepeak import true_peak_db
 from omazone.waveform import PeakIndex, SampleRegion
 from omazone.workflow_status import AnalysisState, RenderState
 from omazone.workflow_steps import KEYS, LEGACY_ORDER, step_for
@@ -2543,7 +2544,7 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
         view = window.output_view
         window.views.setCurrentWidget(view)
         assert window.workspace.plot_stack.currentWidget() is view.canvas
-        assert "OVER 0 dBFS" in view.readouts[0].text()
+        assert "SAMPLE OVER" in view.readouts[0].text()
         assert "render to measure" in view.readouts[2].text()
         view.gain.setValue(-6)
         assert view.enabled.isChecked()
@@ -2553,9 +2554,9 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
         source_audio = window.source[0]
         np.testing.assert_allclose(window.output[0], source_audio * 10 ** (-6 / 20))
         assert window.chain_result.pre_output is source_audio
-        assert "OVER 0 dBFS" in view.readouts[0].text()
-        assert "OVER 0 dBFS" in view.readouts[1].text()
-        assert "OVER 0 dBFS" not in view.readouts[2].text()
+        assert "SAMPLE OVER" in view.readouts[0].text()
+        assert "SAMPLE OVER" in view.readouts[1].text()
+        assert "SAMPLE OVER" not in view.readouts[2].text()
         # Loudness is reported beside the peaks, and -6 dB of gain must move it
         # by 6 LU rather than leaving a second, disagreeing measurement.
         source_lufs = integrated_lufs(source_audio, window.source[1])
@@ -2614,7 +2615,7 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
         wait()
         assert window.renderer.computations["output"] == 2
         assert window.renderer.computations["dynamics"] == 1
-        assert "OVER 0 dBFS" in view.readouts[2].text()
+        assert "SAMPLE OVER" in view.readouts[2].text()
         view.enabled.setChecked(False)
         window.render_saved_recipe()
         wait()
@@ -2653,10 +2654,12 @@ def test_silence_reports_no_loudness_rather_than_a_floor(tmp_path):
             app.processEvents()
             time.sleep(0.005)
         readings = [label.text() for label in window.output_view.readouts]
-        # The peak still reads; the loudness is a dash, not a number.
-        assert all(text.endswith("| —") for text in readings), readings
-        assert not any("LUFS" in text for text in readings), readings
+        # The peak still reads, and so does the true peak; only the gated
+        # loudness is undefined, and it shows as a dash rather than a number.
         assert all("dBFS sample peak" in text for text in readings), readings
+        assert all("| — | " in text for text in readings), readings
+        assert not any("LUFS" in text for text in readings), readings
+        assert "dBTP" in readings[0] and "dBTP" in readings[2], readings
     finally:
         window.project.mark_saved()
         window.close()
@@ -2694,6 +2697,53 @@ def test_matching_purpose_line_names_the_section_route(tmp_path):
         text = window.views.action_label.text()
         assert "whole song" in text, text
         assert "Sections" in text, text
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
+def test_output_reports_true_peak_beside_the_sample_peak(tmp_path):
+    """Inter-sample risk has to be visible, and labelled differently.
+
+    The signal below peaks between samples, so a sample-peak-only readout would
+    call it safe. The sample peak is -3.0 dBFS and the true peak is 0 dBTP.
+    """
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 48000
+    t = np.arange(rate * 2) / rate
+    audio = np.stack([np.cos(2 * np.pi * (rate / 4) * t + np.pi / 4)] * 2, axis=1)
+    sf.write(tmp_path / "hot.wav", audio, rate, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(tmp_path / "hot.wav"))
+        for _ in range(4):
+            app.processEvents()
+        window.views.setStep("output")
+        window.output_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-6)
+        window.output_view.render_button.click()
+        deadline = time.monotonic() + 30
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        readings = [label.text() for label in window.output_view.readouts]
+        for text in readings:
+            assert "dBFS sample peak" in text, text
+            assert "dBTP" in text, text
+        # The three measurements are reported under different labels.
+        assert "dBFS" in readings[0] and "LUFS" in readings[0], readings[0]
+        source_peak = 20 * np.log10(np.max(np.abs(audio)))
+        source_true = true_peak_db(audio, rate)
+        assert f"{source_peak:+.1f} dBFS" in readings[0], readings[0]
+        assert f"{source_true:+.1f} dBTP" in readings[0], readings[0]
+        # True peak above full scale is called out separately from the sample peak.
+        assert source_true - source_peak == pytest.approx(3.0, abs=0.1)
+        # Six dB of gain must move both readings by six.
+        final = readings[2]
+        assert f"{source_peak - 6:+.1f} dBFS" in final, final
+        assert f"{source_true - 6:+.1f} dBTP" in final, final
     finally:
         window.project.mark_saved()
         window.close()

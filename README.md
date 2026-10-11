@@ -38,6 +38,8 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
 - Integrated LUFS per ITU-R BS.1770-4, shown beside the peaks and used to
   loudness-match A/B playback without changing exported samples.
+- Oversampled true peak, so a file at 0 dBFS sample peak that still clips on
+  playback is visible before you deliver it.
 - Cached repair/matching/EQ/compression/output prefixes rendered from the original and saved recipe.
 - A guided seven-step workflow, `Listen and Mark`, `Repair`, `Match`, `Manual EQ`,
   `Dynamics`, `Output`, `Export`, with Back/Continue/Skip and a status label on
@@ -604,27 +606,41 @@ manual makeup. See [the compressor design](docs/compressor.md).
 
 ## Check the final output
 
-The Output step sits after dynamics. It shows three **sample peaks**: the
-original recording, the signal before output gain, and the final float-WAV export.
-They are distinct measurements. Red means that stage has samples above 0 dBFS.
+The Output step sits after dynamics. It shows three rows: the original recording,
+the signal before output gain, and the final float-WAV export. Each row carries
+three measurements that answer different questions:
 
-1. Open **Output**. If the original peak is already red, it came from the source.
+| Measurement | Reads | Above 0 dB means |
+| --- | --- | --- |
+| Sample peak (dBFS) | The largest sample in the file | Float samples exceed full scale |
+| True peak (dBTP) | The largest sample after reconstruction | It will clip on playback |
+| Loudness (LUFS) | A gated average weighted by perception | Nothing; it is not a limit |
+
+Red means that row exceeds full scale.
+
+1. Open **Output**. If the original row is already red, it came from the source.
    If **Before gain** first turns red, earlier processing introduced the overload.
 2. Set **Output gain**, for example -6 dB, and click **Apply output gain and render**.
    Changing a nonzero gain enables the stage. A new project skips it by default.
-3. Check the three measurements again and use **Loop and compare output gain**
+3. Check the measurements again and use **Loop and compare output gain**
    for aligned before/after listening. A/B level matching only affects playback;
    your chosen gain is what **Export WAV** writes.
 
-![Original, pre-output and final sample-peak readings](docs/images/omazone-output-peaks.png)
+![Sample peak, true peak and loudness for the source, pre-output and final export](docs/images/omazone-output-peaks.png)
+
+**True peak is the one to watch before delivery.** A file can sit at exactly
+0 dBFS sample peak and still clip on playback, because the converter rebuilds
+the waveform between samples. Nothing here prevents that: there is no limiter
+yet, so a reading above 0 dBTP is a fact about the file, not a fault that has
+been fixed. See [true peak](docs/true-peak.md).
 
 **View → Both** places the waveform beside the peak display:
 
 ![Waveform and output-stage sample peaks](docs/images/omazone-output-waveform.png)
 
 Attenuating floating-point samples above 0 dBFS can restore headroom. It cannot
-recover the missing shape of peaks flattened before import. Sample peaks do not
-detect peaks between samples, and the output gain does not limit them. See
+recover the missing shape of peaks flattened before import, and neither true
+peak nor output gain limits them. See
 [output gain and peak handling](docs/output-gain.md).
 
 ## Deliver the file
@@ -648,12 +664,15 @@ project later re-renders rather than reusing a baked intermediate. See
 
 ## Current limitations
 
-The interface shows sample peaks and integrated LUFS, but not true peaks; see
-[loudness](docs/loudness.md). Preview is loudness-matched, with common
+The interface shows sample peaks, integrated LUFS and oversampled true peaks;
+see [loudness](docs/loudness.md) and [true peak](docs/true-peak.md). None of the
+three prevents clipping: there is no limiter yet, so a reading above 0 dBTP is a
+fact about the file rather than a fault that has been fixed. Preview is loudness-matched, with common
 attenuation to provide headroom. LUFS is a good model of average perceived
 loudness rather than of every listener, so A/B matching remains approximate.
 Abrupt A/B switches can click; crossfaded switching is a follow-up improvement.
-Measuring integrated loudness adds roughly half a second per stage to a render.
+Measuring integrated loudness and true peaks adds a few seconds to rendering a
+six-minute song, in the background.
 
 Mastering exports are 32-bit floating-point WAVs containing the full chain, without
 preview attenuation. Samples can exceed 0 dBFS; there is no limiter yet. Delay is

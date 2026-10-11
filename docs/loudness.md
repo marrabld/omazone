@@ -72,7 +72,8 @@ guessing at a level.
 ## What it does not do
 
 - **It is not true peak.** LUFS cannot tell you whether a sample reconstructs
-  above 0 dBFS between samples. That measurement (#44) is deliberately separate.
+  above 0 dBFS between samples. That measurement is deliberately separate; see
+  [true peak](true-peak.md).
 - **It is not a limiter.** No stage in the chain limits. A final limiter (#45)
   comes after loudness and true-peak measurement are settled.
 - **It is not perfectly perceptual.** BS.1770 is a good model of average

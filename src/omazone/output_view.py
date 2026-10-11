@@ -12,6 +12,7 @@ from .output_gain import (
     settings_from_parameters,
     validate_settings,
 )
+from .truepeak import format_true_peak
 
 
 class OutputCanvas(pg.PlotWidget):
@@ -171,17 +172,30 @@ class OutputView(QtWidgets.QWidget):
         self.summary.setText(self.owner.workflow_status().stages["output"].reason)
 
     @staticmethod
-    def reading(name, peak, lufs):
+    def reading(name, peak, lufs, intersample):
+        """One line per stage: sample peak, true peak, loudness.
+
+        Three measurements that answer three different questions, kept in one
+        line so they can be compared, and labelled distinctly because a sample
+        peak can read safe while the true peak says otherwise.
+        """
         if peak is None:
             return f"{name}: render to measure"
         level = 20 * np.log10(peak) if peak > 0 else None
-        loud = format_lufs(lufs)
+        parts = [format_lufs(lufs)]
+        if intersample is None:
+            parts.append(format_true_peak(None))
+        else:
+            parts.append(format_true_peak(intersample))
+            if intersample > 1:
+                parts[-1] += " OVER"
         if level is None:
-            return f"{name}: silence | {loud}"
+            return f"{name}: silence | " + " | ".join(parts)
         return (
             f"{name}: {level:+.1f} dBFS sample peak"
-            + (" | OVER 0 dBFS" if peak > 1 else "")
-            + f" | {loud}"
+            + (" | SAMPLE OVER" if peak > 1 else "")
+            + " | "
+            + " | ".join(parts)
         )
 
     def draw(self):
@@ -208,15 +222,26 @@ class OutputView(QtWidgets.QWidget):
                 result.output if result else None,
             )
         )
-        for label, name, peak, loud in zip(
+        # The render already measured these; never measure on the UI thread.
+        intersamples = (
+            result.true_peak.get(id(audio)) if result is not None and audio is not None else None
+            for audio in (
+                source_audio,
+                result.pre_output if result else None,
+                result.output if result else None,
+            )
+        )
+        for label, name, peak, loud, intersample in zip(
             self.readouts,
             ("Original source", "Before output gain", "Final export"),
             peaks,
             loudness,
+            intersamples,
             strict=True,
         ):
-            label.setText(self.reading(name, peak, loud))
-            label.setStyleSheet("color: #ff9086;" if peak is not None and peak > 1 else "")
+            label.setText(self.reading(name, peak, loud, intersample))
+            over = (peak is not None and peak > 1) or (intersample is not None and intersample > 1)
+            label.setStyleSheet("color: #ff9086;" if over else "")
 
     def rendered(self):
         self.draw()

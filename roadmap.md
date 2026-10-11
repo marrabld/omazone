@@ -50,8 +50,9 @@ optional View action and a persistent seek/time display. See
 1. **Output measurements, #9/#44.** Integrated LUFS is implemented: BS.1770-4
    with gated silence and short-audio handling, shown beside the sample peaks and
    used for preview matching that never changes export gain. See
-   [loudness](docs/loudness.md). Oversampled true peaks remain (#44); #44 depends
-   only on the closed #11, so it can proceed on its own.
+   [loudness](docs/loudness.md). Oversampled true peaks are also implemented; see
+   [true peak](docs/true-peak.md). Neither meter changes export gain or prevents
+   clipping on its own.
 2. **Final peak control, #45.** Add a modest final limiter only after loudness and
    true-peak measurements are clear.
 3. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a

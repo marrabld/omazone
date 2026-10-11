@@ -16,8 +16,21 @@ stage starts bypassed at 0 dB. You can switch it off without losing its gain.
 measures the result of earlier processors, and **Final export** measures the
 actual rendered signal that goes into the float WAV. Each is the maximum
 absolute sample across all channels, displayed in dBFS. Above 0 dBFS means
-the float signal contains samples with absolute value greater than 1.0. The
-display says *sample peak*, not true peak.
+the float signal contains samples with absolute value greater than 1.0.
+
+Each row also reports two more measurements, because one number cannot answer
+every question:
+
+| Measurement | Reads | Above 0 dB means |
+| --- | --- | --- |
+| Sample peak (dBFS) | The largest sample you have | Float samples exceed full scale |
+| True peak (dBTP) | The largest sample after reconstruction | It will clip on playback |
+| Loudness (LUFS) | A gated average over time | Nothing; it is not a limit |
+
+Sample peak and true peak are separate readings on purpose. See
+[true peak](true-peak.md). A sample peak at exactly 0 dBFS is not proof the
+file will play back clean: a digital to analogue converter reconstructs the
+waveform between samples, and that reconstruction can be higher.
 
 If the source is already over 0 dBFS, it arrived that way. If the original is
 below 0 but the pre-output reading is over, earlier processing added the
@@ -56,4 +69,5 @@ uv run python tools/render_output_demo.py docs/images
 ```
 
 Integrated LUFS is implemented; see [loudness](loudness.md). Oversampled
-true-peak readings are #44. The ceiling limiter is a later, separate stage #45.
+true-peak readings are implemented; see [true peak](true-peak.md). The ceiling
+limiter is a later, separate stage #45, and nothing here prevents clipping.
