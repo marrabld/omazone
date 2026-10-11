@@ -15,10 +15,14 @@ from scipy import signal
 from omazone.comparison import SPECS, Side
 from omazone.engine import analyse, audition_pair
 from omazone.gui import Window, load_audio
+from omazone.loudness import integrated_lufs
 from omazone.sections import SectionAssignment
 from omazone.waveform import PeakIndex, SampleRegion
 from omazone.workflow_status import AnalysisState, RenderState
 from omazone.workflow_steps import KEYS, LEGACY_ORDER, step_for
+
+# audition_pair measures loudness, so tests pass the rate explicitly.
+RATE = 16000
 
 
 def test_load_render_export(tmp_path, monkeypatch):
@@ -1152,7 +1156,7 @@ def test_stage_viewer_and_playback_use_the_same_chain_prefixes(tmp_path, monkeyp
             assert title == expected_title
             np.testing.assert_array_equal(before, expected_before)
             np.testing.assert_array_equal(after, expected_after)
-            expected_preview = audition_pair(expected_before, expected_after)
+            expected_preview = audition_pair(expected_before, expected_after, RATE)
             np.testing.assert_array_equal(preview[0], expected_preview[0])
             np.testing.assert_array_equal(preview[1], expected_preview[1])
 
@@ -1196,7 +1200,7 @@ def test_stage_viewer_and_playback_use_the_same_chain_prefixes(tmp_path, monkeyp
 
         window.views.setCurrentWidget(window.output_view)
         window.play()
-        expected = audition_pair(retained, retained)
+        expected = audition_pair(retained, retained, RATE)
         np.testing.assert_array_equal(window.preview[0], expected[0])
         np.testing.assert_array_equal(window.preview[1], expected[1])
         window.stop()
@@ -1275,7 +1279,7 @@ def test_comparison_model_covers_every_stage_and_preserves_cursor_and_loop(tmp_p
             np.testing.assert_array_equal(state.after, expected_after)
             assert state.available
             assert state.aligned
-            expected = audition_pair(expected_before, expected_after)
+            expected = audition_pair(expected_before, expected_after, RATE)
             np.testing.assert_array_equal(state.playback_arrays[0], expected[0])
             np.testing.assert_array_equal(state.playback_arrays[1], expected[1])
 
@@ -2475,6 +2479,15 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
         assert "OVER 0 dBFS" in view.readouts[0].text()
         assert "OVER 0 dBFS" in view.readouts[1].text()
         assert "OVER 0 dBFS" not in view.readouts[2].text()
+        # Loudness is reported beside the peaks, and -6 dB of gain must move it
+        # by 6 LU rather than leaving a second, disagreeing measurement.
+        source_lufs = integrated_lufs(source_audio, window.source[1])
+        before = integrated_lufs(window.chain_result.pre_output, window.source[1])
+        final = integrated_lufs(window.output[0], window.source[1])
+        assert f"{source_lufs:+.1f} LUFS" in view.readouts[0].text()
+        assert f"{final:+.1f} LUFS" in view.readouts[2].text()
+        assert source_lufs == pytest.approx(before, abs=0.01)
+        assert final == pytest.approx(source_lufs - 6.0, abs=0.1)
         assert window.renderer.computations == {
             "repair": 1,
             "match": 1,
@@ -2542,3 +2555,32 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
             window.worker.wait()
             app.processEvents()
         window.close()
+
+
+def test_silence_reports_no_loudness_rather_than_a_floor(tmp_path):
+    """A dash, not -inf or a made-up number, when the gate has nothing to measure."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    # Loadable, but far below the -70 LUFS absolute gate.
+    noise = np.random.default_rng(11).normal(0, 1e-5, (rate * 3, 2))
+    sf.write(tmp_path / "quiet.wav", noise, rate, subtype="DOUBLE")
+    try:
+        window.loaded("source", load_audio(tmp_path / "quiet.wav"))
+        window.views.setStep("output")
+        window.output_view.enabled.setChecked(True)
+        window.output_view.gain.setValue(-3)
+        window.output_view.render_button.click()
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        readings = [label.text() for label in window.output_view.readouts]
+        # The peak still reads; the loudness is a dash, not a number.
+        assert all(text.endswith("| —") for text in readings), readings
+        assert not any("LUFS" in text for text in readings), readings
+        assert all("dBFS sample peak" in text for text in readings), readings
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()

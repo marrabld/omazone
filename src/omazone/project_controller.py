@@ -9,7 +9,12 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .comparison import Side
-from .engine import MatchFilter, MatchSettings, analyse, audition_pair
+from .engine import (
+    MatchFilter,
+    MatchSettings,
+    analyse,
+    audition_pair,
+)
 from .project import (
     MatchCalibration,
     NamedRegion,
@@ -383,7 +388,7 @@ class ProjectController:
                     (
                         repair,
                         analyse(repair.audio, self.source[1]),
-                        audition_pair(self.source[0], repair.audio),
+                        audition_pair(self.source[0], repair.audio, self.source[1]),
                     )
                 )
             view = project.view
@@ -502,11 +507,11 @@ class ProjectController:
                 result.output,
                 analyse(result.output, renderer.rate),
                 spec,
-                audition_pair(result.repaired, result.matched),
+                audition_pair(result.repaired, result.matched, renderer.rate, result.loudness),
                 result,
-                audition_pair(result.matched, result.equalized),
-                audition_pair(result.equalized, result.pre_output),
-                audition_pair(result.pre_output, result.output),
+                audition_pair(result.matched, result.equalized, renderer.rate, result.loudness),
+                audition_pair(result.equalized, result.pre_output, renderer.rate, result.loudness),
+                audition_pair(result.pre_output, result.output, renderer.rate, result.loudness),
             )
 
         def completed(payload):

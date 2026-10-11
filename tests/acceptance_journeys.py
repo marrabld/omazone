@@ -158,7 +158,7 @@ def test_journey_two_every_stage_compares_its_named_prefix(studio):
         assert actual_rate == RATE
         np.testing.assert_array_equal(shown_before, before)
         np.testing.assert_array_equal(shown_after, after)
-        expected = audition_pair(before, after)
+        expected = audition_pair(before, after, RATE)
         assert preview is not None
         np.testing.assert_array_equal(preview[0], expected[0])
         np.testing.assert_array_equal(preview[1], expected[1])
@@ -315,7 +315,7 @@ def test_journey_two_repair_is_optional_and_changes_the_audio(studio):
     # The preview is level matched for listening, the chain itself is not.
     preview = window.repair_preview
     assert preview is not None
-    np.testing.assert_array_equal(preview[0], audition_pair(clipped, repaired.audio)[0])
+    np.testing.assert_array_equal(preview[0], audition_pair(clipped, repaired.audio, RATE)[0])
 
 
 def test_every_optional_stage_can_be_skipped_and_the_chain_still_exports(studio, monkeypatch):

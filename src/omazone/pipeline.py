@@ -4,13 +4,14 @@ Prefix caches depend on numerical recipes and upstream inputs, not GUI selection
 Matching never relearns during rendering. Reserved stages fail if enabled.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import numpy as np
 
 from .compressor import CompressionResult, render_compressor, settings_from_parameters
 from .engine import render, validate_audio
+from .loudness import integrated_lufs
 from .manual_eq import eq_from_parameters, render_eq
 from .output_gain import apply_output_gain
 from .output_gain import settings_from_parameters as output_settings
@@ -44,6 +45,10 @@ class ChainResult:
     equalized: np.ndarray | None = None
     compression: CompressionResult | None = None
     pre_output: np.ndarray | None = None
+    # Integrated LUFS per prefix, keyed by array identity. Measured once here,
+    # in the render worker, so the preview pairs and the Output readouts share
+    # one computation instead of each paying for it on the UI thread.
+    loudness: dict = field(default_factory=dict)
 
 
 class ChainRenderer:
@@ -183,6 +188,9 @@ class ChainRenderer:
                 pre_output if output_stage.bypassed else apply_output_gain(pre_output, settings)
             ),
         )
+        loudness = _measure_loudness(
+            [self.original, repaired, matched, equalized, pre_output, output], self.rate
+        )
         return ChainResult(
             self.original,
             repaired,
@@ -192,4 +200,20 @@ class ChainRenderer:
             equalized,
             compressed,
             pre_output,
+            loudness,
         )
+
+
+def _measure_loudness(arrays, rate):
+    """Integrated LUFS for each chain prefix, keyed by array identity.
+
+    Integrated loudness is a whole-programme measurement, so it is taken once
+    per render. A six-minute stereo song costs well under a second each; doing
+    it lazily on the UI thread would stall every redraw that showed a reading.
+    Bypassed stages share an array, so keys may repeat.
+    """
+    measured = {}
+    for audio in arrays:
+        if audio is not None and id(audio) not in measured:
+            measured[id(audio)] = integrated_lufs(audio, rate)
+    return measured

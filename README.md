@@ -36,6 +36,8 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
 - Stereo-linked broadband compression with peak/RMS detection, timed gain reduction and step A/B.
 - Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
+- Integrated LUFS per ITU-R BS.1770-4, shown beside the peaks and used to
+  loudness-match A/B playback without changing exported samples.
 - Cached repair/matching/EQ/compression/output prefixes rendered from the original and saved recipe.
 - A guided seven-step workflow, `Listen and Mark`, `Repair`, `Match`, `Manual EQ`,
   `Dynamics`, `Output`, `Export`, with Back/Continue/Skip and a status label on
@@ -45,7 +47,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Unsaved-work prompts before any destructive action, and an Export review that
   routes you to whichever stage is holding up delivery.
 
-The next priority is LUFS and true-peak metering, followed by a ceiling limiter.
+The next priority is oversampled true-peak metering (#44), followed by a ceiling limiter.
 See the [approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for
 implementation priorities and contribution tasks.
 
@@ -630,10 +632,12 @@ project later re-renders rather than reusing a baked intermediate. See
 
 ## Current limitations
 
-The interface shows RMS and sample peaks, not LUFS or true peaks. Preview is
-RMS-matched, with common attenuation to provide headroom. That is an approximate
-level comparison, not perceptual loudness matching. Abrupt A/B switches can click;
-crossfaded switching is a follow-up improvement.
+The interface shows sample peaks and integrated LUFS, but not true peaks; see
+[loudness](docs/loudness.md). Preview is loudness-matched, with common
+attenuation to provide headroom. LUFS is a good model of average perceived
+loudness rather than of every listener, so A/B matching remains approximate.
+Abrupt A/B switches can click; crossfaded switching is a follow-up improvement.
+Measuring integrated loudness adds roughly half a second per stage to a render.
 
 Mastering exports are 32-bit floating-point WAVs containing the full chain, without
 preview attenuation. Samples can exceed 0 dBFS; there is no limiter yet. Delay is

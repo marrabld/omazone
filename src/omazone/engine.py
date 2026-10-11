@@ -10,6 +10,8 @@ import numpy as np
 from scipy import signal
 from scipy.ndimage import gaussian_filter1d
 
+from .loudness import integrated_lufs, loudness_gain_db
+
 
 @dataclass(frozen=True)
 class Spectrum:
@@ -168,20 +170,53 @@ def peak_db(audio):
     return float(20 * np.log10(max(float(np.max(np.abs(audio))), 1e-12)))
 
 
-def audition_pair(source, output):
-    """RMS-match previews and apply shared headroom; never changes export audio.
+def audition_pair(source, output, sample_rate, loudness=None):
+    """Loudness-match previews and apply shared headroom; never changes export audio.
 
     Both sides must be the same length. The transport reads one cursor across
     the pair, so unequal lengths would silently compare audio that starts at
     different points rather than at the same moment.
+
+    Matching is by integrated LUFS (#9) rather than RMS, because a gate weights
+    what a listener hears instead of a flat average that lets a quiet passage
+    pull the whole programme down. When a measurement is undefined (silence, or
+    audio shorter than one gating block) the gain falls back to RMS rather than
+    guessing at a level.
+
+    ``loudness`` is an optional cache shared across one render's pairs. Stage
+    prefixes chain, so the same array is measured twice in a four-pair chain;
+    pass one dict to measure it once. Keys are array identities, so keep the
+    arrays alive for as long as the cache lives.
     """
     if source.shape[0] != output.shape[0]:
         raise ValueError(
             "Comparison sides must be the same length to stay sample-aligned: "
             f"{source.shape[0]} != {output.shape[0]}."
         )
-    gain = 10 ** ((rms_db(source) - rms_db(output)) / 20)
-    matched = output * gain
+    if source is output or np.array_equal(source, output):
+        # Nothing to match: an identical pair must not be rescaled by a
+        # measurement of itself.
+        return _with_headroom(source, source)
+    source_lufs = _measured_loudness(source, sample_rate, loudness)
+    output_lufs = _measured_loudness(output, sample_rate, loudness)
+    gain_db = loudness_gain_db(source_lufs, output_lufs)
+    if gain_db is None:
+        gain_db = rms_db(source) - rms_db(output)
+    matched = output * 10 ** (gain_db / 20)
+    return _with_headroom(source, matched)
+
+
+def _measured_loudness(audio, sample_rate, cache):
+    if cache is None:
+        return integrated_lufs(audio, sample_rate)
+    key = id(audio)
+    if key not in cache:
+        cache[key] = integrated_lufs(audio, sample_rate)
+    return cache[key]
+
+
+def _with_headroom(source, matched):
+    """Apply the attenuation both sides share, so they stay comparable."""
     peak = max(np.max(np.abs(source)), np.max(np.abs(matched)), 1e-12)
     attenuation = min(1.0, 0.95 / peak)
     return (source * attenuation).astype(np.float32), (matched * attenuation).astype(np.float32)

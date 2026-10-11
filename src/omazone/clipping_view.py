@@ -555,7 +555,7 @@ class ClippingInspector(QtWidgets.QWidget):
             return (
                 combined,
                 analyse(combined.audio, rate),
-                audition_pair(original, combined.audio),
+                audition_pair(original, combined.audio, rate),
                 operations,
             )
 

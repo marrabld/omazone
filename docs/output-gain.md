@@ -55,5 +55,5 @@ listening. The generated demonstration uses no copyrighted recording:
 uv run python tools/render_output_demo.py docs/images
 ```
 
-Integrated LUFS and perceptually matched preview remain in #9. Oversampled
+Integrated LUFS is implemented; see [loudness](loudness.md). Oversampled
 true-peak readings are #44. The ceiling limiter is a later, separate stage #45.
