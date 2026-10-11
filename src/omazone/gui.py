@@ -449,22 +449,38 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         match_subnav_layout = QtWidgets.QHBoxLayout(self.match_subnav)
         match_subnav_layout.setContentsMargins(0, 0, 0, 0)
         match_subnav_layout.setSpacing(4)
+        # Whole song first, because that distinction was the one learners
+        # missed: with only "Match" on screen, matching reads as song-wide.
         for title, key, tip in (
-            ("Match", "match", "Whole-song matching settings"),
+            ("Whole song", "match", "Match the whole recording in one correction"),
             ("Targets", "reference", "Capture and manage reference targets"),
             ("Sections", "sections", "Match the mix in named sections"),
         ):
             button = QtWidgets.QPushButton(title)
             button.setCheckable(True)
             button.setToolTip(tip)
+            # Preferred, not Ignored: Ignored discards the size hint and
+            # collapsed these to zero width, leaving per-section matching with
+            # no visible way to reach it.
             button.setSizePolicy(
-                QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed
+                QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed
             )
             button.clicked.connect(lambda _=False, k=key: self.views.setStep(k))
             match_subnav_layout.addWidget(button)
             setattr(self, f"match_subnav_{key}", button)
         match_subnav_layout.addStretch(1)
         match_layout.addWidget(self.match_subnav)
+        self.match_sections_link = QtWidgets.QToolButton()
+        self.match_sections_link.setText("Match individual sections →")
+        self.match_sections_link.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.match_sections_link.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.match_sections_link.setToolTip(
+            "Go to Sections and start a section from the passage you have selected."
+        )
+        self.match_sections_link.clicked.connect(self.go_to_sections)
+        match_layout.addWidget(self.match_sections_link)
         match_layout.addWidget(self.mastering_controls)
         match_layout.addStretch(1)
         for index in range(self.views.stack.count()):
@@ -868,6 +884,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.clipping_inspector.report is not None
             and bool(self.clipping_inspector.report.candidates)
         )
+        # Offer the shortcut only when it can actually succeed: a passage to
+        # carry over, and a captured target for the section to reference. With
+        # no target the shortcut would dead-end on "Missing target for section".
+        self.match_sections_link.setVisible(
+            self.source is not None
+            and self.waveform.selection is not None
+            and bool(self.section_workbench.targets)
+            and not self.project.stages["match"].bypassed
+        )
         if self.worker is not None:
             message = self.status.text()
         elif self.source is None:
@@ -927,18 +952,30 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             if workflow.matching_analysis is AnalysisState.RETAINED and stage.comparison_available:
                 message = "Matching rendered with analysis retained from an earlier input."
             elif stage.state is RenderState.READY:
-                message = "Matching complete. Compare the result or export."
+                message = (
+                    "Matching complete. Compare, export, or use Sections to match parts separately."
+                )
             elif self.project.match_mode == "none" and not self.project.stages["match"].bypassed:
                 message = (
                     "Matching is optional. Add a reference to analyse it; otherwise it passes unchanged."
                     if self.reference is None and self.project.reference_target is None
-                    else "Mix and reference ready. Analyse Matching, or leave it unchanged."
+                    else "Mix and reference ready. Analyse the whole song, or use Sections "
+                    "to match parts separately."
                 )
             else:
                 message = stage.reason
         else:
             message = "Mix and reference ready."
         self.views.action_label.setText(message)
+
+    def go_to_sections(self):
+        """Open Mix sections with the selected passage already in the form.
+
+        Arriving at an empty form would mean selecting the passage a second
+        time, which is the friction that hides this route in the first place.
+        """
+        self.views.setStep("sections")
+        self.section_workbench.use_mix_selection()
 
     def toggle_details(self, visible):
         self.details_panel.setVisible(visible)

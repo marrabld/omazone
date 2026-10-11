@@ -220,8 +220,8 @@ than reducing the plot area.
 | Step or view | Inspector defaults | Optional details |
 | --- | --- | --- |
 | Regions | Passage name and saved-region list | Precise times and sample counts |
-| Reference targets | Target name and short library list | Import/export/remove and precise bounds |
-| Mix sections | Compact section list, target, and amount | Bounds, smoothing, limits, transition, removal |
+| Targets (Match page) | Target name and short library list | Import/export/remove and precise bounds |
+| Sections (Match page) | Compact section list, target, and amount | Bounds, smoothing, limits, transition, removal |
 | Clipping inspection | Result summary and candidate review | Detector/repair parameters and measurements |
 
 ![Regions with a large waveform and compact naming inspector](docs/images/omazone-shared-regions.png)
@@ -229,7 +229,7 @@ than reducing the plot area.
 The workspace stays beside a compact task inspector on wider windows, with
 bounded controls below on narrow ones. Use **Waveform**, **Spectrum**, or
 **Both** to inspect the same passage while working in Matching, Regions, Reference
-targets, Mix sections, or Clipping inspection. Drag the splitter between the
+targets, Sections, or Clipping inspection. Drag the splitter between the
 viewer and controls to give either more space; inspector contents scroll rather than hiding
 the song. Matching prioritises its frequency spectrum and filter response, with
 compact settings beside the plots on wider windows. Other tools retain the
@@ -276,15 +276,17 @@ chosen view. On Matching, its compact **View** menu offers
 Waveform/Spectrum/Both, original/input/output signals, and the optional overview.
 Looping and returning to whole-recording playback are also available in this menu.
 Matching starts with "Load a mix", then "Mix loaded. Add a reference",
-then "Mix and reference ready". Reference targets open only when you choose that
-tool; loading a reference does not mean you need to capture named targets.
+then "Mix and reference ready". The Match step offers three pages — **Whole
+song**, **Targets**, **Sections** — so you can capture named targets and match
+individual parts of the song. Loading a reference does not mean you need to
+capture named targets.
 
 The plots take most of the Matching workspace. **Match amount** is shown in a
 compact panel, with smoothing and gain limits under **Advanced matching settings**.
 At narrower widths, controls become a strip below the plots. Basic matching
 playback across all tools is Play/Stop, A/B, seeking, and time; looping and view
 options are in **View**. The tabs and primary action bar do not scroll. **Analyse + process** stays visible
-on Matching; **Render sections** stays visible on Mix sections. Settings may scroll
+on Matching; **Render sections** stays visible on Sections. Settings may scroll
 when the lower panel is small. **View → Show measurements and status** expands the footer
 details when you need them. Opening a saved project still deliberately restores
 its saved tool and view preferences.
@@ -372,7 +374,17 @@ number of display points.
 
 ## Match metal and clean sections separately
 
-Use different targets when a song contains passages with different tonal goals.
+Matching is not only whole-song. The Match step has three pages, chosen at the
+top of its panel:
+
+| Page | Use it for |
+| --- | --- |
+| **Whole song** | One correction applied to the entire recording |
+| **Targets** | Capturing named reference passages |
+| **Sections** | Different settings for different parts of the song |
+
+Use **Analyse + process** on *Whole song* for a single correction everywhere. Use
+**Sections** when a song contains passages with different tonal goals.
 Each mix section is analysed independently against its assigned target; the
 whole-song spectrum is not used to design its correction.
 Its inspector shows the compact section list, name, assigned target, and amount.
@@ -381,13 +393,17 @@ are under **Section settings and bounds**. Add/Update and Render actions stay fi
 
 ![Mix-section assignment inspector beside a large waveform with named passages](docs/images/omazone-shared-sections.png)
 
-1. Load a reference and open **Reference targets**. Shift+drag its metal passage,
-   enter a target name such as `Metal`, and click **Capture target**.
+1. Load a reference and open **Targets** on the Match step. Shift+drag its metal
+   passage, enter a target name such as `Metal`, and click **Capture target**.
 2. Select its clean passage and capture `Clean`. You can also capture targets
    from different reference files; earlier targets remain in the library.
-3. Load your mix. In **Regions** or the shared waveform, select the metal passage.
-4. Open **Mix sections**, click **Use selected passage**, name the section, choose
+3. Load your mix and select the metal passage in the shared waveform.
+4. Open **Sections**, click **Use selected passage**, name the section, choose
    `Metal`, set its amount/smoothing/gain limits, and click **Add section**.
+
+   With a passage already selected, Match offers **Match individual sections →**
+   instead, which opens **Sections** with that passage already in the form. It
+   appears only when it can work, so you need a selection and a captured target.
 5. Repeat for the clean passage with the `Clean` target. Assignments cannot overlap.
 6. Choose a **Transition** duration and click **Render sections**. This produces
    one complete preview and exportable file, keeping the original duration.
@@ -398,7 +414,7 @@ are under **Section settings and bounds**. Add/Update and Render actions stay fi
 To change an assignment, select its row, edit the fields, and click **Update
 section**. **Inspect EQ** and **Render sections** also apply pending edits to the
 selected row. Edits invalidate the old preview and export until you render again.
-The controls below the tabs and **Analyse + process** still perform whole-song
+**Analyse + process** on the *Whole song* page still performs whole-song
 matching; section settings live in the section table and editor.
 
 Coloured named regions appear on the mix waveform. Dashed yellow windows show
@@ -423,8 +439,8 @@ longer representative passages generally make better tonal targets.
 
 Section assignments and settings are saved in the project recipe. Loading a new
 mix starts a new session but retains the captured target library. Preview level
-matching uses whole-file RMS, not separate per-section
-loudness normalisation. Section matching controls tonal balance, not dynamics or
+matching uses whole-file [loudness](docs/loudness.md), not separate per-section
+normalisation. Section matching controls tonal balance, not dynamics or
 vocal/instrument balance.
 
 ## Try clipping repair
