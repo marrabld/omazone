@@ -11,6 +11,10 @@ from omazone.engine import (
     render,
     rms_db,
 )
+from omazone.loudness import integrated_lufs
+
+# audition_pair measures loudness, so tests pass the rate explicitly.
+RATE = 16000
 
 
 def noise():
@@ -68,12 +72,36 @@ def test_gain_limits_and_stereo_preservation():
     np.testing.assert_allclose(result[:, 1], -0.4 * result[:, 0], atol=1e-12)
 
 
-def test_preview_matches_rms_and_has_headroom():
+def test_preview_matches_loudness_and_keeps_headroom():
+    """A/B is level-matched by LUFS, and both sides stay under full scale."""
     audio = noise() * 10
-    first, second = audition_pair(audio, audio * 3)
-    assert abs(rms_db(first) - rms_db(second)) < 1e-5
+    first, second = audition_pair(audio, audio * 3, RATE)
+    assert abs(integrated_lufs(first, RATE) - integrated_lufs(second, RATE)) < 0.05
     assert np.max(np.abs(first)) <= 0.950001
     assert np.max(np.abs(second)) <= 0.950001
+
+
+def test_preview_falls_back_to_rms_when_loudness_is_undefined():
+    """Silence and sub-block audio have no gated mean, so matching uses RMS."""
+    audio = noise() * 10
+    short = audio[: RATE // 10]
+    first, second = audition_pair(short, short * 3, RATE)
+    assert abs(rms_db(first) - rms_db(second)) < 1e-5
+
+
+def test_an_identical_pair_is_not_rescaled_by_measuring_itself():
+    audio = noise() * 10
+    first, second = audition_pair(audio, audio, RATE)
+    np.testing.assert_array_equal(first, second)
+    assert np.max(np.abs(first)) <= 0.950001
+
+
+def test_preview_matching_never_changes_the_audio_it_compares():
+    """Matching is for listening only; the rendered array is untouched."""
+    audio = noise() * 10
+    before = audio.copy()
+    audition_pair(audio, audio * 3, RATE)
+    np.testing.assert_array_equal(audio, before)
 
 
 def test_silence_rejected_and_reference_can_have_different_rate():

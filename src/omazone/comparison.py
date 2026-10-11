@@ -198,7 +198,7 @@ class ComparisonState:
         """Fall back to the stage input so a stale output still plays sensibly."""
         if self.before is None:
             return None
-        return audition_pair(self.before, self.before)
+        return audition_pair(self.before, self.before, self.rate)
 
     @property
     def playback_arrays(self):

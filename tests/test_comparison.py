@@ -14,6 +14,10 @@ from omazone.comparison import (
 from omazone.engine import audition_pair
 from omazone.project import STAGES
 
+# audition_pair measures loudness, so tests pass the rate explicitly.
+RATE = 16000
+
+
 ORIGINAL = np.zeros((64, 2))
 REPAIRED = np.ones((64, 2))
 MATCHED = np.full((64, 2), 2.0)
@@ -40,7 +44,7 @@ def rendered_pairs(**stages):
         pairs[stage] = StagePair(
             before if present else None,
             after if present else None,
-            audition_pair(before, after) if present else None,
+            audition_pair(before, after, RATE) if present else None,
         )
     return pairs
 
@@ -176,7 +180,7 @@ def test_alignment_is_reported_rather_than_assumed():
 
 def test_audition_pair_refuses_unequal_sides():
     with pytest.raises(ValueError, match="same length"):
-        audition_pair(np.zeros((64, 2)), np.zeros((32, 2)))
+        audition_pair(np.zeros((64, 2)), np.zeros((32, 2)), RATE)
 
 
 @pytest.mark.parametrize(

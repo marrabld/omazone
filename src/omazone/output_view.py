@@ -4,6 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
+from .loudness import format_lufs
 from .output_gain import (
     OutputGainSettings,
     output_parameters,
@@ -170,13 +171,18 @@ class OutputView(QtWidgets.QWidget):
         self.summary.setText(self.owner.workflow_status().stages["output"].reason)
 
     @staticmethod
-    def reading(name, peak):
+    def reading(name, peak, lufs):
         if peak is None:
             return f"{name}: render to measure"
-        if peak == 0:
-            return f"{name}: silence"
-        db = 20 * np.log10(peak)
-        return f"{name}: {db:+.1f} dBFS sample peak" + (" | OVER 0 dBFS" if peak > 1 else "")
+        level = 20 * np.log10(peak) if peak > 0 else None
+        loud = format_lufs(lufs)
+        if level is None:
+            return f"{name}: silence | {loud}"
+        return (
+            f"{name}: {level:+.1f} dBFS sample peak"
+            + (" | OVER 0 dBFS" if peak > 1 else "")
+            + f" | {loud}"
+        )
 
     def draw(self):
         source = self.owner.source[0] if self.owner.source is not None else None
@@ -191,13 +197,25 @@ class OutputView(QtWidgets.QWidget):
             self.final_peak = sample_peak(result.output) if result is not None else None
         peaks = (self.source_peak, self.before_peak, self.final_peak)
         self.canvas.show_peaks(peaks)
-        for label, name, peak in zip(
+        # The render already measured every prefix; never measure on the UI thread.
+        source_audio = self.owner.source[0] if self.owner.source is not None else None
+        measured = result.loudness if result is not None else {}
+        loudness = (
+            measured.get(id(audio)) if audio is not None else None
+            for audio in (
+                source_audio,
+                result.pre_output if result else None,
+                result.output if result else None,
+            )
+        )
+        for label, name, peak, loud in zip(
             self.readouts,
             ("Original source", "Before output gain", "Final export"),
             peaks,
+            loudness,
             strict=True,
         ):
-            label.setText(self.reading(name, peak))
+            label.setText(self.reading(name, peak, loud))
             label.setStyleSheet("color: #ff9086;" if peak is not None and peak > 1 else "")
 
     def rendered(self):

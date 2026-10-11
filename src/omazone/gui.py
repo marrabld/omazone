@@ -1387,11 +1387,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 result.output,
                 analyse(result.output, rate),
                 spec,
-                audition_pair(result.repaired, result.matched),
+                audition_pair(result.repaired, result.matched, rate, result.loudness),
                 result,
-                audition_pair(result.matched, result.equalized),
-                audition_pair(result.equalized, result.pre_output),
-                audition_pair(result.pre_output, result.output),
+                audition_pair(result.matched, result.equalized, rate, result.loudness),
+                audition_pair(result.equalized, result.pre_output, rate, result.loudness),
+                audition_pair(result.pre_output, result.output, rate, result.loudness),
             )
 
         self.invalidate()
