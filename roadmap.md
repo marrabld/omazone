@@ -49,12 +49,20 @@ optional View action and a persistent seek/time display. See
 
 1. **Output measurements, #9/#44.** Add integrated loudness with tested silence
    and short-audio handling, then separately calibrated oversampled true peaks.
-   Preview loudness matching must never change export gain.
+   Preview loudness matching must never change export gain. #44 depends only on
+   the closed #11, so the two can proceed in parallel rather than in sequence.
 2. **Final peak control, #45.** Add a modest final limiter only after loudness and
    true-peak measurements are clear.
 3. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
    three-band compressor from the tested broadband detector. Verify crossover
    recombination before expanding multiband processing.
+
+Milestone 3 is not yet startable. #8 needs the filter modules in #6, and #46 is
+gated behind #44 and #45 as well. Neither #6 nor #14 appears in the plan above:
+#6 is a prerequisite rather than a goal, and #14 now covers only the audible
+platform checks that continuous integration cannot perform. #10 (crossfading A/B
+and smoothing seeks) is likewise open and unplanned; it improves playback polish
+and blocks nothing.
 
 Workflow consolidation (#25/#27) is complete: repair, matching, manual EQ,
 compression, output, comparison, and export now behave as one guided application,
@@ -88,7 +96,7 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#11](https://github.com/marrabld/omazone/issues/11) | Output gain and overload indicators | Foundation |
 | [#12](https://github.com/marrabld/omazone/issues/12) | Readable log-frequency labels | Good first issue |
 | [#13](https://github.com/marrabld/omazone/issues/13) | Generated-signal matching tutorial | Good first issue |
-| [#14](https://github.com/marrabld/omazone/issues/14) | Windows/macOS setup and playback validation | Good first issue |
+| [#14](https://github.com/marrabld/omazone/issues/14) | Audible A/B and audio device checks on Windows/macOS | Good first issue |
 | [#16](https://github.com/marrabld/omazone/issues/16) | Named reference-passage targets and profile files | #2 |
 | [#17](https://github.com/marrabld/omazone/issues/17) | Mix-section assignments and independent correction curves | #16 |
 | [#18](https://github.com/marrabld/omazone/issues/18) | Contextual section rendering and aligned transitions | #16, #17 |
@@ -105,6 +113,8 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#52](https://github.com/marrabld/omazone/issues/52) | Use the same stage pair for playback and the viewer | Comparison #27 |
 | [#53](https://github.com/marrabld/omazone/issues/53) | Add a final Export review step | Status #54, navigation #25 |
 | [#54](https://github.com/marrabld/omazone/issues/54) | Share render and matching-analysis status across the UI | Chain #1 |
+| [#64](https://github.com/marrabld/omazone/issues/64) | Save a project when the recording has no relative path | Cross-drive storage |
+| [#70](https://github.com/marrabld/omazone/issues/70) | Confirm the layout works at laptop widths below 1440px | Layout #36, #38 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
