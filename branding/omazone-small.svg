@@ -1,0 +1,14 @@
+<!-- Omazone application mark, small sizes. Source of truth for icons at or
+     below 32px, where omazone.svg's zigzag loses its shape.
+
+     Fewer, thicker strokes on the same colours. Run
+     `uv run python tools/build_icons.py` to regenerate the outputs. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"
+     aria-label="Omazone">
+  <title>Omazone</title>
+  <rect x="2" y="2" width="124" height="124" rx="26" fill="#141a24"/>
+  <rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="#22304a" stroke-width="2"/>
+  <path d="M22 64h18l12-30 16 60 16-60 12 30h10"
+        fill="none" stroke="#63dfc0" stroke-width="16" stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>
