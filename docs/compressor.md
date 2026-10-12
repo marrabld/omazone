@@ -4,6 +4,30 @@ The processing order is repair -> learned matching -> manual EQ -> stereo-linked
 compressor -> output gain -> export. The compressor can run without matching or EQ. Its settings
 live in the saved project; it never relearns reference filters during rendering.
 
+## Using the dynamics page
+
+1. Check **Enable compressor in the chain** and set threshold, ratio and timing.
+   The checkbox includes or bypasses compression. It does not process audio.
+2. Click **Render compression** to rebuild the chain with these settings.
+   Changing a control requires another render before you can compare it.
+   Rendering processes the whole song, even with a passage selected, and can take
+   a while. An animated activity bar and elapsed time stay above the settings
+   until processing finishes. The bar shows activity, not percentage complete.
+3. Click **Loop and compare compression**, then use the listening button to switch
+   between before and after. A selected passage loops; with no selection, the
+   whole song plays.
+4. Continue to Output or export. To omit compression, use **Skip Dynamics**, or
+   uncheck the compressor and click **Render without compression**.
+
+Before compression is the chain after repair, matching and EQ. Compression never
+changes that input. It is not the raw source, which you can hear with
+**View > Original recording**. A/B applies constant preview gain for loudness
+matching and shared headroom, not compression to the before side.
+
+Playback uses buffered audio. If the device misses buffers, a playback-dropout
+warning appears. Dropouts can garble either A/B side without changing the render
+or export.
+
 ## Detector and static curve
 
 The detector uses the largest absolute channel sample in `peak` mode or the
@@ -41,7 +65,7 @@ crossovers whose uncompressed bands recombine predictably.
 
 **View -> Both** places the raw waveform next to the graphs. Preview A/B compares
 the equalized signal with the compressed signal at the same cursor and loop. Both
-sides include any earlier repair or matching. Preview RMS matching and common
+sides include any earlier repair or matching. Preview LUFS matching and common
 headroom do not affect export. EQ-only A/B excludes the compressor.
 
 ## Project recipe and cache

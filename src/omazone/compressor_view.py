@@ -102,10 +102,35 @@ class CompressorView(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         prompt = QtWidgets.QLabel(
-            "Control whole-mix level changes after EQ. Start gently and watch gain reduction."
+            "Dynamics controls whole-mix compression after EQ. Enable the compressor, "
+            "set the controls, then render. Compare before/after with the listening button. "
+            "Changing controls does not process audio until you render. "
+            "Rendering processes the entire song, not just the selection, and can take a while."
         )
         prompt.setWordWrap(True)
         layout.addWidget(prompt)
+        # The window places this above the scrolling settings so activity stays
+        # visible even when the user has scrolled down to the listening controls.
+        self.render_activity = QtWidgets.QWidget()
+        activity_layout = QtWidgets.QVBoxLayout(self.render_activity)
+        activity_layout.setContentsMargins(4, 4, 4, 4)
+        self.render_message = QtWidgets.QLabel()
+        self.render_message.setWordWrap(True)
+        self.render_message.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+        )
+        activity_layout.addWidget(self.render_message)
+        self.render_progress = QtWidgets.QProgressBar()
+        self.render_progress.setRange(0, 0)
+        self.render_progress.setTextVisible(False)
+        self.render_progress.setAccessibleName("Rendering in progress")
+        activity_layout.addWidget(self.render_progress)
+        self.render_activity.hide()
+        self.render_elapsed = QtCore.QElapsedTimer()
+        self.render_timer = QtCore.QTimer(self)
+        self.render_timer.setInterval(1000)
+        self.render_timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
+        self.render_timer.timeout.connect(self.update_render_message)
         self.threshold = self.spin(layout, "Threshold", -60, 0, -18, " dBFS", 1)
         self.ratio = self.spin(layout, "Ratio", 1, 20, 2, ":1", 1)
         self.makeup = self.spin(layout, "Manual makeup gain", -18, 18, 0, " dB", 1)
@@ -126,9 +151,18 @@ class CompressorView(QtWidgets.QWidget):
         layout.addWidget(self.advanced)
         self.advanced.hide()
         self.advanced_toggle.toggled.connect(self.advanced.setVisible)
-        self.enabled = QtWidgets.QCheckBox("Apply compressor")
+        self.enabled = QtWidgets.QCheckBox("Enable compressor in the chain")
+        self.enabled.setToolTip(
+            "Checked: the next render includes compression. Unchecked: it bypasses compression. "
+            "This switch does not render audio."
+        )
         layout.addWidget(self.enabled)
         self.listen_button = QtWidgets.QPushButton("Loop and compare compression")
+        self.listen_button.setToolTip(
+            "Before is the chain after EQ, without compression. After adds compression. "
+            "Both sides use preview-only loudness matching and shared headroom. "
+            "Use View > Original recording to hear the untouched source."
+        )
         self.listen_button.clicked.connect(self.listen)
         layout.addWidget(self.listen_button)
         self.summary = QtWidgets.QLabel(
@@ -137,7 +171,11 @@ class CompressorView(QtWidgets.QWidget):
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
         layout.addStretch(1)
-        self.render_button = QtWidgets.QPushButton("Apply compression and render")
+        self.render_button = QtWidgets.QPushButton("Render compression")
+        self.render_button.setToolTip(
+            "Rebuild the chain with the current settings. Earlier matching and EQ are retained. "
+            "Compression never overwrites its input or the original file."
+        )
         self.render_button.clicked.connect(owner.render_saved_recipe)
         for control in (
             self.threshold,
@@ -151,6 +189,24 @@ class CompressorView(QtWidgets.QWidget):
         self.detector.currentIndexChanged.connect(self.changed)
         self.enabled.toggled.connect(self.changed)
         self.restore()
+
+    def set_rendering(self, busy):
+        if busy and not self.render_timer.isActive():
+            self.render_elapsed.start()
+            self.render_timer.start()
+            self.update_render_message()
+        elif not busy:
+            self.render_timer.stop()
+        self.render_activity.setVisible(
+            busy and self.owner.views.currentWidget() is self
+        )
+
+    def update_render_message(self):
+        seconds = self.render_elapsed.elapsed() // 1000
+        self.render_message.setText(
+            f"Processing audio, {seconds}s elapsed. The full song is processed before "
+            "comparison is ready. Longer songs can take a while."
+        )
 
     def spin(self, layout, name, low, high, value, suffix, decimals):
         layout.addWidget(QtWidgets.QLabel(name))
@@ -213,6 +269,9 @@ class CompressorView(QtWidgets.QWidget):
         self.summary.setText(self.owner.workflow_status().stages["dynamics"].reason)
 
     def draw(self):
+        self.render_button.setText(
+            "Render compression" if self.enabled.isChecked() else "Render without compression"
+        )
         self.canvas.show_settings(self.settings(), self.owner.project.stages["dynamics"].bypassed)
         self.canvas.show_result(
             self.owner.chain_result.compression

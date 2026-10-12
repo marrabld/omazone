@@ -537,6 +537,9 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.label.setToolTip(
                     "Waveforms show raw processing levels; preview gain matching is separate. Spectrum compares relative tonal balance."
                 )
+                # Keyed by identity: the caller resets this whenever a render
+                # replaces the chain, because id() is only unique among live
+                # objects and a freed array's id can be reused.
                 key = (id(data), rate)
                 if key != self.wave_key:
                     old_selection = selection

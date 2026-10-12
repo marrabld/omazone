@@ -468,8 +468,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.task_actions.append(self.manual_eq_view.render_button)
         self.views.action_layout.addWidget(self.compressor_view.render_button)
         self.task_actions.append(self.compressor_view.render_button)
+        self.views.layout().insertWidget(
+            self.views.layout().indexOf(self.tool_scroll), self.compressor_view.render_activity
+        )
         self.views.action_layout.addWidget(self.output_view.render_button)
         self.task_actions.append(self.output_view.render_button)
+        # Keep the final action outside the scrolling chain review, like the
+        # render actions on earlier steps.
+        self.views.action_layout.addWidget(self.export_view.export_button)
+        self.task_actions.append(self.export_view.export_button)
         for button in (
             self.clipping_inspector.analyse_button,
             self.clipping_inspector.review_button,
@@ -845,6 +852,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.manual_eq_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.manual_eq_view.listen_button.setEnabled(not busy and self.comparison("eq").available)
         self.compressor_view.setEnabled(not busy and self.source is not None)
+        self.compressor_view.set_rendering(busy)
         self.compressor_view.canvas.setEnabled(not busy and self.source is not None)
         self.compressor_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.compressor_view.listen_button.setEnabled(
@@ -884,6 +892,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         manual_eq = self.views.currentWidget() is self.manual_eq_view
         compressor = self.views.currentWidget() is self.compressor_view
         output = self.views.currentWidget() is self.output_view
+        exporting = self.views.currentWidget() is self.export_view
         self.views.action_bar.show()
         shown = set()
         if matching:
@@ -907,6 +916,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             shown.add(self.compressor_view.render_button)
         elif output:
             shown.add(self.output_view.render_button)
+        elif exporting:
+            shown.add(self.export_view.export_button)
         for button in self.task_actions:
             button.setVisible(button in shown)
         self.name_region_button.setEnabled(
@@ -977,6 +988,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 "Output measured. Review sample peaks, compare or export."
                 if stage.measurements_available
                 else stage.reason
+            )
+        elif exporting:
+            message = (
+                "Processing complete. Click Export WAV to choose a filename and save the full chain."
+                if workflow.export_available
+                else workflow.render_reason
             )
         elif sections:
             count = len(self.section_workbench.sections)
@@ -1174,6 +1191,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         busy = self.worker is not None
         self.back_button.setEnabled(not busy and previous_step(step.key) is not None)
         following = next_step(step.key)
+        self.continue_button.setVisible(following is not None)
         self.continue_button.setEnabled(not busy and status.can_continue and following is not None)
         self.continue_button.setToolTip(
             f"Go to {following.title}." if following is not None else "This is the final step."
@@ -1200,6 +1218,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def tab_changed(self, *args):
         self.workspace.tool_changed()
+        self.compressor_view.set_rendering(self.worker is not None)
         clipping = self.views.currentWidget() is self.clipping_inspector
         reviewing = self.views.currentWidget() is self.region_page and self.audition_mode in (
             "original",
@@ -1477,6 +1496,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_preview = self.preview = result[3]
         if len(result) > 4:
             self.chain_result = result[4]
+            # The old chain's arrays are about to be freed, and a new array can
+            # land on the same id(). Caches keyed by id() must not survive that,
+            # or they hand back the previous render's audio.
+            self._identity_playback = None
+            self.workspace.wave_key = None
             self.match_after = result[4].matched
             self.eq_before = result[4].matched
             self.eq_after = result[4].equalized
@@ -1600,7 +1624,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         try:
             import sounddevice as sd
 
+            self.playback_dropouts = 0
+            self.reported_playback_dropouts = 0
+
             def callback(outdata, frames, time_info, status):
+                # Keep device diagnostics out of Qt and off the audio thread.
+                if status and status.output_underflow:
+                    self.playback_dropouts += 1
                 audio = self.preview[int(self.listen_processed)]
                 if self.transport.fill(audio, outdata):
                     self.playing = False
@@ -1610,6 +1640,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 samplerate=self.source[1],
                 channels=self.source[0].shape[1],
                 dtype="float32",
+                # This is offline audition, not live monitoring. Give Python
+                # callbacks room to run while Qt repaints the processing plots.
+                blocksize=2048,
+                latency="high",
                 callback=callback,
             )
             self.playing = True
@@ -1630,6 +1664,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.play_button.setText("Play")
 
     def check_playback(self):
+        if self.stream is not None and self.playback_dropouts > self.reported_playback_dropouts:
+            self.reported_playback_dropouts = self.playback_dropouts
+            self.status.setText(
+                "Playback dropouts detected. The audio device missed buffers; "
+                "this does not mean the rendered audio is damaged. Stop and replay to retry."
+            )
         if self.stream is not None and not self.playing:
             self.stop()
         self.update_transport()
