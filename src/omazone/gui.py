@@ -253,9 +253,21 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
+        # The mark sits in the header rather than only the title bar, so the
+        # application looks like itself the moment it opens.
+        brand = QtWidgets.QHBoxLayout()
+        brand.setContentsMargins(0, 0, 0, 0)
+        brand.setSpacing(10)
+        mark = QtWidgets.QLabel()
+        mark.setPixmap(application_icon().pixmap(32, 32))
+        mark.setFixedSize(32, 32)
+        mark.setToolTip("Omazone")
+        brand.addWidget(mark, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
         heading = QtWidgets.QLabel("OMAZONE   /   spectral laboratory")
         heading.setStyleSheet("font-size: 18px; font-weight: bold; color: #63dfc0;")
-        layout.addWidget(heading)
+        brand.addWidget(heading, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        brand.addStretch(1)
+        layout.addLayout(brand)
         self.files = QtWidgets.QLabel("Load a mix and a reference to begin.")
         self.files.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
