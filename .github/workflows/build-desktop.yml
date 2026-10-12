@@ -60,10 +60,12 @@ jobs:
           # Confirm the bundle identifies itself rather than inheriting Qt's defaults,
           # which would make the app unopenable by double-click.
           plist=dist/Omazone.app/Contents/Info.plist
-          for expected in "au.com.omazone.app" "Omazone" "14.0"; do
+          for expected in "au.com.omazone.app" "Omazone" "14.0" "Omazone.icns"; do
             grep -q "<string>$expected</string>" "$plist" \
               || { echo "::error::Info.plist is missing $expected" >&2; exit 1; }
           done
+          # A bundle that declares an icon it does not carry shows a blank one.
+          test -f dist/Omazone.app/Contents/Resources/Omazone.icns
       - name: Choose download filename
         id: bundle
         shell: bash

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="branding/icons/omazone-128.png" alt="Omazone" width="96" height="96">
+</p>
+
 # Omazone
 
 [**Download Windows app: latest development build**](https://github.com/marrabld/omazone/releases/download/development/Omazone-windows-x64.zip)
@@ -738,6 +742,9 @@ a mastering verdict. Silence is rejected rather than used as a matching target.
 - `tests/test_clipping.py`: asymmetric/scaled clipping, rails, overloads, and documented detection limits.
 - `tests/test_declipping.py`: repair accuracy, exact masks, rejection cases, and a known worsening case.
 - `roadmap.md`: planned processing modules, priorities, and contribution ideas.
+- `branding/`: the application mark. The SVGs are the source of truth; run
+  `uv run python tools/build_icons.py` to regenerate every platform format from
+  them. Edit the SVGs, never the generated PNG, ICO or iconset.
 
 The GUI uses PySide6 and pyqtgraph. The engine uses NumPy and SciPy; SoundFile
 handles audio files, and sounddevice handles preview playback. Analysis and

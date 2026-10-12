@@ -507,8 +507,15 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.eq_canvas.set_spectra()
                 self.compressor_canvas.show_result(None)
                 self.output_canvas.show_peaks((None, None, None))
+                # No audio on screen means one of two quite different things:
+                # a project whose recording could not be found, or simply
+                # nothing loaded yet. Telling someone to relink a file they
+                # never chose is worse than saying nothing useful.
                 self.label.setText(
-                    "Recording unavailable. Project regions and choices are retained; relink the original."
+                    "Recording unavailable. Project regions and choices are retained; "
+                    "relink the original."
+                    if self.owner.project.source is not None
+                    else "Load a mix to see the song."
                 )
                 self.badge.setText(" | ".join(self.owner.asset_messages))
             else:

@@ -1,0 +1,16 @@
+<!-- Omazone application mark. Source of truth for every icon format.
+
+     Run `uv run python tools/build_icons.py` to regenerate the PNG, ICO and
+     macOS iconset under branding/icons/. Edit this file, never the outputs.
+
+     The stroke is 10/128 so it still reads at 16px. omazone-small.svg is the
+     variant used at or below 32px, where a full waveform turns to mush. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"
+     aria-label="Omazone">
+  <title>Omazone</title>
+  <rect x="2" y="2" width="124" height="124" rx="26" fill="#141a24"/>
+  <rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="#22304a" stroke-width="2"/>
+  <path d="M14 64h11l7-22 9 44 11-58 11 68 9-47 6 15h26"
+        fill="none" stroke="#63dfc0" stroke-width="10" stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>

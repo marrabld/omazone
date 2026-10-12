@@ -177,10 +177,36 @@ NARROW_WIDTH = 950
 READY_STAGE = StageStatus(RenderState.READY, "Ready to move on.", "Continue")
 
 
+def icon_candidates():
+    """Where the window icon may live, in the order worth trying.
+
+    A frozen bundle carries its own copy beside the package; a checkout reads
+    the one the icon build produced, so the asset is never committed twice.
+    """
+    here = Path(__file__).resolve().parent
+    yield here / "omazone-icon.png"
+    yield here.parents[1] / "branding" / "icons" / "omazone-256.png"
+
+
+def application_icon():
+    """The window icon, or an empty one when the asset is not present.
+
+    A missing icon costs a default one. It must never stop the window opening,
+    which is why this is a loop over candidates and not a load that can raise.
+    """
+    icon = QtGui.QIcon()
+    for path in icon_candidates():
+        if path.is_file():
+            icon.addFile(str(path))
+            break
+    return icon
+
+
 class Window(ProjectController, QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Omazone | spectral matching playground")
+        self.setWindowIcon(application_icon())
         self.resize(1120, 800)
         # Below this the stacked layout has no room left for the plots, and the
         # window would open larger than the screen it is on.
@@ -227,9 +253,21 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
+        # The mark sits in the header rather than only the title bar, so the
+        # application looks like itself the moment it opens.
+        brand = QtWidgets.QHBoxLayout()
+        brand.setContentsMargins(0, 0, 0, 0)
+        brand.setSpacing(10)
+        mark = QtWidgets.QLabel()
+        mark.setPixmap(application_icon().pixmap(32, 32))
+        mark.setFixedSize(32, 32)
+        mark.setToolTip("Omazone")
+        brand.addWidget(mark, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
         heading = QtWidgets.QLabel("OMAZONE   /   spectral laboratory")
         heading.setStyleSheet("font-size: 18px; font-weight: bold; color: #63dfc0;")
-        layout.addWidget(heading)
+        brand.addWidget(heading, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        brand.addStretch(1)
+        layout.addLayout(brand)
         self.files = QtWidgets.QLabel("Load a mix and a reference to begin.")
         self.files.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred

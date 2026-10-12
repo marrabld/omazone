@@ -20,6 +20,12 @@ package() {
     cp -a "$startdir/../../dist/Omazone/." "$pkgdir/opt/omazone/"
     install -Dm755 "$startdir/omazone" "$pkgdir/usr/bin/omazone"
     install -Dm644 "$startdir/omazone.desktop" "$pkgdir/usr/share/applications/omazone.desktop"
-    install -Dm644 "$startdir/omazone.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omazone.svg"
+    install -Dm644 "$startdir/../../branding/omazone.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omazone.svg"
+    # Raster sizes too: some desktops and launchers will not render a scalable
+    # icon at the sizes they actually ask for.
+    for size in 16 24 32 48 64 128 256 512; do
+        install -Dm644 "$startdir/../../branding/icons/omazone-$size.png" \
+            "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/omazone.png"
+    done
     install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

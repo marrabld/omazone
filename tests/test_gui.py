@@ -2748,3 +2748,51 @@ def test_output_reports_true_peak_beside_the_sample_peak(tmp_path):
         window.project.mark_saved()
         window.close()
         app.processEvents()
+
+
+def test_an_empty_start_does_not_tell_the_user_to_relink_a_file(tmp_path):
+    """Nothing loaded is not the same problem as a project that lost its audio."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        window.show()
+        for _ in range(4):
+            app.processEvents()
+        text = window.workspace.label.text()
+        assert "relink" not in text, text
+        assert "Load a mix" in text, text
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
+def test_a_project_whose_recording_is_missing_still_asks_for_a_relink(tmp_path):
+    """The genuine case keeps its guidance once a recipe expects audio."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    sf.write(
+        tmp_path / "mix.wav",
+        np.random.default_rng(319).normal(0, 0.1, (rate, 2)),
+        rate,
+        subtype="DOUBLE",
+    )
+    try:
+        window.show()
+        window.loaded("source", load_audio(tmp_path / "mix.wav"))
+        window.project.mark_saved()
+        for _ in range(4):
+            app.processEvents()
+        # The recipe still references a recording; the audio is simply gone.
+        assert window.project.source is not None
+        window.source = None
+        window.workspace.tool_changed()
+        for _ in range(4):
+            app.processEvents()
+        assert "relink" in window.workspace.label.text(), window.workspace.label.text()
+
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
