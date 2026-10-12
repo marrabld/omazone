@@ -82,6 +82,7 @@ def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch):
     class FakeStream:
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
+            self.options = kwargs
             self.active = False
 
         def start(self):
@@ -110,9 +111,17 @@ def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch):
         assert window.position == rate
         assert window.time_label.text() == "0:01.0 / 0:03.0"
         window.play()
+        assert window.stream.options["blocksize"] == 2048
+        assert window.stream.options["latency"] == "high"
         block = np.empty((128, 2), dtype=np.float32)
-        window.stream.callback(block, 128, None, None)
+        underrun = sd.CallbackFlags()
+        underrun.output_underflow = True
+        window.stream.callback(block, 128, None, underrun)
         np.testing.assert_array_equal(block, audio[rate : rate + 128])
+        assert window.playback_dropouts == 1
+        window.check_playback()
+        assert "Playback dropouts detected" in window.status.text()
+        assert window.reported_playback_dropouts == 1
         window.toggle_ab()
         window.stream.callback(block, 128, None, None)
         np.testing.assert_array_equal(block, audio[rate + 128 : rate + 256] * 0.5)
@@ -1636,6 +1645,16 @@ def test_continue_names_the_action_when_a_step_is_not_ready(tmp_path):
         window.go_continue()
         assert window.views.currentStep() == "export"
         assert not window.continue_button.isEnabled(), "Export is the final step"
+        assert window.continue_button.isHidden(), "No dead-end Continue on the final step"
+        assert not window.export_view.export_button.isHidden()
+        assert window.views.action_layout.indexOf(window.export_view.export_button) >= 0
+        assert window.views.action_label.text() == (
+            "Processing complete. Click Export WAV to choose a filename and save the full chain."
+        )
+        window.back_button.click()
+        assert window.views.currentStep() == "output"
+        assert not window.continue_button.isHidden()
+        assert window.export_view.export_button.isHidden()
     finally:
         if window.worker is not None:
             window.worker.wait()
@@ -1858,6 +1877,11 @@ def test_narrow_window_keeps_back_and_continue_and_no_horizontal_scrolling(tmp_p
                 assert window.rect().contains(QtCore.QRect(on_window, control.size())), control
             window.views.setStep("export")
             app.processEvents()
+            assert window.continue_button.isHidden()
+            for control in (window.back_button, window.export_view.export_button):
+                assert control.isVisible()
+                on_window = control.mapTo(window, QtCore.QPoint(0, 0))
+                assert window.rect().contains(QtCore.QRect(on_window, control.size()))
             assert window.tool_scroll.horizontalScrollBar().maximum() == 0
             assert window.minimumSizeHint().width() <= 520, window.minimumSizeHint().width()
     finally:
@@ -2384,6 +2408,74 @@ def test_multiband_canvas_edits_and_shared_viewer_without_relearning(tmp_path):
         window.close()
 
 
+@pytest.mark.parametrize("fail", [False, True])
+def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, monkeypatch, fail):
+    from threading import Event
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    release = Event()
+    audio = np.random.default_rng(291).normal(0, 0.1, (RATE, 2))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, RATE, subtype="DOUBLE")
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.views.setStep("dynamics")
+        comp = window.compressor_view
+        comp.enabled.setChecked(True)
+        renderer = window.get_renderer()
+        render = renderer.render
+
+        def delayed_render(*args, **kwargs):
+            assert release.wait(15)
+            if fail:
+                raise ValueError("Test render failed")
+            return render(*args, **kwargs)
+
+        monkeypatch.setattr(renderer, "render", delayed_render)
+        assert comp.render_activity.isHidden()
+        comp.render_button.click()
+        app.processEvents()
+        assert window.worker is not None
+        assert comp.render_activity.isVisible()
+        assert comp.render_activity.isEnabled(), "Activity should not look disabled"
+        assert not comp.render_button.isEnabled()
+        assert comp.render_progress.minimum() == comp.render_progress.maximum() == 0
+        assert "full song" in comp.render_message.text()
+        assert "0s elapsed" in comp.render_message.text()
+        assert window.views.layout().indexOf(comp.render_activity) < window.views.layout().indexOf(
+            window.tool_scroll
+        )
+        QtTest.QTest.qWait(1200)
+        assert "0s elapsed" not in comp.render_message.text()
+        window.views.setStep("export")
+        assert comp.render_activity.isHidden()
+        window.views.setStep("dynamics")
+        assert comp.render_activity.isVisible()
+
+        release.set()
+        deadline = time.monotonic() + 15
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert comp.render_activity.isHidden()
+        assert not comp.render_timer.isActive()
+        assert comp.render_button.isEnabled()
+        assert errors == (["Test render failed"] if fail else [])
+        if not fail:
+            assert window.dynamics_preview is not None
+    finally:
+        release.set()
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
 def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
     import sounddevice as sd
 
@@ -2431,9 +2523,12 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         comp = window.compressor_view
         window.views.setCurrentWidget(comp)
         assert window.workspace.plot_stack.currentWidget() is comp.canvas
+        assert comp.enabled.text() == "Enable compressor in the chain"
+        assert comp.render_button.text() == "Render without compression"
         comp.threshold.setValue(-28)
         comp.ratio.setValue(3)
         comp.enabled.setChecked(True)
+        assert comp.render_button.text() == "Render compression"
         assert not window.project.stages["dynamics"].bypassed
         comp.render_button.click()
         wait()
@@ -2441,6 +2536,13 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         direct = render_compressor(before, rate, comp.settings())
         np.testing.assert_allclose(window.output[0], direct.audio, atol=1e-12)
         np.testing.assert_array_equal(window.chain_result.equalized, before)
+        uncompressed = window.dynamics_before
+        uncompressed_copy = uncompressed.copy()
+        # Preview gain may change level, but cannot apply a compressor envelope
+        # to Before. Its gain is constant across the entire recording.
+        mask = np.abs(before) > 1e-5
+        preview_gain = window.dynamics_preview[0][mask] / before[mask]
+        np.testing.assert_allclose(preview_gain, preview_gain[0], rtol=1e-6)
         assert window.chain_result.compression is not None
         assert len(comp.canvas.reduction_curve.yData) == len(direct.reduction_db)
         window.position = rate // 2
@@ -2477,6 +2579,8 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
             "output": 2,
         }
         np.testing.assert_allclose(window.eq_preview[1], before_eq, atol=1e-12)
+        assert window.dynamics_before is uncompressed
+        np.testing.assert_array_equal(window.dynamics_before, uncompressed_copy)
         expected = window.output[0].copy()
         project_file = tmp_path / "compressor.omazone.json"
         monkeypatch.setattr(
@@ -2493,6 +2597,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         wait()
         np.testing.assert_array_equal(window.output[0], expected)
         window.compressor_view.enabled.setChecked(False)
+        assert comp.render_button.text() == "Render without compression"
         window.render_saved_recipe()
         wait()
         np.testing.assert_array_equal(window.output[0], before)

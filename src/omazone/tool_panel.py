@@ -40,6 +40,9 @@ class ToolPanel(QtWidgets.QWidget):
         self.action_layout.setContentsMargins(4, 4, 4, 4)
         self.action_label = QtWidgets.QLabel()
         self.action_label.setWordWrap(True)
+        self.action_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+        )
         self.action_layout.addWidget(self.action_label, 1)
         # Step navigation shares the action row, so moving between steps costs no
         # vertical space the viewer needs.

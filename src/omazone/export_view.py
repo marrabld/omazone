@@ -26,12 +26,16 @@ class ExportView(QtWidgets.QWidget):
         self.owner = owner
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(
-            QtWidgets.QLabel(
-                "Export writes the full-chain render, never a preview. "
-                "Review the stages below before writing the file."
-            )
+        prompt = QtWidgets.QLabel(
+            "Export writes the full-chain render, never a preview. "
+            "Review the stages below, then click Export WAV to choose a filename and save. "
+            "This is the final step."
         )
+        prompt.setWordWrap(True)
+        prompt.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+        )
+        layout.addWidget(prompt)
         self.chain = QtWidgets.QListWidget()
         self.chain.setMinimumHeight(150)
         self.chain.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -55,7 +59,10 @@ class ExportView(QtWidgets.QWidget):
         layout.addStretch(1)
         self.export_button = QtWidgets.QPushButton("Export WAV…")
         self.export_button.clicked.connect(owner.export)
-        layout.addWidget(self.export_button)
+        self.export_button.setToolTip(
+            "Choose a filename and save the full rendered chain as a 32-bit float WAV. "
+            "Preview loudness matching is not included."
+        )
         self.requested = None
         self.route_target = None
 
