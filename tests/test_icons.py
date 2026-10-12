@@ -13,6 +13,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6 import QtWidgets
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "build_icons.py"
 spec = importlib.util.spec_from_file_location("build_icons", SCRIPT)
@@ -81,8 +82,9 @@ def test_both_marks_render_and_are_not_blank():
     """A silently broken SVG would produce transparent icons for every platform."""
     from PySide6 import QtCore, QtGui, QtSvg
 
-    app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
-    del app
+    # A QApplication, not a QGuiApplication: Qt refuses to change application
+    # type once one exists, and other tests here need the widgets one.
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     for name in ("omazone.svg", "omazone-small.svg"):
         renderer = QtSvg.QSvgRenderer(str(BRANDING / name))
         assert renderer.isValid(), f"{name} does not parse"
@@ -99,3 +101,37 @@ def test_a_malformed_icon_is_detected_rather_than_written(tmp_path):
     write_ico([(16, b"not a png")], tmp_path / "bad.ico")
     data = (tmp_path / "bad.ico").read_bytes()
     assert struct.unpack("<HHH", data[:6]) == (0, 1, 1)
+
+
+def test_the_window_carries_the_icon_on_every_platform():
+    """A pipeline that builds icons but never sets one changes nothing visible."""
+    from omazone.gui import Window, application_icon
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        icon = application_icon()
+        assert not icon.isNull(), "the window icon asset was not found"
+        assert icon.availableSizes(), "the icon loaded with no usable size"
+        assert not window.windowIcon().isNull()
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
+def test_a_missing_icon_asset_degrades_instead_of_raising(monkeypatch, tmp_path):
+    """Running from an unusual layout must still open a window."""
+    import omazone.gui as gui
+
+    monkeypatch.setattr(gui, "icon_candidates", lambda: iter([tmp_path / "gone.png"]))
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = gui.Window()
+    try:
+        # Nothing to load, so no icon; the window still opens.
+        assert gui.application_icon().isNull()
+        assert window.windowIcon().isNull()
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()

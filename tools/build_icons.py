@@ -97,8 +97,8 @@ def write_ico(entries: list[tuple[int, bytes]], path: Path):
 
 
 def main():
-    app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
-    del app  # Qt needs the instance alive while images are made
+    # Kept referenced for the whole run: Qt images need a live application.
+    _app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
     OUTPUT.mkdir(parents=True, exist_ok=True)
 
     written = []
