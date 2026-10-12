@@ -17,6 +17,7 @@ from .output_gain import apply_output_gain
 from .output_gain import settings_from_parameters as output_settings
 from .project import digest_json, filter_dict, replay_repairs
 from .sections import render_sections
+from .truepeak import true_peak_db as measured_true_peak
 
 
 class BlockProcessor(Protocol):
@@ -49,6 +50,10 @@ class ChainResult:
     # in the render worker, so the preview pairs and the Output readouts share
     # one computation instead of each paying for it on the UI thread.
     loudness: dict = field(default_factory=dict)
+    # True peak for the source, the pre-output signal and the delivered file.
+    # Oversampling every prefix would cost more for no extra information:
+    # inter-sample risk is only asked about at the boundaries of the chain.
+    true_peak: dict = field(default_factory=dict)
 
 
 class ChainRenderer:
@@ -191,6 +196,10 @@ class ChainRenderer:
         loudness = _measure_loudness(
             [self.original, repaired, matched, equalized, pre_output, output], self.rate
         )
+        true_peak = {
+            id(audio): measured_true_peak(audio, self.rate)
+            for audio in (self.original, pre_output, output)
+        }
         return ChainResult(
             self.original,
             repaired,
@@ -201,6 +210,7 @@ class ChainRenderer:
             compressed,
             pre_output,
             loudness,
+            true_peak,
         )
 
 

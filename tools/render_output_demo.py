@@ -29,9 +29,19 @@ def main():
     rate = 16000
     t = np.arange(rate * 4) / rate
     envelope = np.where(t < 1.0, 0.65, np.where(t < 3.0, 1.25, 0.8))
-    left = envelope * (0.9 * np.sin(2 * np.pi * 220 * t) + 0.08 * np.sin(2 * np.pi * 950 * t))
+    # A quarter-rate component offset by half a sample: its samples land at
+    # +-0.707 of the peak, so the reconstructed signal runs 3 dB above the
+    # largest sample. Without it the readout would show true peak equal to
+    # sample peak and teach nothing about the difference between them.
+    left = envelope * (
+        0.9 * np.sin(2 * np.pi * 220 * t)
+        + 0.08 * np.sin(2 * np.pi * 950 * t)
+        + 0.5 * np.cos(2 * np.pi * (rate / 4) * t + np.pi / 4)
+    )
     right = envelope * (
-        0.8 * np.sin(2 * np.pi * 220 * t + 0.12) + 0.08 * np.sin(2 * np.pi * 950 * t)
+        0.8 * np.sin(2 * np.pi * 220 * t + 0.12)
+        + 0.08 * np.sin(2 * np.pi * 950 * t)
+        + 0.5 * np.cos(2 * np.pi * (rate / 4) * t + np.pi / 4)
     )
     audio = np.column_stack((left, right))
 
