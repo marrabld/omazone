@@ -24,7 +24,7 @@ from .sections import (
 from .waveform import PeakIndex, SampleRegion
 from .workflow_steps import LEGACY_ORDER, is_legacy_step_key, is_step_key
 
-STAGES = ("repair", "match", "eq", "dynamics", "output")
+STAGES = ("repair", "match", "eq", "dynamics", "output", "limiter")
 
 
 def fingerprint(path):
@@ -366,6 +366,10 @@ def validate_project(project):
         from .output_gain import settings_from_parameters, validate_settings
 
         validate_settings(settings_from_parameters(project.stages["output"].parameters))
+    if project.stages["limiter"].parameters.get("kind") == "limiter-v1":
+        from .limiter import settings_from_parameters, validate_settings
+
+        validate_settings(settings_from_parameters(project.stages["limiter"].parameters))
     if not np.isfinite(project.transition_ms) or project.transition_ms < 0:
         raise ValueError("Invalid transition duration.")
     values = (
@@ -698,6 +702,8 @@ def load_project(path):
             stages={key: StageState(**value) for key, value in data["stages"].items()},
             view=data["view"],
         )
+        # Additive stage migration: old projects must never enable a new effect.
+        project.stages.setdefault("limiter", StageState(bypassed=True))
         for item in data["repairs"]:
             project.repairs.append(
                 RepairOperation(

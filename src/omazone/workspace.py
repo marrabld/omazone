@@ -338,7 +338,7 @@ class SongWorkspace(QtWidgets.QWidget):
         for view, key in (
             (self.owner.manual_eq_view, "eq"),
             (self.owner.compressor_view, "dynamics"),
-            (self.owner.output_view, "output-gain"),
+            (self.owner.output_view, self.owner.output_view.comparison_key),
         ):
             if widget is view:
                 return key
@@ -355,6 +355,8 @@ class SongWorkspace(QtWidgets.QWidget):
             return "Compression" + (" (bypassed)" if stages["dynamics"].bypassed else "")
         if key == "output-gain":
             return "Output gain" + (" (bypassed)" if stages["output"].bypassed else "")
+        if key == "limiter":
+            return "Final limiter" + (" (bypassed)" if stages["limiter"].bypassed else "")
         title = {
             "listen": "Working mix",
             "reference": "Mix context",
@@ -617,6 +619,15 @@ class SongWorkspace(QtWidgets.QWidget):
                     messages.append(
                         "Render the saved chain for the output-stage input. Showing earlier source context."
                     )
+                if (
+                    self.owner.views.currentWidget() is self.owner.output_view
+                    and self.owner.output_view.comparison_key == "limiter"
+                    and self.owner.limiter_before is None
+                    and not self.owner.project.stages["output"].bypassed
+                ):
+                    messages.append(
+                        "Render the chain to obtain limiter input after output gain. Showing earlier source context."
+                    )
                 self.badge.setText(" | ".join(messages))
                 if self.mode.currentData() != "waveform":
                     self.timer.start()
@@ -845,6 +856,7 @@ class SongWorkspace(QtWidgets.QWidget):
         )
         self.overview_cursor.setValue(self.owner.position / rate)
         self.compressor_canvas.set_position(self.owner.position / rate)
+        self.owner.output_view.canvas.set_position(self.owner.position / rate)
 
     def close_jobs(self):
         self.closing = True

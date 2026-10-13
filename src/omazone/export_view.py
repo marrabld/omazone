@@ -10,6 +10,7 @@ STAGE_TITLES = (
     ("eq", "Manual EQ"),
     ("dynamics", "Dynamics"),
     ("output", "Output gain"),
+    ("limiter", "Final limiter"),
 )
 
 
@@ -95,7 +96,7 @@ class ExportView(QtWidgets.QWidget):
             self.analysis.setText(
                 "Matching analysis is missing. Analyse or skip Matching before rendering."
             )
-        measurements = self.owner.output_view.readouts
+        measurements = [*self.owner.output_view.readouts, self.owner.output_view.limiter_input_readout]
         self.peaks.setText(" | ".join(label.text() for label in measurements if label.text()))
         self.summary.setText(
             "Ready to export the rendered chain."

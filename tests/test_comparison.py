@@ -57,6 +57,7 @@ def test_every_comparison_names_a_stage_and_the_original_names_none():
         "eq",
         "dynamics",
         "output-gain",
+        "limiter",
     ]
     assert stage_for("mastering") == "match"
     assert stage_for("output-gain") == "output"
@@ -216,7 +217,7 @@ def test_matching_input_label_follows_the_repair_decision():
 
 def test_pair_labels_name_both_signals():
     state = resolve("output-gain", rendered_pairs(output=True), original=ORIGINAL)
-    assert state.labels == ("Chain before output gain", "Final output")
+    assert state.labels == ("Chain before output gain", "Chain after output gain")
 
 
 def test_graphs_read_raw_levels_while_transport_reads_the_matched_pair():

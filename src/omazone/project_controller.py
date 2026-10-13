@@ -61,6 +61,7 @@ class ProjectController:
             ("eq", "Skip manual EQ"),
             ("dynamics", "Skip compressor"),
             ("output", "Skip output gain"),
+            ("limiter", "Skip final limiter"),
         ):
             item = QtGui.QAction(title, self)
             item.setCheckable(True)
@@ -148,7 +149,7 @@ class ProjectController:
             item.setEnabled(
                 not busy
                 and (
-                    key in ("repair", "match", "eq", "dynamics", "output")
+                    key in ("repair", "match", "eq", "dynamics", "output", "limiter")
                     or not self.project.stages[key].bypassed
                 )
             )
@@ -474,6 +475,9 @@ class ProjectController:
         elif stage == "output":
             self.invalidate_output()
             self.output_view.restore()
+        elif stage == "limiter":
+            self.invalidate_limiter()
+            self.output_view.restore()
         else:
             self.invalidate()
         self.plot_spectra()
@@ -511,7 +515,8 @@ class ProjectController:
                 result,
                 audition_pair(result.matched, result.equalized, renderer.rate, result.loudness),
                 audition_pair(result.equalized, result.pre_output, renderer.rate, result.loudness),
-                audition_pair(result.pre_output, result.output, renderer.rate, result.loudness),
+                audition_pair(result.pre_output, result.pre_limiter, renderer.rate, result.loudness),
+                audition_pair(result.pre_limiter, result.output, renderer.rate, result.loudness),
             )
 
         def completed(payload):

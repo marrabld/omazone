@@ -103,9 +103,13 @@ SPECS = (
         "output",
         "Output gain",
         "Chain before output gain",
-        "Final output",
+        "Chain after output gain",
         "before output gain",
         "after output gain",
+    ),
+    ComparisonSpec(
+        "limiter", "limiter", "Final limiter", "Chain before limiter", "Final output",
+        "before limiter", "after limiter",
     ),
 )
 

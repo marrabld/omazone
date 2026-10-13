@@ -11,6 +11,8 @@ import numpy as np
 
 from .compressor import CompressionResult, render_compressor, settings_from_parameters
 from .engine import render, validate_audio
+from .limiter import LimitingResult, render_limiter
+from .limiter import settings_from_parameters as limiter_settings
 from .loudness import integrated_lufs
 from .manual_eq import eq_from_parameters, render_eq
 from .output_gain import apply_output_gain
@@ -54,6 +56,8 @@ class ChainResult:
     # Oversampling every prefix would cost more for no extra information:
     # inter-sample risk is only asked about at the boundaries of the chain.
     true_peak: dict = field(default_factory=dict)
+    pre_limiter: np.ndarray | None = None
+    limiting: LimitingResult | None = None
 
 
 class ChainRenderer:
@@ -73,7 +77,7 @@ class ChainRenderer:
         if entry is None or entry[0] != key:
             audio = function()
             self.cache[stage] = (key, audio)
-            self.computations[stage] += 1
+            self.computations[stage] = self.computations.get(stage, 0) + 1
         return self.cache[stage][1]
 
     def render(self, project, block_size=4096):
@@ -186,19 +190,32 @@ class ChainRenderer:
                 "parameters": output_stage.parameters,
             }
         )
-        output = self.prefix(
+        pre_limiter = self.prefix(
             "output",
             output_key,
             lambda: (
                 pre_output if output_stage.bypassed else apply_output_gain(pre_output, settings)
             ),
         )
+        limiter = project.stages["limiter"]
+        limiting = (
+            None
+            if limiter.bypassed
+            else self.prefix(
+                "limiter",
+                digest_json({"input": output_key, "parameters": limiter.parameters}),
+                lambda: render_limiter(
+                    pre_limiter, self.rate, limiter_settings(limiter.parameters), block_size
+                ),
+            )
+        )
+        output = pre_limiter if limiting is None else limiting.audio
         loudness = _measure_loudness(
-            [self.original, repaired, matched, equalized, pre_output, output], self.rate
+            [self.original, repaired, matched, equalized, pre_output, pre_limiter, output], self.rate
         )
         true_peak = {
             id(audio): measured_true_peak(audio, self.rate)
-            for audio in (self.original, pre_output, output)
+            for audio in (self.original, pre_output, pre_limiter, output)
         }
         return ChainResult(
             self.original,
@@ -211,6 +228,8 @@ class ChainRenderer:
             pre_output,
             loudness,
             true_peak,
+            pre_limiter,
+            limiting,
         )
 
 

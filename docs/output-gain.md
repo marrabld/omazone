@@ -1,12 +1,12 @@
 # Output gain and sample peaks
 
-The current saved processing order ends with explicit output gain:
+The current saved processing order places optional limiting after output gain:
 
 ```text
-Original -> repair -> matching -> manual EQ -> compression -> output gain -> float WAV
+Original -> repair -> matching -> manual EQ -> compression -> output gain -> limiter -> float WAV
 ```
 
-An output-gain edit rerenders only the last prefix. It never changes saved
+An output-gain edit rerenders gain and the enabled limiter after it. It never changes saved
 matching filters, EQ bands, compressor controls or the original file. The
 stage starts bypassed at 0 dB. You can switch it off without losing its gain.
 
@@ -17,6 +17,11 @@ measures the result of earlier processors, and **Final export** measures the
 actual rendered signal that goes into the float WAV. Each is the maximum
 absolute sample across all channels, displayed in dBFS. Above 0 dBFS means
 the float signal contains samples with absolute value greater than 1.0.
+
+When limiting is enabled, an additional **Before limiter** row measures the
+signal after output gain. The reduction trace and verified-peak summary describe
+the final limiter. See [the limiter](limiter.md) for its lookahead and reported
+true-peak safety correction.
 
 Each row also reports two more measurements, because one number cannot answer
 every question:
@@ -43,7 +48,7 @@ the source was or was not previously clipped.
 The plots and readouts refer to the *last render*. Editing gain or bypass
 clears stale final readings and disables export until rendering finishes.
 The source peak remains visible. Preview A/B uses the same cursor and loop for
-the signal before and after output gain. Its separate RMS matching and common
+the signal before and after output gain, excluding the limiter. Its separate LUFS matching and common
 headroom do not affect the exported 32-bit float WAV.
 
 ## Recipe and verification
@@ -70,4 +75,5 @@ uv run python tools/render_output_demo.py docs/images
 
 Integrated LUFS is implemented; see [loudness](loudness.md). Oversampled
 true-peak readings are implemented; see [true peak](true-peak.md). The ceiling
-limiter is a later, separate stage #45, and nothing here prevents clipping.
+limiter is an optional separate stage after gain; see [the limiter](limiter.md).
+Gain and meters alone do not prevent clipping.
