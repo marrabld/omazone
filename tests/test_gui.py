@@ -1884,6 +1884,7 @@ def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path)
             "Manual EQ: ready",
             "Dynamics: skipped",
             "Output gain: ready",
+            "Final limiter: skipped",
         ]
         assert window.export_view.export_button.isEnabled()
         assert window.export_view.peaks.text()
@@ -2758,6 +2759,200 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
         wait()
         np.testing.assert_array_equal(window.output[0], before)
         assert window.project.stages["dynamics"].parameters["kind"] == "compressor-v1"
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_final_limiter_output_ui_ab_export_and_retained_gain(
+    tmp_path, monkeypatch, unsmoothed_audition
+):
+    import sounddevice as sd
+
+    from omazone.limiter import render_limiter
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    samples = np.arange(RATE)
+    left = 0.95 * np.sin(2 * np.pi * 0.25 * samples + np.pi / 4)
+    audio = np.column_stack((left, -0.4 * left))
+    source = tmp_path / "mix.wav"
+    sf.write(source, audio, RATE, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 20
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.views.setStep("output")
+        view = window.output_view
+        assert not view.limiter_enabled.isChecked()
+        view.gain.setValue(3)
+        view.render_button.click()
+        wait()
+        gained = window.chain_result.pre_limiter
+        gain_preview = window.output_preview
+        gain_recipe = dict(window.project.stages["output"].parameters)
+        view.limiter_enabled.setChecked(True)
+        view.ceiling.setValue(-2)
+        view.lookahead.setValue(7)
+        assert view.comparison_key == "limiter"
+        assert window.output_preview is gain_preview, "Limiter edits must keep gain A/B valid"
+        assert not window.continue_button.isEnabled()
+        assert "Limiter" in window.views.action_label.text()
+        view.render_button.click()
+        assert window.compressor_view.render_activity.isVisible()
+        wait()
+        result = window.chain_result
+        assert result.pre_limiter is gained
+        direct = render_limiter(gained, RATE, view.limiting_settings())
+        np.testing.assert_allclose(result.output, direct.audio)
+        assert result.output.shape == audio.shape
+        assert window.project.stages["output"].parameters == gain_recipe
+        assert window.renderer.computations["output"] == 1
+        assert window.renderer.computations["limiter"] == 1
+        assert view.canvas.reduction.isVisible()
+        np.testing.assert_array_equal(view.canvas.reduction_curve.yData, result.limiting.reduction_db)
+        assert "compensated" in view.summary.text()
+        assert "safety attenuation" in view.summary.text()
+        assert "Safety attenuation" in window.views.action_label.text()
+        assert "Before limiter" in view.limiter_input_readout.text()
+        assert window.audition_mode == "limiter"
+        assert window.workspace.viewer_context_key() == "limiter"
+        assert window.workspace.pairs()[0] is gained
+        assert window.workspace.pairs()[1] is result.output
+        window.waveform.set_selection(SampleRegion(5000, 8000))
+        view.listen_button.click()
+        block = np.empty((128, 2), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.limiter_preview[0][5000:5128])
+        window.toggle_ab()
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, window.limiter_preview[1][5128:5256])
+        assert window.ab_button.text() == "Listening: after limiter"
+        window.stop()
+        view.comparison_selector.setCurrentIndex(0)
+        assert window.audition_mode == "output-gain"
+        assert window.workspace.pairs()[1] is gained, "Gain-only comparison must exclude the limiter"
+
+        view.comparison_selector.setCurrentIndex(1)
+        saved = tmp_path / "limited.omazone.json"
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved), ""))
+        window.save_current_project()
+        wait()
+        expected = result.output.copy()
+        window.new_project()
+        window.open_project_path(saved)
+        wait()
+        view = window.output_view
+        assert view.limiter_enabled.isChecked() and view.ceiling.value() == -2
+        assert view.lookahead.value() == 7
+        assert window.project.stages["output"].parameters == gain_recipe
+        window.views.setStep("output")
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_allclose(window.output[0], expected)
+        window.go_continue()
+        assert window.views.currentStep() == "export"
+        assert window.export_view.chain.item(5).text() == "Final limiter: ready"
+        exported = tmp_path / "limited.wav"
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(exported), ""))
+        window.export_view.export_button.click()
+        wait()
+        written, rate = sf.read(exported, always_2d=True)
+        assert rate == RATE and written.shape == audio.shape
+        np.testing.assert_allclose(written, expected, atol=5e-8)
+        view.limiter_enabled.setChecked(False)
+        assert window.project.stages["limiter"].parameters["ceiling_db"] == -2
+        assert window.project.stages["output"].parameters == gain_recipe
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_allclose(window.output[0], gained)
+        assert window.chain_result.limiting is None
+        assert view.canvas.reduction.isHidden()
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.close()
+
+
+def test_positive_true_peak_below_one_db_still_warns_of_overload():
+    from omazone.output_view import OutputView
+
+    reading = OutputView.reading("Final export", 0.8, -14, 0.25)
+    assert "dBTP OVER" in reading
+    assert "SAMPLE OVER" not in reading
+
+
+def test_limiter_without_output_gain_and_unsupported_recipe_route_to_output(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    source = tmp_path / "mix.wav"
+    sf.write(source, np.random.default_rng(775).normal(0, 0.2, (RATE, 1)), RATE)
+    try:
+        window.loaded("source", load_audio(source))
+        window.views.setStep("output")
+        view = window.output_view
+        assert window.project.stages["output"].bypassed
+        view.limiter_enabled.setChecked(True)
+        assert window.output_status(window.workflow_status()).state is RenderState.NEEDS_RENDER
+        assert not window.continue_button.isEnabled()
+        view.render_button.click()
+        deadline = time.monotonic() + 20
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None
+        assert window.chain_result.pre_limiter is window.chain_result.pre_output
+        assert window.continue_button.isEnabled()
+
+        window.skip_button.click()  # Enable gain, then skip it again.
+        window.skip_button.click()
+        assert window.views.currentStep() == "output"
+        assert window.project.stages["output"].bypassed
+        assert not window.project.stages["limiter"].bypassed
+        assert not window.continue_button.isEnabled(), "The changed limiter input needs rendering"
+
+        opaque = {"kind": "future-limiter", "extra": "keep"}
+        window.project.stages["limiter"].parameters = opaque.copy()
+        window.invalidate_limiter()
+        view.restore()
+        assert not view.render_button.isEnabled()
+        window.views.setStep("export")
+        assert not window.export_view.export_button.isEnabled()
+        assert window.export_view.route.text() == "Go to Output"
+        window.export_view.route.click()
+        assert window.views.currentStep() == "output"
+        view.limiter_enabled.setChecked(False)
+        view.ceiling.setValue(-3)
+        assert window.project.stages["limiter"].parameters == opaque
+        assert window.project.stages["limiter"].bypassed
+        assert "unsupported" in view.summary.text()
+        assert view.render_button.isEnabled()
     finally:
         if window.worker is not None:
             window.worker.wait()

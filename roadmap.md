@@ -53,14 +53,16 @@ optional View action and a persistent seek/time display. See
    [loudness](docs/loudness.md). Oversampled true peaks are also implemented; see
    [true peak](docs/true-peak.md). Neither meter changes export gain or prevents
    clipping on its own.
-2. **Final peak control, #45.** Add a modest final limiter only after loudness and
-   true-peak measurements are clear.
+2. **Final peak control, #45.** An optional stereo-linked lookahead limiter is
+   implemented after output gain, with a reconstructed-peak safety check,
+   reduction history and aligned stage-only A/B. See [limiting](docs/limiter.md).
 3. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
    three-band compressor from the tested broadband detector. Verify crossover
    recombination before expanding multiband processing.
 
-Milestone 3 is not yet startable. #8 needs the filter modules in #6, and #46 is
-gated behind #44 and #45 as well. Neither #6 nor #14 appears in the plan above:
+Milestone 3 follows limiter listening/review. #8 still needs the filter modules
+in #6; the output-safety prerequisites for #46 are implemented. Neither #6 nor
+#14 appears in the plan above:
 #6 is a prerequisite rather than a goal, and #14 now covers only the audible
 platform checks that continuous integration cannot perform. A/B crossfades and
 smoothed seek/pause/resume transitions (#10) are implemented with callback-owned
@@ -187,7 +189,7 @@ Keep one application, with independently usable and testable processing modules.
 - [x] Add controls/bypass and stage A/B for repair, matching, and manual EQ.
 - [x] Extend stage comparisons and measured rendering to broadband compression.
 - [x] Extend stage comparisons and sample-peak readings to output gain.
-- [ ] Extend measured rendering to true peaks, LUFS and limiting.
+- [x] Extend measured rendering to true peaks, LUFS and limiting.
 - [ ] Show measurements before and after each stage.
 - [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
@@ -240,9 +242,9 @@ Work in small stages so a louder export cannot be mistaken for a safer one:
    overshoot against the new true-peak meter.
 
 - [x] Output gain and original/pre-output/final sample-peak overload indicators.
-- [ ] LUFS metering and perceptual loudness-matched A/B.
-- [ ] Oversampled true-peak estimation.
-- [ ] A modest lookahead limiter with ceiling and gain-reduction display.
+- [x] LUFS metering and perceptual loudness-matched A/B.
+- [x] Oversampled true-peak estimation.
+- [x] A modest lookahead limiter with ceiling and gain-reduction display.
 - [x] Crossfaded A/B changes and smoother seek/pause/resume transitions (#10).
 - [ ] Audio output-device selection.
 - [ ] Export options for bit depth, headroom, and deliberate dither when quantising.

@@ -508,7 +508,8 @@ class SectionWorkbench(QtWidgets.QWidget):
                 chain,
                 audition_pair(chain.matched, chain.equalized, source[1], chain.loudness),
                 audition_pair(chain.equalized, chain.pre_output, source[1], chain.loudness),
-                audition_pair(chain.pre_output, chain.output, source[1], chain.loudness),
+                audition_pair(chain.pre_output, chain.pre_limiter, source[1], chain.loudness),
+                audition_pair(chain.pre_limiter, chain.output, source[1], chain.loudness),
             )
 
         self.owner.start_job(

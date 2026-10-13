@@ -5,6 +5,8 @@ from enum import Enum
 
 from .compressor import settings_from_parameters as compressor_settings
 from .compressor import validate_settings as validate_compressor
+from .limiter import settings_from_parameters as limiter_settings
+from .limiter import validate_settings as validate_limiter
 from .manual_eq import eq_from_parameters, validate_eq
 from .output_gain import settings_from_parameters as output_settings
 from .output_gain import validate_settings as validate_output
@@ -108,6 +110,7 @@ CONFIGURE_GUIDANCE = {
     "eq": "Add a band to use this step, or skip it.",
     "dynamics": "Set threshold and ratio, then render.",
     "output": "Set output gain, then render.",
+    "limiter": "Set the limiter ceiling, then render.",
 }
 
 
@@ -136,6 +139,9 @@ def stage_configured(project, stage, sample_rate=48000):
         return True
     if stage == "output":
         validate_output(output_settings(parameters))
+        return True
+    if stage == "limiter":
+        validate_limiter(limiter_settings(parameters))
         return True
     return bool(parameters)
 
@@ -225,7 +231,7 @@ def derive_workflow_status(
             state = RenderState.NOT_CONFIGURED
             reason = CONFIGURE_GUIDANCE.get(stage, f"Configure or skip {stage_name(stage)}.")
             action = "Configure"
-        elif stage in ("match", "eq", "dynamics", "output") and matching_blocked:
+        elif stage in ("match", "eq", "dynamics", "output", "limiter") and matching_blocked:
             state = RenderState.NEEDS_RENDER
             reason, action = "Analyse or skip Matching before rendering.", "Analyse"
         elif available:
@@ -304,4 +310,5 @@ def stage_name(stage):
         "eq": "Manual EQ",
         "dynamics": "Dynamics",
         "output": "Output",
+        "limiter": "Limiter",
     }[stage]

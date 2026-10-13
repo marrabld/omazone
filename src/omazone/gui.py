@@ -233,6 +233,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_after = None
         self.dynamics_after = None
         self.output_after = None
+        self.limiter_preview = self.limiter_before = self.limiter_after = None
         self.chain_result = None
         self.renderer = None
         self.renderer_key = None
@@ -692,6 +693,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 self.dynamics_after if self.dynamics_preview is not None else None,
                 self.dynamics_preview,
             )
+        if stage == "limiter":
+            return StagePair(
+                self.limiter_before,
+                self.limiter_after if self.limiter_preview is not None else None,
+                self.limiter_preview,
+            )
         return StagePair(
             self.output_before,
             self.output_after if self.output_preview is not None else None,
@@ -728,6 +735,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         """The workflow step that explains a processing stage."""
         if stage is None:
             return None
+        if stage == "limiter":
+            return step_for("output")
         return next((item for item in STEPS if item.stage == stage and not item.secondary), None)
 
     def apply_comparison(self, key=None, side=None):
@@ -864,7 +873,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.output_view.canvas.setEnabled(not busy and self.source is not None)
         self.output_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.output_view.listen_button.setEnabled(
-            not busy and self.comparison("output-gain").available
+            not busy and self.comparison(self.output_view.comparison_key).available
         )
         self.update_project_actions()
         self.update_step_navigation(workflow)
@@ -985,12 +994,23 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 else stage.reason
             )
         elif output:
-            stage = workflow.stages["output"]
-            message = (
-                "Output measured. Review sample peaks, compare or export."
-                if stage.measurements_available
-                else stage.reason
-            )
+            stage = self.output_status(workflow)
+            limiting = self.chain_result.limiting if self.chain_result is not None else None
+            if stage.measurements_available and limiting is not None:
+                peak = (
+                    f"{limiting.reconstructed_peak_db:+.2f} dBTP"
+                    if limiting.reconstructed_peak_db is not None else "silence"
+                )
+                message = (
+                    f"Limiter ready. Max reduction {limiting.max_reduction_db:.1f} dB. "
+                    f"Safety attenuation {limiting.guard_reduction_db:.2f} dB; "
+                    f"8x peak {peak}. Compare or export."
+                )
+            else:
+                message = (
+                    "Output measured. Review sample peaks, compare or export."
+                    if stage.measurements_available else stage.reason
+                )
         elif exporting:
             message = (
                 "Processing complete. Click Export WAV to choose a filename and save the full chain."
@@ -1144,6 +1164,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         # Skipping advances; turning a stage back on stays put so the change is
         # made where the learner can see it.
         following = None if bypassing else next_step(step.key)
+        if step.key == "output" and not self.project.stages["limiter"].bypassed:
+            # Skipping gain changes the limiter's input. Stay on Output so its
+            # new result can be rendered before moving to Export.
+            following = None
         if following is not None:
             self.views.setStep(following.key)
 
@@ -1155,13 +1179,25 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         step = step_for(self.views.currentStep())
         if step.stage is None:
             return READY_STAGE
+        if step.key == "output":
+            return self.output_status(workflow)
         return workflow.stages[step.stage]
+
+    def output_status(self, workflow):
+        """Output contains independently bypassable gain and limiter stages."""
+        gain, limiter = workflow.stages["output"], workflow.stages["limiter"]
+        if gain.state is RenderState.SKIPPED or (gain.can_continue and not limiter.can_continue):
+            return limiter if limiter.state is not RenderState.SKIPPED else gain
+        return gain
 
     def update_step_navigation(self, workflow):
         """Show each step's state on its navigation entry, and control Continue."""
         states = {}
         for step in NAVIGATION:
-            status = workflow.stages[step.stage] if step.stage else None
+            status = (
+                self.output_status(workflow) if step.key == "output"
+                else workflow.stages[step.stage] if step.stage else None
+            )
             if step.key == "export":
                 # Export is a step rather than a stage, so name whatever is
                 # actually holding it up instead of assuming it is a render.
@@ -1203,7 +1239,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.skip_button.setEnabled(not busy and skippable)
         if skippable:
             self.skip_verb = "Enable" if self.project.stages[step.stage].bypassed else "Skip"
-            self.skip_step_title = step.title
+            self.skip_step_title = "output gain" if step.key == "output" else step.title
         else:
             # Nothing to skip here, so leave no stale wording behind.
             self.skip_verb = None
@@ -1366,6 +1402,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_preview = self.eq_before = self.eq_after = self.chain_result = None
         self.dynamics_preview = self.dynamics_before = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
+        self.limiter_preview = self.limiter_before = self.limiter_after = None
         self.apply_comparison(side=Side.BEFORE)
         self.reset_filter_view()
         self.meters.setText("Process to update measurements.")
@@ -1379,6 +1416,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.dynamics_preview = None
         self.dynamics_before = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
+        self.limiter_preview = self.limiter_before = self.limiter_after = None
         self.chain_result = None
         self.apply_comparison(side=Side.BEFORE)
         self.meters.setText("Render to update measurements.")
@@ -1391,6 +1429,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.output = None
         self.dynamics_preview = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
+        self.limiter_preview = self.limiter_before = self.limiter_after = None
         self.chain_result = None
         self.apply_comparison(side=Side.BEFORE)
         self.meters.setText("Render to update measurements.")
@@ -1402,6 +1441,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         self.output = None
         self.output_preview = self.output_after = None
+        self.limiter_preview = self.limiter_before = self.limiter_after = None
         self.chain_result = None
         self.apply_comparison(side=Side.BEFORE)
         self.meters.setText("Render to update measurements.")
@@ -1415,6 +1455,17 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.renderer = ChainRenderer(self.source[0], self.source[1], repair)
             self.renderer_key = key
         return self.renderer
+
+    def invalidate_limiter(self):
+        self.project_changed()
+        self.stop()
+        self.output = None
+        self.limiter_preview = self.limiter_after = None
+        self.chain_result = None
+        self.apply_comparison(side=Side.BEFORE)
+        self.meters.setText("Render to update measurements.")
+        self.workspace.completed_key = None
+        self.update_buttons()
 
     def settings_changed(self):
         self.invalidate()
@@ -1487,7 +1538,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 result,
                 audition_pair(result.matched, result.equalized, rate, result.loudness),
                 audition_pair(result.equalized, result.pre_output, rate, result.loudness),
-                audition_pair(result.pre_output, result.output, rate, result.loudness),
+                audition_pair(result.pre_output, result.pre_limiter, rate, result.loudness),
+                audition_pair(result.pre_limiter, result.output, rate, result.loudness),
             )
 
         self.invalidate()
@@ -1511,8 +1563,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.dynamics_after = result[4].pre_output
             self.dynamics_preview = result[6]
             self.output_before = result[4].pre_output
-            self.output_after = result[4].output
+            self.output_after = (
+                result[4].pre_limiter if result[4].pre_limiter is not None else result[4].output
+            )
             self.output_preview = result[7]
+            self.limiter_before = self.output_after
+            self.limiter_after = result[4].output
+            self.limiter_preview = result[8] if len(result) > 8 else None
         self.apply_comparison("mastering", Side.BEFORE)
         self.plot_spectra()
         spec = self.output[2]
@@ -1549,7 +1606,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         key = {
             id(self.manual_eq_view): "eq",
             id(self.compressor_view): "dynamics",
-            id(self.output_view): "output-gain",
+            id(self.output_view): self.output_view.comparison_key,
         }.get(id(tool))
         if key is not None and self.comparison(key).available:
             self.workspace.focus_comparison(key)

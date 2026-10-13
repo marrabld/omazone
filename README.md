@@ -41,6 +41,8 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
 - Stereo-linked broadband compression with peak/RMS detection, timed gain reduction and step A/B.
 - Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
+- Optional final lookahead limiter with a ceiling, linked stereo gain reduction,
+  aligned limiter-only A/B and a reported reconstructed-peak safety correction.
 - Integrated LUFS per ITU-R BS.1770-4, shown beside the peaks and used to
   loudness-match A/B playback without changing exported samples.
 - Oversampled true peak, so a file at 0 dBFS sample peak that still clips on
@@ -54,7 +56,8 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Unsaved-work prompts before any destructive action, and an Export review that
   routes you to whichever stage is holding up delivery.
 
-The next priority is oversampled true-peak metering (#44), followed by a ceiling limiter.
+Output gain, LUFS, true-peak metering and an optional final limiter are implemented.
+The next processing features are dynamic EQ and three-band compression; see the roadmap.
 See the [approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for
 implementation priorities and contribution tasks.
 
@@ -163,7 +166,7 @@ Use the **Project** menu:
   matching curves, without silently relearning. Rendered audio is not stored in
   the project file. **Analyse + process** and section analysis explicitly learn
   new matching curves.
-- **Stage bypass** skips repair, matching, manual EQ, compression, or output gain
+- **Stage bypass** skips repair, matching, manual EQ, compression, output gain or limiting
   while retaining that stage's choices.
 - **Name current selection** adds a stable region independent of matching; the
   **Named regions** submenu returns to it.
@@ -176,10 +179,11 @@ can still be used when its reference recording is unavailable. Moving an earlier
 processing choice marks later calibration as needing analysis, but stored curves
 remain available when their configuration still matches. Updating matching
 settings or assignments requires explicit analysis for newly requested matching
-curves. Manual EQ, compressor, and output-gain edits only need rendering; they do not relearn matching.
+curves. Manual EQ, compressor, output-gain and limiter edits only need rendering;
+they do not relearn matching.
 
 The implemented chain is repair -> learned matching -> manual EQ -> compressor
--> output gain. Old reserved output metadata is retained; enabling an unknown
+-> output gain -> optional limiter. Old reserved output metadata is retained; enabling an unknown
 output processor fails rather than silently acting like a limiter. New, Open,
 source replacement, and Close offer Save, Discard, or Cancel when the project has
 unsaved changes. Audio originals are not overwritten by saving projects. Session
@@ -628,19 +632,26 @@ Red means that row exceeds full scale.
 
 1. Open **Output**. If the original row is already red, it came from the source.
    If **Before gain** first turns red, earlier processing introduced the overload.
-2. Set **Output gain**, for example -6 dB, and click **Apply output gain and render**.
+2. Set **Output gain**, for example -6 dB, and click **Render output**.
    Changing a nonzero gain enables the stage. A new project skips it by default.
 3. Check the measurements again and use **Loop and compare output gain**
    for aligned before/after listening. A/B level matching only affects playback;
-   your chosen gain is what **Export WAV** writes.
+    export contains your chosen gain and any enabled final limiter.
+
+For final peak protection, check **Enable final limiter**, start with a **-1 dBTP**
+ceiling, and click **Render output**. Choose **Compare final limiter** for its own
+before/after pair. The reduction trace includes any reported, whole-file true-peak
+safety attenuation. Lookahead is compensated and export keeps the original length.
+Output gain and the limiter start bypassed and keep independent settings. See
+[final limiting](docs/limiter.md) for the method and measurement tolerances.
 
 ![Sample peak, true peak and loudness for the source, pre-output and final export](docs/images/omazone-output-peaks.png)
 
 **True peak is the one to watch before delivery.** A file can sit at exactly
 0 dBFS sample peak and still clip on playback, because the converter rebuilds
-the waveform between samples. Nothing here prevents that: there is no limiter
-yet, so a reading above 0 dBTP is a fact about the file, not a fault that has
-been fixed. See [true peak](docs/true-peak.md).
+the waveform between samples. Gain and meters alone do not prevent it. The final
+limiter is optional; when bypassed, a reading above 0 dBTP remains an overload
+warning. See [true peak](docs/true-peak.md).
 
 **View → Both** places the waveform beside the peak display:
 
@@ -673,17 +684,18 @@ project later re-renders rather than reusing a baked intermediate. See
 ## Current limitations
 
 The interface shows sample peaks, integrated LUFS and oversampled true peaks;
-see [loudness](docs/loudness.md) and [true peak](docs/true-peak.md). None of the
-three prevents clipping: there is no limiter yet, so a reading above 0 dBTP is a
-fact about the file rather than a fault that has been fixed. Preview is loudness-matched, with common
+see [loudness](docs/loudness.md) and [true peak](docs/true-peak.md). Meters alone
+do not prevent clipping. Optional [limiting](docs/limiter.md) controls final peaks,
+but cannot repair damage in the source or guarantee a later lossy encode.
+Preview is loudness-matched, with common
 attenuation to provide headroom. LUFS is a good model of average perceived
 loudness rather than of every listener, so A/B matching remains approximate.
-Abrupt A/B switches can click; crossfaded switching is a follow-up improvement.
+A/B switches are crossfaded; arbitrary loop boundaries are not smoothed.
 Measuring integrated loudness and true peaks adds a few seconds to rendering a
 six-minute song, in the background.
 
 Mastering exports are 32-bit floating-point WAVs containing the full chain, without
-preview attenuation. Samples can exceed 0 dBFS; there is no limiter yet. Delay is
+preview attenuation. Samples can exceed 0 dBFS when limiting is bypassed. Delay is
 compensated and the output retains the input length. The complete matching-FIR
 convolution tail is available through its processor API, but file rendering trims it.
 

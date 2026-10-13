@@ -66,7 +66,7 @@ STEPS = (
         "output",
         spectral=True,
         skippable=True,
-        aliases=("output-gain",),
+        aliases=("output-gain", "limiter"),
         short="Output",
     ),
     Step("export", "Export", short="Export"),

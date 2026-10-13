@@ -198,7 +198,7 @@ class CompressorView(QtWidgets.QWidget):
         elif not busy:
             self.render_timer.stop()
         self.render_activity.setVisible(
-            busy and self.owner.views.currentWidget() is self
+            busy and self.owner.views.currentWidget() in (self, self.owner.output_view)
         )
 
     def update_render_message(self):
