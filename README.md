@@ -25,8 +25,9 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Mix, reference, and processed spectrum plots.
 - Requested correction versus actual linear-phase FIR response.
 - Offline, block-based rendering with compensated filter delay.
-- RMS-matched original/processed A/B playback at the same song position.
-- Click-and-drag seeking, elapsed/total time, and pause/resume.
+- Loudness-matched original/processed A/B playback at the same song position,
+  with short linear crossfades between sides.
+- Click-and-drag seeking, elapsed/total time, and faded seek/pause/resume transitions.
 - Linked mono/stereo waveform views with peak-preserving zoom and region selection.
 - One-shot selection playback and sample-aligned loops with shared original/processed A/B.
 - Named targets captured from reference passages, with JSON profile save/load.
@@ -315,6 +316,9 @@ if it was playing. Play/Pause and Stop preserve the cursor; seek to the left edg
 to restart. Pressing Play after reaching the end starts from the beginning.
 The time display shows elapsed and total time. With the seek bar focused, arrow
 keys move one second and Page Up/Down move ten seconds.
+Switching A/B uses a 10 ms linear crossfade. Seeking fades out and back in;
+pausing fades out before stopping, and resuming fades in. These preview-only
+transitions never change export. See [audition transitions](docs/playback.md).
 Changed settings require another render. WAV, FLAC, and AIFF mono/stereo files
 are supported. Different reference and mix sample rates are supported.
 

@@ -16,6 +16,7 @@ from omazone.comparison import SPECS, Side
 from omazone.engine import analyse, audition_pair
 from omazone.gui import Window, load_audio
 from omazone.loudness import integrated_lufs
+from omazone.playback import AuditionProcessor
 from omazone.sections import SectionAssignment
 from omazone.truepeak import true_peak_db
 from omazone.waveform import PeakIndex, SampleRegion
@@ -24,6 +25,12 @@ from omazone.workflow_steps import KEYS, LEGACY_ORDER, step_for
 
 # audition_pair measures loudness, so tests pass the rate explicitly.
 RATE = 16000
+
+
+@pytest.fixture
+def unsmoothed_audition(monkeypatch):
+    """Routing tests inspect exact source samples; transition tests use the default fades."""
+    monkeypatch.setattr("omazone.gui.AuditionProcessor", lambda: AuditionProcessor(transition_ms=0))
 
 
 def test_load_render_export(tmp_path, monkeypatch):
@@ -76,7 +83,7 @@ def test_load_render_export(tmp_path, monkeypatch):
         window.close()
 
 
-def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch):
+def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
     class FakeStream:
@@ -236,7 +243,148 @@ def test_waveform_selection_zoom_seek_and_new_file_reset():
         window.close()
 
 
-def test_selection_playback_looping_edits_and_mode_changes(monkeypatch):
+def test_default_audition_smooths_ab_seek_pause_and_resume_without_reopening_for_seek(monkeypatch):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    audio = np.full((RATE * 2, 2), [0.8, -0.4], dtype=np.float32)
+    audio[RATE : RATE + 100] *= 0.5  # Non-DC content for spectrum analysis.
+    before = audio.copy()
+    try:
+        window.loaded("source", (audio, RATE, analyse(audio, RATE), "mix.wav"))
+        window.mastering_preview = (audio, -audio)
+        window.match_after = -audio
+        window.apply_comparison("mastering", Side.BEFORE)
+        window.play()
+        stream = window.stream
+        block = np.empty((160, 2), dtype=np.float32)
+        stream.callback(block, len(block), None, None)
+        assert np.all(block[0] == 0)
+        np.testing.assert_array_equal(block[79:], audio[79:160])
+        window.toggle_ab()
+        stream.callback(block, len(block), None, None)
+        expected = audio[:160] * (1 - 2 * np.linspace(0, 1, 160)[:, None])
+        np.testing.assert_allclose(block, expected, atol=1e-7)
+        assert window.position == 320
+
+        window.seek(9000)
+        assert window.stream is stream and window.playing
+        assert window.position == 320, "Only the callback moves a live cursor"
+        stream.callback(block, len(block), None, None)
+        expected_gain = np.r_[np.linspace(1, 0, 80), np.linspace(0, 1, 80)]
+        np.testing.assert_allclose(block, -audio[:160] * expected_gain[:, None], atol=1e-7)
+        assert window.position == 9080
+        assert np.all(block[79:81] == 0)
+
+        window.play()  # Pause is a callback-owned fade, not an abrupt device stop.
+        assert window.audition.pause_requested
+        with pytest.raises(sd.CallbackStop):
+            stream.callback(block, len(block), None, None)
+        assert not window.playing
+        assert window.position == 9160
+        assert not np.any(block[79:])
+        window.check_playback()
+        assert window.stream is None
+        window.play()
+        assert window.stream is not stream
+        window.stream.callback(block, len(block), None, None)
+        assert not np.any(block[0])
+        np.testing.assert_array_equal(block[79:], -audio[79:160])
+        assert window.position == 9320
+        window.transport.region = SampleRegion(8000, 10000)
+        window.transport.loop = True
+        window.update_transport()
+        assert window.workspace.loop_action.isChecked()
+        window.seek(12000)  # Leaving the loop is queued, not yet applied.
+        window.seek(9000)  # A newer seek must not silently restore the old loop.
+        window.stream.callback(block, len(block), None, None)
+        assert window.transport.region is None
+        assert not window.transport.loop
+        assert window.position == 9080
+        window.check_playback()
+        assert not window.loop_selection.isChecked()
+        assert not window.workspace.loop_action.isChecked()
+        assert window.playback_mode.text() == "Playback: whole song"
+        window.seek(len(audio))
+        with pytest.raises(sd.CallbackStop):
+            window.stream.callback(block, len(block), None, None)
+        assert window.position == len(audio)
+        assert not np.any(block[79:])
+        window.check_playback()
+        window.play()
+        assert window.position == 0
+        window.stream.callback(block, len(block), None, None)
+        assert not np.any(block[0])
+        assert window.position == len(block)
+        np.testing.assert_array_equal(audio, before)
+    finally:
+        window.close()
+
+
+@pytest.mark.parametrize("pause_finishes", [False, True])
+def test_scrubbing_resumes_at_requested_sample_before_or_after_pause_fade(
+    monkeypatch, pause_finishes
+):
+    import sounddevice as sd
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    audio = np.full((RATE * 2, 1), 0.5, dtype=np.float32)
+    audio[RATE : RATE + 100] *= 0.5
+    try:
+        window.loaded("source", (audio, RATE, analyse(audio, RATE), "mix.wav"))
+        window.play()
+        stream = window.stream
+        block = np.empty((160, 1), dtype=np.float32)
+        stream.callback(block, len(block), None, None)
+        window.begin_scrub()
+        window.seek(7000)
+        window.seek(9000)
+        assert window.position == 160
+        if pause_finishes:
+            with pytest.raises(sd.CallbackStop):
+                stream.callback(block, len(block), None, None)
+            window.check_playback()
+        window.end_scrub()
+        assert window.playing
+        window.stream.callback(block, len(block), None, None)
+        assert window.position == 9000 + (160 if pause_finishes else 80)
+        assert not window.resume_after_scrub
+        assert window.scrub_position is None
+    finally:
+        window.close()
+
+
+def test_selection_playback_looping_edits_and_mode_changes(monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
     class FakeStream:
@@ -521,7 +669,9 @@ def test_clipping_inspection_markers_navigation_and_stale_results():
         window.close()
 
 
-def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypatch):
+def test_selective_repair_audition_export_matching_and_reset(
+    tmp_path, monkeypatch, unsmoothed_audition
+):
     import sounddevice as sd
 
     from omazone.engine import design_match
@@ -660,7 +810,9 @@ def test_selective_repair_audition_export_matching_and_reset(tmp_path, monkeypat
         window.close()
 
 
-def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(monkeypatch):
+def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(
+    monkeypatch, unsmoothed_audition
+):
     import sounddevice as sd
 
     class FakeStream:
@@ -2158,7 +2310,9 @@ def test_analysis_handlers_reject_an_invalid_downstream_recipe():
         window.close()
 
 
-def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(tmp_path, monkeypatch):
+def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(
+    tmp_path, monkeypatch, unsmoothed_audition
+):
     import copy
 
     import sounddevice as sd
@@ -2449,7 +2603,9 @@ def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, 
         assert window.views.layout().indexOf(comp.render_activity) < window.views.layout().indexOf(
             window.tool_scroll
         )
-        QtTest.QTest.qWait(1200)
+        deadline = time.monotonic() + 5
+        while "0s elapsed" in comp.render_message.text() and time.monotonic() < deadline:
+            QtTest.QTest.qWait(20)
         assert "0s elapsed" not in comp.render_message.text()
         window.views.setStep("export")
         assert comp.render_activity.isHidden()
@@ -2476,7 +2632,7 @@ def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, 
         window.close()
 
 
-def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
+def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
     from omazone.compressor import render_compressor
@@ -2609,7 +2765,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch):
         window.close()
 
 
-def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch):
+def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
     class FakeStream:
