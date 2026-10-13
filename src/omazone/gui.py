@@ -27,7 +27,7 @@ from .export_view import ExportView
 from .manual_eq_view import ManualEQView
 from .output_view import OutputView
 from .pipeline import ChainRenderer
-from .playback import PlaybackCursor
+from .playback import AuditionProcessor, PlaybackCursor
 from .project import STAGES, AudioReference, MatchCalibration, Project
 from .project_controller import ProjectController
 from .section_view import SectionWorkbench
@@ -241,6 +241,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stream = None
         self.preview = None
         self.transport = PlaybackCursor()
+        self.audition = AuditionProcessor()
+        self.scrub_position = None
         self.playing = False
         self.listen_processed = False
         self.resume_after_scrub = False
@@ -1610,7 +1612,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def play(self):
         if self.playing:
-            self.stop()
+            if self.audition.enabled:
+                if self.audition.pause_requested:
+                    self.audition.request_resume()
+                    self.play_button.setText("Pause")
+                else:
+                    self.audition.request_pause()
+                    self.play_button.setText("Play")
+            else:
+                self.stop()
             return
         self.stop()
         if self.preview is None:
@@ -1626,13 +1636,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
             self.playback_dropouts = 0
             self.reported_playback_dropouts = 0
+            self.audition.prepare(
+                self.source[1], self.source[0].shape[1], 2048, self.listen_processed
+            )
 
             def callback(outdata, frames, time_info, status):
                 # Keep device diagnostics out of Qt and off the audio thread.
                 if status and status.output_underflow:
                     self.playback_dropouts += 1
-                audio = self.preview[int(self.listen_processed)]
-                if self.transport.fill(audio, outdata):
+                if self.audition.fill(self.transport, self.preview, self.listen_processed, outdata):
                     self.playing = False
                     raise sd.CallbackStop
 
@@ -1679,20 +1691,43 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def begin_scrub(self):
         self.resume_after_scrub = self.playing
-        self.stop()
+        self.scrub_position = self.position
+        if self.playing and self.audition.enabled:
+            self.audition.request_pause()
+        else:
+            self.stop()
 
     def end_scrub(self):
+        position, self.scrub_position = self.scrub_position, None
+        if position is not None:
+            self.seek(position)
         if self.resume_after_scrub:
             self.resume_after_scrub = False
-            if self.source is not None and self.position < len(self.source[0]):
+            if (
+                not self.playing
+                and self.source is not None
+                and self.position < len(self.source[0])
+            ):
                 self.play()
 
     def seek(self, position):
         if self.source is None:
             return
+        position = min(len(self.source[0]), max(0, position))
+        if self.scrub_position is not None:
+            self.scrub_position = position
+            if not self.playing:
+                self.position = position
+            return
+        if self.playing and self.audition.enabled:
+            region, loop = self.audition.seek_bounds(self.transport)
+            if region is not None and not region.start <= position < region.end:
+                region, loop = None, False
+            self.audition.request_seek(position, region, loop)
+            return
         resume = self.playing or self.resume_after_selection_edit
         self.stop()
-        self.position = min(len(self.source[0]), max(0, position))
+        self.position = position
         region = self.transport.region
         if region is not None and not region.start <= self.position < region.end:
             self.reset_playback_mode()
@@ -1716,6 +1751,19 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return f"{minutes}:{seconds:02d}.{fraction}"
 
         self.time_label.setText(f"{timestamp(self.position)} / {timestamp(length)}")
+        # A live seek can change selection mode on the callback thread. Mirror
+        # the applied bounds here rather than displaying an unapplied request.
+        with QtCore.QSignalBlocker(self.loop_selection):
+            self.loop_selection.setChecked(self.transport.loop)
+        with QtCore.QSignalBlocker(self.workspace.loop_action):
+            self.workspace.loop_action.setChecked(self.transport.loop)
+        self.playback_mode.setText(
+            "Playback: whole song"
+            if self.transport.region is None
+            else (
+                "Playback: looping selection" if self.transport.loop else "Playback: selection once"
+            )
+        )
         self.waveform.set_position(self.position)
         self.workspace.update_cursor()
 

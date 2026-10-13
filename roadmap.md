@@ -62,9 +62,9 @@ optional View action and a persistent seek/time display. See
 Milestone 3 is not yet startable. #8 needs the filter modules in #6, and #46 is
 gated behind #44 and #45 as well. Neither #6 nor #14 appears in the plan above:
 #6 is a prerequisite rather than a goal, and #14 now covers only the audible
-platform checks that continuous integration cannot perform. #10 (crossfading A/B
-and smoothing seeks) is likewise open and unplanned; it improves playback polish
-and blocks nothing.
+platform checks that continuous integration cannot perform. A/B crossfades and
+smoothed seek/pause/resume transitions (#10) are implemented with callback-owned
+envelopes and aligned cursors. See [audition transitions](docs/playback.md).
 
 Workflow consolidation (#25/#27) is complete: repair, matching, manual EQ,
 compression, output, comparison, and export now behave as one guided application,
@@ -243,7 +243,7 @@ Work in small stages so a louder export cannot be mistaken for a safer one:
 - [ ] LUFS metering and perceptual loudness-matched A/B.
 - [ ] Oversampled true-peak estimation.
 - [ ] A modest lookahead limiter with ceiling and gain-reduction display.
-- [ ] Crossfaded A/B changes and smoother seek transitions (#10).
+- [x] Crossfaded A/B changes and smoother seek/pause/resume transitions (#10).
 - [ ] Audio output-device selection.
 - [ ] Export options for bit depth, headroom, and deliberate dither when quantising.
 
