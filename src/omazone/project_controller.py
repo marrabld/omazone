@@ -94,7 +94,7 @@ class ProjectController:
                 "loop_region": [loop.start, loop.end] if loop else None,
                 "loop_enabled": self.transport.loop,
                 "position": self.position,
-                "audition_mode": self.audition_mode,
+                "audition_mode": "dynamics" if self.audition_mode == "band-solo" else self.audition_mode,
                 "active_step": self.views.currentStep(),
             }
         )

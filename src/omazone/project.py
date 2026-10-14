@@ -358,10 +358,11 @@ def validate_project(project):
             project.source.sample_rate if project.source else 48000,
             project.regions,
         )
-    if project.stages["dynamics"].parameters.get("kind") == "compressor-v1":
-        from .compressor import settings_from_parameters, validate_settings
+    if project.stages["dynamics"].parameters.get("kind") in ("compressor-v1", "dynamics-v2"):
+        from .dynamics import settings_from_parameters, validate_settings
 
-        validate_settings(settings_from_parameters(project.stages["dynamics"].parameters))
+        rate = project.source.sample_rate if project.source else 48000
+        validate_settings(settings_from_parameters(project.stages["dynamics"].parameters, rate), rate)
     if project.stages["output"].parameters.get("kind") == "output-gain-v1":
         from .output_gain import settings_from_parameters, validate_settings
 

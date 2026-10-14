@@ -719,16 +719,27 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if side is None:
             side = self.comparison_side() if selected == self.audition_mode else Side.BEFORE
         stage = spec_for(selected).stage
+        pairs = self.comparison_pairs()
+        reason = self.workflow_status().stages[stage].reason if stage else ""
+        input_label = "repaired input" if self.repair_active else "original"
+        if selected == "band-solo":
+            solo = self.compressor_view.solo_pair()
+            label = self.compressor_view.band_selector.currentText()
+            raw, playback = solo if solo is not None else (pairs["dynamics"].before, None)
+            pairs["dynamics"] = StagePair(raw, None, (playback, playback) if playback is not None else None)
+            side = Side.BEFORE
+            input_label = f"{label} band solo (audition only)"
+            reason = f"{label} band solo is audition-only. Exit solo to compare compression; export always includes all bands." if solo is not None else "Render three-band compression before using band solo."
         return resolve(
             selected,
-            self.comparison_pairs(),
+            pairs,
             side=self.comparison_side() if side is None else side,
             original=self.source[0] if self.source is not None else None,
             fallback=(self.processing_source() or (None,))[0],
             rate=self.source[1] if self.source is not None else 1,
             bypassed={name: item.bypassed for name, item in self.project.stages.items()},
-            reason=self.workflow_status().stages[stage].reason if stage else "",
-            input_label="repaired input" if self.repair_active else "original",
+            reason=reason,
+            input_label=input_label,
         )
 
     def step_for_stage(self, stage):
@@ -1605,7 +1616,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         tool = self.views.currentWidget()
         key = {
             id(self.manual_eq_view): "eq",
-            id(self.compressor_view): "dynamics",
+            id(self.compressor_view): self.compressor_view.comparison_key,
             id(self.output_view): self.output_view.comparison_key,
         }.get(id(tool))
         if key is not None and self.comparison(key).available:

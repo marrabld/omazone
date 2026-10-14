@@ -6,7 +6,7 @@ from the actual detector and gain envelope, not reconstructed from output audio.
 """
 
 from dataclasses import asdict, dataclass
-from math import exp, log10, sqrt
+from math import exp
 
 import numpy as np
 
@@ -131,32 +131,26 @@ class CompressorProcessor:
             or not np.all(np.isfinite(block))
         ):
             raise ValueError("Block differs from the prepared compressor format or size.")
-        output = np.empty_like(block)
-        self.last_detector_db = np.empty(len(block))
-        self.last_reduction_db = np.empty(len(block))
         settings = self.settings
-        slope = 1 - 1 / settings.ratio
-        half = settings.knee_db / 2
-        makeup = settings.makeup_db
-        for i, frame in enumerate(block):
-            if settings.detector == "peak":
-                detected = max(abs(value) for value in frame)
-            else:
-                detected = sqrt(sum(value * value for value in frame) / self.channels)
-            coefficient = self.attack if detected > self.envelope else self.release
-            self.envelope = coefficient * self.envelope + (1 - coefficient) * detected
-            level = 20 * log10(max(self.envelope, 1e-12))
-            distance = level - settings.threshold_db
-            if distance <= -half:
-                reduction = 0.0
-            elif settings.knee_db and distance < half:
-                reduction = -slope * (distance + half) ** 2 / (2 * settings.knee_db)
-            else:
-                reduction = -slope * distance
-            output[i] = frame * (10 ** ((reduction + makeup) / 20))
-            self.last_detector_db[i] = level
-            self.last_reduction_db[i] = reduction
-        return output
+        detected = (
+            np.max(np.abs(block), axis=1) if settings.detector == "peak"
+            else np.sqrt(np.mean(np.square(block), axis=1))
+        )
+        # Keep the same causal attack/release recurrence. Only the scalar
+        # envelope loop needs Python; band detection, logs and sample gains are
+        # vectorised to avoid three per-frame NumPy operations in multiband mode.
+        envelope = self.envelope
+        envelopes = np.empty(len(block))
+        attack, release = self.attack, self.release
+        for index, value in enumerate(detected.tolist()):
+            coefficient = attack if value > envelope else release
+            envelope = coefficient * envelope + (1 - coefficient) * value
+            envelopes[index] = envelope
+        self.envelope = envelope
+        self.last_detector_db = 20 * np.log10(np.maximum(envelopes, 1e-12))
+        self.last_reduction_db = gain_reduction_db(self.last_detector_db, settings)
+        gains = np.power(10.0, (self.last_reduction_db + settings.makeup_db) / 20)
+        return block * gains[:, None]
 
 
 @dataclass(frozen=True)

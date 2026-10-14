@@ -32,6 +32,36 @@ def test_static_knee_continuity_and_hard_knee():
 
 
 @pytest.mark.parametrize("detector", ["peak", "rms"])
+def test_vectorised_detector_and_gain_keep_the_original_scalar_recurrence(detector):
+    from math import exp, log10, sqrt
+
+    rate = 16000
+    audio = np.random.default_rng(2026).normal(0, 0.3, (2000, 2))
+    settings = CompressorSettings(-22, 3, 7, 90, 4, -2, detector)
+    attack = exp(-1000 / (rate * settings.attack_ms))
+    release = exp(-1000 / (rate * settings.release_ms))
+    envelope = 0.0
+    expected = np.empty_like(audio)
+    levels, reductions = [], []
+    for index, frame in enumerate(audio):
+        value = max(abs(item) for item in frame) if detector == "peak" else sqrt(sum(item * item for item in frame) / 2)
+        coefficient = attack if value > envelope else release
+        envelope = coefficient * envelope + (1 - coefficient) * value
+        level = 20 * log10(max(envelope, 1e-12))
+        reduction = gain_reduction_db(level, settings)
+        expected[index] = frame * 10 ** ((reduction + settings.makeup_db) / 20)
+        levels.append(level)
+        reductions.append(reduction)
+    processor = CompressorProcessor()
+    processor.prepare(rate, 2, len(audio))
+    processor.set_settings(settings)
+    actual = processor.process_block(audio)
+    np.testing.assert_allclose(actual, expected, atol=1e-13)
+    np.testing.assert_allclose(processor.last_detector_db, levels, atol=1e-12)
+    np.testing.assert_allclose(processor.last_reduction_db, reductions, atol=1e-12)
+
+
+@pytest.mark.parametrize("detector", ["peak", "rms"])
 def test_stateful_blocks_and_stereo_linking(detector):
     rate = 16000
     t = np.arange(rate) / rate

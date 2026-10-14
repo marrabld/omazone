@@ -59,7 +59,7 @@ STEPS = (
     ),
     Step("sections", "Mix sections", "match", part_of="match", secondary=True, short="Sections"),
     Step("eq", "Manual EQ", "eq", spectral=True, skippable=True, short="EQ"),
-    Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True, short="Dynamics"),
+    Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True, aliases=("band-solo",), short="Dynamics"),
     Step(
         "output",
         "Output",

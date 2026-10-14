@@ -337,7 +337,7 @@ class SongWorkspace(QtWidgets.QWidget):
         widget = self.owner.views.currentWidget()
         for view, key in (
             (self.owner.manual_eq_view, "eq"),
-            (self.owner.compressor_view, "dynamics"),
+            (self.owner.compressor_view, self.owner.compressor_view.comparison_key),
             (self.owner.output_view, self.owner.output_view.comparison_key),
         ):
             if widget is view:
@@ -353,6 +353,8 @@ class SongWorkspace(QtWidgets.QWidget):
             return "Manual EQ" + (" (bypassed)" if stages["eq"].bypassed else "")
         if key == "dynamics":
             return "Compression" + (" (bypassed)" if stages["dynamics"].bypassed else "")
+        if key == "band-solo":
+            return f"{self.owner.compressor_view.band_selector.currentText()} band solo (audition only)"
         if key == "output-gain":
             return "Output gain" + (" (bypassed)" if stages["output"].bypassed else "")
         if key == "limiter":
@@ -532,6 +534,8 @@ class SongWorkspace(QtWidgets.QWidget):
                     if requested == "original"
                     else ("output" if requested == "output" and after is not None else "input")
                 )
+                if self.viewer_context_key() == "band-solo" and requested != "original":
+                    shown = "output"
                 self.label.setText(
                     f"{title} {shown} | {scope}"
                     + (" | Loop active" if self.owner.transport.loop else "")

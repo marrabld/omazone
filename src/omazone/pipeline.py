@@ -9,12 +9,14 @@ from typing import Protocol
 
 import numpy as np
 
-from .compressor import CompressionResult, render_compressor, settings_from_parameters
+from .compressor import CompressionResult
+from .dynamics import render_dynamics, settings_from_parameters
 from .engine import render, validate_audio
 from .limiter import LimitingResult, render_limiter
 from .limiter import settings_from_parameters as limiter_settings
 from .loudness import integrated_lufs
 from .manual_eq import eq_from_parameters, render_eq
+from .multiband import MultibandResult
 from .output_gain import apply_output_gain
 from .output_gain import settings_from_parameters as output_settings
 from .project import digest_json, filter_dict, replay_repairs
@@ -46,7 +48,7 @@ class ChainResult:
     output: np.ndarray
     analysis_stale: bool
     equalized: np.ndarray | None = None
-    compression: CompressionResult | None = None
+    compression: CompressionResult | MultibandResult | None = None
     pre_output: np.ndarray | None = None
     # Integrated LUFS per prefix, keyed by array identity. Measured once here,
     # in the render worker, so the preview pairs and the Output readouts share
@@ -177,8 +179,8 @@ class ChainRenderer:
             lambda: (
                 None
                 if dynamics.bypassed
-                else render_compressor(
-                    equalized, self.rate, settings_from_parameters(dynamics.parameters), block_size
+                else render_dynamics(
+                    equalized, self.rate, settings_from_parameters(dynamics.parameters, self.rate), block_size
                 )
             ),
         )
