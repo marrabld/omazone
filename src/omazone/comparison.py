@@ -111,6 +111,10 @@ SPECS = (
         "limiter", "limiter", "Final limiter", "Chain before limiter", "Final output",
         "before limiter", "after limiter",
     ),
+    ComparisonSpec(
+        "band-solo", "dynamics", "Band solo (audition only)",
+        "Solo band output", "Solo band output", "", "band solo",
+    ),
 )
 
 BY_KEY = {spec.key: spec for spec in SPECS}

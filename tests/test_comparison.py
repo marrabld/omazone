@@ -58,6 +58,7 @@ def test_every_comparison_names_a_stage_and_the_original_names_none():
         "dynamics",
         "output-gain",
         "limiter",
+        "band-solo",
     ]
     assert stage_for("mastering") == "match"
     assert stage_for("output-gain") == "output"

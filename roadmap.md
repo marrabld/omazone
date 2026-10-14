@@ -56,12 +56,15 @@ optional View action and a persistent seek/time display. See
 2. **Final peak control, #45.** An optional stereo-linked lookahead limiter is
    implemented after output gain, with a reconstructed-peak safety check,
    reduction history and aligned stage-only A/B. See [limiting](docs/limiter.md).
-3. **Advanced dynamics, #8/#46.** Build a single downward dynamic-EQ band or a
-   three-band compressor from the tested broadband detector. Verify crossover
-   recombination before expanding multiband processing.
+3. **Advanced dynamics, #8/#46.** The three-band crossover prototype is implemented
+   with verified neutral reconstruction, per-band compression and audition-only
+   solo. See [three-band compression](docs/multiband.md). Listen on real mixes
+   before expanding processing or starting the selective-filtering research #83.
+   The single downward dynamic-EQ band remains planned.
 
-Milestone 3 follows limiter listening/review. #8 still needs the filter modules
-in #6; the output-safety prerequisites for #46 are implemented. Neither #6 nor
+#46 now needs real-mix listening and review. #8 still needs the filter modules
+in #6; selective-filtering research #83 remains gated on using the prototype.
+Neither #6 nor
 #14 appears in the plan above:
 #6 is a prerequisite rather than a goal, and #14 now covers only the audible
 platform checks that continuous integration cannot perform. A/B crossfades and
@@ -262,7 +265,7 @@ prove its crossover paths recombine without unintended changes.
 - [ ] Dynamic EQ: frequency, bandwidth, threshold, maximum cut, and attack/release.
 - [ ] Dynamic EQ: stable time-varying gain, stereo-linked detection, bypass and
   rendered gain-envelope plots. Add upward processing or more bands later.
-- [ ] Three-band compression: two draggable crossovers with verified phase,
+- [x] Three-band compression: two draggable crossovers with verified phase,
   latency and uncompressed reconstruction, plus per-band gain-reduction plots.
 
 Check quiet passages, bounded attenuation, release recovery, stereo preservation,

@@ -83,6 +83,27 @@ def test_load_render_export(tmp_path, monkeypatch):
         window.close()
 
 
+def test_bundled_selftest_checks_generated_three_band_and_limiter_without_device(monkeypatch):
+    import sounddevice as sd
+
+    from omazone.selftest import verify
+
+    def unexpected_device(*args, **kwargs):
+        raise AssertionError("Self-test must not open an audio device")
+
+    monkeypatch.setattr(sd, "OutputStream", unexpected_device)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        verify(window)
+        app.processEvents()
+        assert window.compressor_view.multiband_mode
+        assert window.output_view.limiter_enabled.isChecked()
+    finally:
+        window.project.mark_saved()
+        window.close()
+
+
 def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
@@ -2630,6 +2651,169 @@ def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, 
         if window.worker is not None:
             window.worker.wait()
             app.processEvents()
+        window.close()
+
+
+def test_three_band_controls_solo_export_and_saved_mode_presets(
+    tmp_path, monkeypatch, unsmoothed_audition
+):
+    import sounddevice as sd
+
+    from omazone.dynamics import settings_from_parameters as dynamics_settings
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.callback = kwargs["callback"]
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    time_axis = np.arange(RATE) / RATE
+    left = 0.45 * np.sin(2 * np.pi * 60 * time_axis) + 0.2 * np.sin(2 * np.pi * 800 * time_axis)
+    left += 0.08 * np.sin(2 * np.pi * 5000 * time_axis)
+    audio = np.column_stack((left, -0.4 * left))
+    source, reference = tmp_path / "mix.wav", tmp_path / "reference.wav"
+    sf.write(source, audio, RATE, subtype="DOUBLE")
+    sf.write(reference, signal.sosfilt(signal.butter(2, 3000, fs=RATE, output="sos"), audio, axis=0), RATE, subtype="DOUBLE")
+
+    def wait():
+        deadline = time.monotonic() + 20
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.show()
+        window.loaded("source", load_audio(source))
+        window.loaded("reference", load_audio(reference))
+        window.manual_eq_view.add_band(1800, -2)
+        window.process()
+        wait()
+        calibrated = window.project.calibration
+        matched = window.match_after
+        eq_preview = window.eq_preview
+        before = window.chain_result.equalized
+        comp = window.compressor_view
+        window.views.setStep("dynamics")
+        comp.threshold.setValue(-22)
+        comp.mode.setCurrentIndex(comp.mode.findData("three-band"))
+        comp.enabled.setChecked(True)
+        assert comp.band_controls.isVisible()
+        assert comp.canvas.crossover.isVisible()
+        assert all(line.movable for line in comp.canvas.crossovers)
+        assert comp.ratio.value() == 1, "Three-band mode starts neutral"
+        comp.render_button.click()
+        assert comp.render_activity.isVisible()
+        wait()
+        np.testing.assert_allclose(window.output[0], before, atol=1e-12)
+        assert window.dynamics_before is before
+        assert window.match_after is matched
+        for actual, expected_preview in zip(window.eq_preview, eq_preview, strict=True):
+            np.testing.assert_array_equal(actual, expected_preview)
+        eq_preview = window.eq_preview
+        assert window.project.calibration is calibrated
+        assert window.renderer.computations["match"] == window.renderer.computations["eq"] == 1
+        assert len(comp.canvas.band_reduction_curves) == 3
+
+        # A completed graph drag changes only the Dynamics recipe, not calibration.
+        line = comp.canvas.crossovers[0]
+        line.setValue(np.log10(400))
+        line.sigPositionChangeFinished.emit(line)
+        assert comp.low_crossover.value() == pytest.approx(400)
+        assert window.output is None
+        assert window.project.calibration is calibrated and window.eq_preview is eq_preview
+        comp.high_crossover.setValue(3600)
+        comp.band_selector.setCurrentIndex(1)
+        comp.threshold.setValue(-30)
+        comp.ratio.setValue(3)
+        comp.band_selector.setCurrentIndex(2)
+        assert comp.ratio.value() == 1
+        comp.band_bypass.setChecked(True)
+        comp.band_selector.setCurrentIndex(1)
+        assert comp.ratio.value() == 3 and comp.threshold.value() == -30
+        comp.render_button.click()
+        wait()
+        result = window.chain_result.compression
+        assert result.band_max_reduction_db[1] > 0
+        assert result.band_max_reduction_db[0] == result.band_max_reduction_db[2] == 0
+        np.testing.assert_array_equal(comp.canvas.detector_curve.yData, result.detector_db[:, 1])
+        for index, curve in enumerate(comp.canvas.band_reduction_curves):
+            np.testing.assert_array_equal(curve.yData, result.reduction_db[:, index])
+        output = window.output[0]
+        recipe = dict(window.project.stages["dynamics"].parameters)
+        comp.high_crossover.setValue(comp.low_crossover.value())
+        assert comp.high_crossover.value() == 3600
+        assert window.output[0] is output, "Invalid crossing must not discard a valid render"
+        assert window.project.stages["dynamics"].parameters == recipe
+        window.waveform.set_selection(SampleRegion(5000, 8000))
+        comp.solo.setChecked(True)
+        assert window.audition_mode == "band-solo"
+        assert "Mid band solo" in window.ab_button.text()
+        assert not window.ab_button.isEnabled()
+        assert window.workspace.pairs()[0] is result.solo_audio[1]
+        assert window.workspace.pairs()[1] is None
+        comp.listen_button.click()
+        block = np.empty((128, 2), dtype=np.float32)
+        window.stream.callback(block, 128, None, None)
+        np.testing.assert_array_equal(block, result.solo_playback[1][5000:5128])
+        assert window.output[0] is output
+        assert window.project.stages["dynamics"].parameters == recipe
+        window.stop()
+        exported = tmp_path / "mix-with-all-bands.wav"
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(exported), ""))
+        window.export()
+        wait()
+        written, rate = sf.read(exported, always_2d=True)
+        assert rate == RATE
+        np.testing.assert_allclose(written, output, atol=1e-7)
+        assert np.any(np.abs(written - result.solo_audio[1]) > 0.1)
+        comp.solo.setChecked(False)
+        assert window.audition_mode == "dynamics" and window.ab_button.isEnabled()
+
+        comp.mode.setCurrentIndex(0)
+        assert comp.threshold.value() == -22
+        comp.mode.setCurrentIndex(1)
+        assert comp.ratio.value() == 3
+        assert comp.low_crossover.value() == 400 and comp.high_crossover.value() == 3600
+        comp.render_button.click()
+        wait()
+        expected = window.output[0].copy()
+        comp.solo.setChecked(True)
+        saved = tmp_path / "bands.omazone.json"
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved), ""))
+        window.save_current_project()
+        wait()
+        assert window.project.view["audition_mode"] == "dynamics"
+        window.new_project()
+        window.open_project_path(saved)
+        wait()
+        comp = window.compressor_view
+        assert comp.multiband_mode and not comp.solo.isChecked()
+        assert comp.low_crossover.value() == 400
+        choices = dynamics_settings(window.project.stages["dynamics"].parameters, RATE)
+        assert choices.broadband.threshold_db == -22
+        assert choices.multiband.bands[1].compressor.ratio == 3
+        assert choices.multiband.bands[2].bypassed
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_allclose(window.output[0], expected, atol=1e-12)
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.project.mark_saved()
         window.close()
 
 

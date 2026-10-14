@@ -43,6 +43,8 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
 - Optional final lookahead limiter with a ceiling, linked stereo gain reduction,
   aligned limiter-only A/B and a reported reconstructed-peak safety correction.
+- Three-band Dynamics mode with draggable crossovers, per-band linked compression,
+  reduction history and audition-only solo. Bands start neutral at 1:1.
 - Integrated LUFS per ITU-R BS.1770-4, shown beside the peaks and used to
   loudness-match A/B playback without changing exported samples.
 - Oversampled true peak, so a file at 0 dBFS sample peak that still clips on

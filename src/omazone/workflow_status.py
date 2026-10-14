@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from .compressor import settings_from_parameters as compressor_settings
-from .compressor import validate_settings as validate_compressor
+from .dynamics import settings_from_parameters as dynamics_settings
+from .dynamics import validate_settings as validate_dynamics
 from .limiter import settings_from_parameters as limiter_settings
 from .limiter import validate_settings as validate_limiter
 from .manual_eq import eq_from_parameters, validate_eq
@@ -135,7 +135,7 @@ def stage_configured(project, stage, sample_rate=48000):
         # an adjustment the renderer cannot make.
         return any(band.enabled and band.gain_db != 0 for band in settings.bands)
     if stage == "dynamics":
-        validate_compressor(compressor_settings(parameters))
+        validate_dynamics(dynamics_settings(parameters, sample_rate), sample_rate)
         return True
     if stage == "output":
         validate_output(output_settings(parameters))

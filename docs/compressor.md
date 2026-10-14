@@ -1,5 +1,9 @@
 # Broadband compression
 
+Dynamics also offers an optional [three-band mode](multiband.md). Broadband stays
+the default, with its existing settings and detector behaviour. Switching modes
+retains both recipes; it does not replace broadband with a new algorithm silently.
+
 The processing order is repair -> learned matching -> manual EQ -> stereo-linked
 compressor -> output gain -> export. The compressor can run without matching or EQ. Its settings
 live in the saved project; it never relearns reference filters during rendering.
