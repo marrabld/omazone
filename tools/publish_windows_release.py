@@ -37,7 +37,17 @@ def read_api(endpoint):
 
 
 def read_release(repo, tag):
-    return read_api(f"repos/{repo}/releases/tags/{tag}")
+    release = read_api(f"repos/{repo}/releases/tags/{tag}")
+    if release is not None:
+        return release
+    # GitHub's by-tag endpoint does not find an unpublished draft, even when
+    # the authenticated release list includes it. Reuse that draft rather than
+    # create a second release with the same intended tag.
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
+    matches = [release for page in pages for release in page if release.get("tag_name") == tag]
+    if len(matches) > 1:
+        raise ValueError(f"Multiple releases use {tag}; choose the intended draft before publishing.")
+    return matches[0] if matches else None
 
 
 def publish(repo, event, ref, sha, version, assets, run_url):
@@ -107,6 +117,8 @@ def publish(repo, event, ref, sha, version, assets, run_url):
         "SHA256SUMS.txt contains all three package checksums. Each BUILD-INFO file identifies its platform build.\n"
         "The Windows executable is unsigned, and the Mac app is not Apple-notarized.\n"
     )
+    if not development and release is not None and release.get("body", "").strip():
+        notes = release["body"].strip() + "\n\n## Build and download verification\n\n" + notes
     title = "Latest development builds" if development else tag
     with tempfile.TemporaryDirectory() as directory:
         notes_file = Path(directory) / "release-notes.md"

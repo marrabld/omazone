@@ -49,7 +49,7 @@ def assets(tmp_path, *, version="0.1.0", numbered=False):
     return files
 
 
-def fake_github(monkeypatch, *, main_sha=SHA, release=None, tag_exists=True, fail_upload=False):
+def fake_github(monkeypatch, *, main_sha=SHA, release=None, tag_exists=True, fail_upload=False, draft_release=None):
     calls = []
     notes = []
 
@@ -65,6 +65,8 @@ def fake_github(monkeypatch, *, main_sha=SHA, release=None, tag_exists=True, fai
             if release is None:
                 raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 404: Not Found")
             return json.dumps(release)
+        if args[:3] == ("api", "--paginate", "--slurp"):
+            return json.dumps([[draft_release]] if draft_release is not None else [[]])
         if "--notes-file" in args:
             notes.append(Path(args[args.index("--notes-file") + 1]).read_text())
         if args[:2] == ("release", "upload") and fail_upload:
@@ -147,6 +149,28 @@ def test_empty_published_numbered_release_gets_assets(tmp_path, monkeypatch):
     upload = next(args for args in calls if args[:2] == ("release", "upload"))
     assert "--clobber" not in upload
     assert "--latest=true" in calls[-1]
+
+
+def test_unpublished_numbered_draft_is_reused_and_its_notes_preserved(tmp_path, monkeypatch):
+    draft = {"tag_name": "v0.1.0", "draft": True, "assets": [], "body": "User's release notes"}
+    calls, notes = fake_github(monkeypatch, draft_release=draft)
+    assert "Published" in publish(tmp_path, ref="refs/tags/v0.1.0")
+    assert not any(args[:2] == ("release", "create") for args in calls)
+    upload = next(args for args in calls if args[:2] == ("release", "upload"))
+    assert "--clobber" in upload
+    assert "--draft=false" in calls[-1]
+    assert notes and all("User's release notes" in note and SHA in note for note in notes)
+
+
+def test_duplicate_drafts_fail_without_publishing(monkeypatch):
+    def github(*args):
+        if args[:3] == ("api", "--paginate", "--slurp"):
+            return json.dumps([[{"tag_name": "v0.1.0", "draft": True}] * 2])
+        raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 404: Not Found")
+
+    monkeypatch.setattr(publisher, "gh", github)
+    with pytest.raises(ValueError, match="Multiple releases"):
+        publisher.read_release(REPO, "v0.1.0")
 
 
 def test_tag_version_mismatch_and_missing_assets_fail_before_mutation(tmp_path, monkeypatch):
