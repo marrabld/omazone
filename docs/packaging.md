@@ -56,6 +56,10 @@ What the Mac build does verify: the bundle is produced, and
 `Omazone.app/Contents/MacOS/Omazone --selftest` passes on a real macOS runner.
 Audio playback on a colleague's Mac still needs their own check; see issue #14.
 
+The bundled self-test also renders generated audio through neutral three-band
+compression and the final limiter, checking finite samples, reconstruction and
+unchanged length. It does not access an audio device or use private recordings.
+
 ## Arch Linux and Omarchy
 
 `packaging/arch` provides `PKGBUILD` plus a launcher, desktop entry and icon. The

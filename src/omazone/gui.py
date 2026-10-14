@@ -2085,7 +2085,7 @@ def main():
     parser.add_argument(
         "--selftest",
         action="store_true",
-        help="Create the window, close it, and exit without the GUI loop",
+        help="Check the window, three-band DSP and limiter without an audio device",
     )
     arguments = parser.parse_args()
     app = QtWidgets.QApplication(sys.argv)
@@ -2093,9 +2093,18 @@ def main():
     window = Window()
     window.show()
     if arguments.selftest:
-        app.processEvents()
-        window.close()
-        print("Omazone selftest OK")
+        from .selftest import verify
+
+        try:
+            verify(window)
+            app.processEvents()
+        except Exception as error:  # noqa: BLE001 -- frozen smoke tests must exit, not show a dialog
+            print(f"Omazone selftest failed: {error}", file=sys.stderr)
+            raise SystemExit(1) from error
+        finally:
+            window.project.mark_saved()
+            window.close()
+        print("Omazone selftest OK: window, three-band reconstruction and limiter")
         return
     sys.exit(app.exec())
 

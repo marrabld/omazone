@@ -65,9 +65,22 @@ only. The Windows workflow serialises runs for the same ref.
 See [platform builds](docs/packaging.md) for what each bundle contains, how the
 Mac and Arch packages are verified, and the current signing and validation limits.
 
-For a deliberate numbered snapshot, run `uv version 0.2.0 --no-sync` (choose
-the intended version), review the `pyproject.toml` and `uv.lock` changes, and
-merge that version-bump PR into `main`. Push a matching `v0.2.0` tag on the new
+For a deliberate numbered snapshot, choose the intended version and run:
+
+```bash
+uv version 0.3.0 --no-sync
+uv lock
+uv sync --locked
+```
+
+Commit both `pyproject.toml` and `uv.lock`. Editing only the TOML version leaves
+the editable package's locked version stale and every platform stops at
+`uv sync --locked`, before packaging. `uv lock` preserves existing dependency
+versions unless an update is needed; a version-only change normally updates just
+the Omazone package entry.
+
+Review the changes and merge that version-bump PR into `main`. Push a matching
+`v0.3.0` tag on the new
 main commit. The tag workflow creates the numbered GitHub release and uploads
 every platform archive, one shared checksum file and per-platform build
 metadata. Do not create the tag or release before the source version matches: a

@@ -83,6 +83,27 @@ def test_load_render_export(tmp_path, monkeypatch):
         window.close()
 
 
+def test_bundled_selftest_checks_generated_three_band_and_limiter_without_device(monkeypatch):
+    import sounddevice as sd
+
+    from omazone.selftest import verify
+
+    def unexpected_device(*args, **kwargs):
+        raise AssertionError("Self-test must not open an audio device")
+
+    monkeypatch.setattr(sd, "OutputStream", unexpected_device)
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        verify(window)
+        app.processEvents()
+        assert window.compressor_view.multiband_mode
+        assert window.output_view.limiter_enabled.isChecked()
+    finally:
+        window.project.mark_saved()
+        window.close()
+
+
 def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
