@@ -108,6 +108,12 @@ class SectionWorkbench(QtWidgets.QWidget):
         row.addWidget(self.target_choice, 1)
         layout.addLayout(row)
         settings_row = QtWidgets.QVBoxLayout()
+        settings_row.addWidget(QtWidgets.QLabel("Matching method"))
+        self.match_method = QtWidgets.QComboBox()
+        self.match_method.addItem("Reference EQ matching", "reference-eq")
+        self.match_method.addItem("Range-aware matching", "range-aware-v1")
+        self.match_method.setToolTip("Range-aware sections need four full seconds and a target with new excerpt data. Both sides are normalised over common resolved bands; the display remains full-spectrum relative power.")
+        settings_row.addWidget(self.match_method)
         self.amount = self.spin(settings_row, "Amount", 0, 100, 50, "%", 0)
         layout.addLayout(settings_row)
         row = QtWidgets.QVBoxLayout()
@@ -149,6 +155,7 @@ class SectionWorkbench(QtWidgets.QWidget):
             control.valueChanged.connect(self.mark_draft)
         self.name.textEdited.connect(self.mark_draft)
         self.target_choice.currentIndexChanged.connect(self.mark_draft)
+        self.match_method.currentIndexChanged.connect(self.mark_draft)
 
     def button(self, row, text, callback):
         button = QtWidgets.QPushButton(text)
@@ -297,6 +304,7 @@ class SectionWorkbench(QtWidgets.QWidget):
                 self.owner.retained_number(self.boost, old.max_boost_db),
                 self.owner.retained_number(self.cut, old.max_cut_db),
                 old.taps,
+                self.match_method.currentData(),
             ),
         )
 
@@ -402,6 +410,7 @@ class SectionWorkbench(QtWidgets.QWidget):
         self.start.setValue(section.region.start / rate)
         self.end.setValue(section.region.end / rate)
         self.target_choice.setCurrentIndex(self.target_choice.findData(section.target_id))
+        self.match_method.setCurrentIndex(self.match_method.findData(section.settings.method))
         for control, value in (
             (self.amount, section.settings.amount * 100),
             (self.smoothing, section.settings.smoothing_octaves),

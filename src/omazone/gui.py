@@ -21,7 +21,6 @@ from .delivery import format_label, suggested_attenuation, write
 from .dynamic_eq_view import DynamicEQView
 from .engine import (
     analyse,
-    design_match,
     peak_db,
     rms_db,
 )
@@ -33,6 +32,7 @@ from .pipeline import ChainRenderer
 from .playback import AuditionProcessor, PlaybackCursor
 from .project import STAGES, AudioReference, MatchCalibration, Project
 from .project_controller import ProjectController
+from .range_match import design_target_match
 from .reference_variation import analyse_variation
 from .reference_variation_view import ReferenceVariationView
 from .render_payload import RenderPayload
@@ -468,6 +468,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             "Whole-song matching settings. Mix sections have independent settings."
         )
         controls = QtWidgets.QVBoxLayout()
+        controls.addWidget(QtWidgets.QLabel("Matching method"))
+        self.match_method = QtWidgets.QComboBox()
+        self.match_method.addItem("Reference EQ matching", "reference-eq")
+        self.match_method.addItem("Range-aware matching", "range-aware-v1")
+        self.match_method.setToolTip("Range-aware matching compares equally weighted excerpt statistics over common bands. It needs new reference excerpt data and at least four full seconds of source audio.")
+        controls.addWidget(self.match_method)
+        self.match_method_note = QtWidgets.QLabel()
+        self.match_method_note.setWordWrap(True)
+        controls.addWidget(self.match_method_note)
         self.amount = self.control(controls, "Match amount", 0, 100, 50, "%", 0)
         mastering_layout.addLayout(controls)
         self.match_advanced_toggle = QtWidgets.QToolButton()
@@ -483,6 +492,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.smoothing = self.control(advanced, "Smoothing", 0.02, 2, 0.33, " oct", 2)
         self.boost = self.control(advanced, "Maximum boost", 0, 18, 6, " dB", 1)
         self.cut = self.control(advanced, "Maximum cut", 0, 18, 6, " dB", 1)
+        self.inspect_match_button = self.button(advanced, "Inspect proposed curve", self.inspect_match)
         mastering_layout.addWidget(self.match_advanced_panel)
         self.match_advanced_panel.hide()
         self.match_advanced_toggle.toggled.connect(self.toggle_match_advanced)
@@ -583,6 +593,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 )
         for control in (self.amount, self.smoothing, self.boost, self.cut):
             control.valueChanged.connect(self.settings_changed)
+        self.match_method.currentIndexChanged.connect(self.settings_changed)
 
         row = QtWidgets.QHBoxLayout()
         self.play_button = self.button(row, "Play", self.play)
@@ -923,8 +934,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.play_selection_button.setEnabled(not busy and has_selection)
         self.loop_selection.setEnabled(not busy and has_selection)
         self.whole_song_button.setEnabled(not busy and self.source is not None)
-        for control in (self.amount, self.smoothing, self.boost, self.cut):
+        for control in (self.match_method, self.amount, self.smoothing, self.boost, self.cut):
             control.setEnabled(not busy)
+        self.inspect_match_button.setEnabled(not busy and self.source is not None and self.project.reference_target is not None)
         self.clipping_inspector.refresh_actions()
         self.manual_eq_view.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.canvas.setEnabled(not busy and self.source is not None)
@@ -1664,6 +1676,27 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             name=name,
         )
 
+    def inspect_match(self):
+        if not self.ensure_processing_ready():
+            return
+        self.sync_project()
+        target = copy.deepcopy(self.project.reference_target)
+        if target is None:
+            self.error("Load a reference before inspecting a matching curve.")
+            return
+        source, rate, spectrum = self.processing_source()[:3]
+        settings = self.project.matching
+
+        def completed(spec):
+            self.draw_filter(spec)
+            self.eq_plot.setTitle("Proposed whole-song correction | audio not rendered")
+            self.status.setText("Proposed curve only. Analyse + process renders the full chain for listening and export.")
+
+        self.start_job(
+            lambda: design_target_match(source, rate, target, settings, spectrum),
+            completed, "Analysing proposed matching curve…",
+        )
+
     def process(self):
         if not self.ensure_processing_ready():
             return
@@ -1678,12 +1711,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.sync_project()
         settings = self.project.matching
         source, rate, spectrum = self.processing_source()[:3]
-        reference = self.reference[2] if self.reference else self.project.reference_target.spectrum
         snapshot = copy.deepcopy(self.project)
         renderer = self.get_renderer()
 
         def calculate():
-            spec = design_match(spectrum, reference, rate, settings)
+            spec = design_target_match(source, rate, snapshot.reference_target, settings, spectrum)
             snapshot.calibration = MatchCalibration(
                 snapshot.config_key(), snapshot.input_key(), whole=spec
             )
@@ -2343,7 +2375,7 @@ def main():
         finally:
             window.project.mark_saved()
             window.close()
-        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter and reference variation")
+        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter, reference variation and range-aware matching")
         return
     sys.exit(app.exec())
 

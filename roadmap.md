@@ -58,8 +58,9 @@ claim of parity with a commercial mastering suite.
 | 3 | [Loudness targeting #102](https://github.com/marrabld/omazone/issues/102) | Explicit requested LUFS/peak ceiling, consent-based processing and the actual achievable result. |
 
 The envelope and empirical density display from #98 shipped in PR #99. Its
-remaining correction method is tracked separately in #100. Range-aware matching
-is not inherently better or more trustworthy than ordinary average-spectrum
+correction method is tracked separately in #100, with implementation ready for
+maintainer listening review. Range-aware matching is not inherently better or
+more trustworthy than ordinary average-spectrum
 matching. Compare both on music and document where they fail. The visual curves
 are interpolated for readability, not extra analysis resolution or confidence.
 
@@ -321,7 +322,7 @@ with a fixed EQ cut; listen for clicks, pumping and crossover colouration.
 - [ ] Explore minimum-phase matching as an alternative to linear phase.
 - [x] Save reference spectral profiles.
 - [x] Show measured within-passage reference variation and empirical density, without changing ordinary matching. See [reference variation](docs/reference-variation.md).
-- [ ] Add deterministic, optional Range-aware matching using conservative correction toward a reference range (#100, following #98). Bootstrap stability reporting remains separate stretch work.
+- [ ] Review the implemented optional Range-aware matching on real music (#100, following #98). It supports whole-song/section recipes and common-band excerpt normalisation; see [the method](docs/range-aware-matching.md). Bootstrap stability reporting remains separate stretch work.
 - [x] Save whole-song matching settings and retained learned curves in project recipes.
 - [ ] Profile memory and render time on full-length songs.
 

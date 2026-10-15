@@ -1,10 +1,11 @@
 """Capture measured reference density with generated, redistributable signals.
 
 uv run python tools/render_reference_variation_demo.py docs/images
+uv run python tools/render_reference_variation_demo.py docs/images --range-aware
 """
 
+import argparse
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -21,7 +22,11 @@ from omazone.waveform import PeakIndex
 
 
 def main():
-    directory = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("directory", type=Path)
+    parser.add_argument("--range-aware", action="store_true")
+    arguments = parser.parse_args()
+    directory = arguments.directory
     directory.mkdir(parents=True, exist_ok=True)
     rate = 48000
     t = np.arange(rate * 12) / rate
@@ -60,6 +65,8 @@ def main():
             ),
         )
         window.views.setStep("match")
+        if arguments.range_aware:
+            window.match_method.setCurrentIndex(window.match_method.findData("range-aware-v1"))
         window.process()
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -80,7 +87,11 @@ def main():
         window.tool_scroll.ensureWidgetVisible(window.reference_variation)
         for _ in range(8):
             app.processEvents()
-        path = directory / "omazone-reference-variation.png"
+        path = directory / (
+            "omazone-range-aware.png"
+            if arguments.range_aware
+            else "omazone-reference-variation.png"
+        )
         if not window.grab().save(str(path)):
             raise RuntimeError("Could not save screenshot")
         print(f"Captured {path}")

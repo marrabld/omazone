@@ -8,14 +8,15 @@ from pathlib import Path
 import numpy as np
 
 from .engine import (
+    MATCH_METHODS,
     MatchFilter,
     MatchSettings,
     Spectrum,
     analyse,
-    design_match,
     render,
     validate_audio,
 )
+from .range_match import design_target_match
 from .reference_variation import (
     ReferenceVariation,
     analyse_variation,
@@ -213,6 +214,8 @@ def validate_sections(sections, targets, length, rate):
             raise ValueError("Invalid section matching settings.")
         if type(settings.taps) is not int or settings.taps < 3 or settings.taps % 2 != 1:
             raise ValueError("Section FIR tap count must be odd and at least three.")
+        if settings.method not in MATCH_METHODS:
+            raise ValueError("Unknown section matching method.")
     return ordered
 
 
@@ -243,7 +246,8 @@ def transition_plan(sections, length, rate, transition_ms):
 def section_curve(audio, rate, section, targets):
     validate_sections([section], targets, len(audio), rate)
     source = analyse(audio[section.region.start : section.region.end], rate)
-    spec = design_match(source, targets[section.target_id].spectrum, rate, section.settings)
+    spec = design_target_match(audio[section.region.start:section.region.end], rate,
+                               targets[section.target_id], section.settings, source)
     return SectionCurve(section, source, spec)
 
 

@@ -13,7 +13,8 @@ import soundfile as sf
 
 from .clipping import ClipInterval, ClipReport, DetectionSettings, detect_clipping
 from .declipping import RepairResult, RepairSettings, repair_clipping
-from .engine import MatchFilter, MatchSettings, Spectrum, analyse
+from .engine import MATCH_METHODS, MatchFilter, MatchSettings, Spectrum, analyse, matching_dict
+from .range_match import range_signature
 from .reference_variation import parse_variation, variation_dict
 from .sections import (
     SectionAssignment,
@@ -167,11 +168,13 @@ class Project:
         if self.match_mode == "whole":
             config = {
                 "mode": "whole",
-                "settings": asdict(self.matching),
+                "settings": matching_dict(self.matching),
                 "target": spectrum_dict(self.reference_target.spectrum)
                 if self.reference_target
                 else None,
             }
+            if self.matching.method == "range-aware-v1":
+                config["range_target"] = range_signature(self.reference_target.variation) if self.reference_target else None
         else:
             config = {
                 "mode": self.match_mode,
@@ -180,7 +183,7 @@ class Project:
                         "id": item.id,
                         "region": asdict(item.region),
                         "target_id": item.target_id,
-                        "settings": asdict(item.settings),
+                        "settings": matching_dict(item.settings),
                     }
                     for item in self.sections
                 ],
@@ -190,6 +193,9 @@ class Project:
                     for key in sorted({item.target_id for item in self.sections})
                 },
             }
+            range_ids = {item.target_id for item in self.sections if item.settings.method == "range-aware-v1"}
+            if range_ids:
+                config["range_targets"] = {key: range_signature(self.targets[key].variation) for key in sorted(range_ids)}
         return digest_json(config)
 
     @property
@@ -405,6 +411,7 @@ def validate_project(project):
         or type(project.matching.taps) is not int
         or project.matching.taps < 3
         or project.matching.taps % 2 != 1
+        or project.matching.method not in MATCH_METHODS
     ):
         raise ValueError("Invalid whole-song matching settings.")
     if project.source is None and (
@@ -622,6 +629,9 @@ def project_dict(project, path):
         data["path"] = project_relative(asset.path, directory)
         return data
 
+    def section_dict(section):
+        return {**asdict(section), "settings": matching_dict(section.settings)}
+
     calibration = None
     if project.calibration:
         calibration = {
@@ -630,7 +640,7 @@ def project_dict(project, path):
             "whole": filter_dict(project.calibration.whole) if project.calibration.whole else None,
             "sections": [
                 {
-                    "section": asdict(curve.section),
+                    "section": section_dict(curve.section),
                     "source": spectrum_dict(curve.source),
                     "filter": filter_dict(curve.filter),
                 }
@@ -648,9 +658,9 @@ def project_dict(project, path):
         else None,
         "regions": [asdict(item) for item in project.regions],
         "targets": [target_dict(item) for item in project.targets.values()],
-        "sections": [asdict(item) for item in project.sections],
+        "sections": [section_dict(item) for item in project.sections],
         "repairs": [asdict(item) for item in project.repairs],
-        "matching": asdict(project.matching),
+        "matching": matching_dict(project.matching),
         "match_mode": project.match_mode,
         "transition_ms": project.transition_ms,
         "stages": {key: asdict(value) for key, value in project.stages.items()},
