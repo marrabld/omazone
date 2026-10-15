@@ -1,4 +1,4 @@
-"""Fixed-order original -> repair -> matching -> EQ -> dynamics -> output rendering.
+"""Fixed-order repair -> matching -> EQ -> filters -> dynamics -> output rendering.
 
 Prefix caches depend on numerical recipes and upstream inputs, not GUI selection.
 Matching never relearns during rendering. Reserved stages fail if enabled.
@@ -12,6 +12,8 @@ import numpy as np
 from .compressor import CompressionResult
 from .dynamics import render_dynamics, settings_from_parameters
 from .engine import render, validate_audio
+from .filters import filters_from_parameters, render_filters
+from .filters import validate_settings as validate_filters
 from .limiter import LimitingResult, render_limiter
 from .limiter import settings_from_parameters as limiter_settings
 from .loudness import integrated_lufs
@@ -60,6 +62,7 @@ class ChainResult:
     true_peak: dict = field(default_factory=dict)
     pre_limiter: np.ndarray | None = None
     limiting: LimitingResult | None = None
+    filtered: np.ndarray | None = None
 
 
 class ChainRenderer:
@@ -72,7 +75,7 @@ class ChainRenderer:
             if self.repair_preview.shape != self.original.shape:
                 raise ValueError("Repair preview and original formats differ.")
         self.cache = {}
-        self.computations = {key: 0 for key in ("repair", "match", "eq", "dynamics", "output")}
+        self.computations = {key: 0 for key in ("repair", "match", "eq", "filters", "dynamics", "output")}
 
     def prefix(self, stage, key, function):
         entry = self.cache.get(stage)
@@ -169,9 +172,25 @@ class ChainRenderer:
                 )
             ),
         )
+        filters = project.stages["filters"]
+        filter_settings = None if filters.bypassed else filters_from_parameters(filters.parameters)
+        if filter_settings is not None:
+            validate_filters(filter_settings, self.rate)
+        filters_key = digest_json(
+            {"input": eq_key, "bypass": filters.bypassed, "parameters": filters.parameters}
+        )
+        filtered = self.prefix(
+            "filters",
+            filters_key,
+            lambda: (
+                equalized
+                if filters.bypassed or not any(item.enabled for item in filter_settings.filters)
+                else render_filters(equalized, self.rate, filter_settings, block_size)
+            ),
+        )
         dynamics = project.stages["dynamics"]
         dynamics_key = digest_json(
-            {"input": eq_key, "bypass": dynamics.bypassed, "parameters": dynamics.parameters}
+            {"input": filters_key, "bypass": dynamics.bypassed, "parameters": dynamics.parameters}
         )
         compressed = self.prefix(
             "dynamics",
@@ -180,11 +199,11 @@ class ChainRenderer:
                 None
                 if dynamics.bypassed
                 else render_dynamics(
-                    equalized, self.rate, settings_from_parameters(dynamics.parameters, self.rate), block_size
+                    filtered, self.rate, settings_from_parameters(dynamics.parameters, self.rate), block_size
                 )
             ),
         )
-        pre_output = equalized if compressed is None else compressed.audio
+        pre_output = filtered if compressed is None else compressed.audio
         output_key = digest_json(
             {
                 "input": dynamics_key,
@@ -213,25 +232,26 @@ class ChainRenderer:
         )
         output = pre_limiter if limiting is None else limiting.audio
         loudness = _measure_loudness(
-            [self.original, repaired, matched, equalized, pre_output, pre_limiter, output], self.rate
+            [self.original, repaired, matched, equalized, filtered, pre_output, pre_limiter, output], self.rate
         )
         true_peak = {
             id(audio): measured_true_peak(audio, self.rate)
             for audio in (self.original, pre_output, pre_limiter, output)
         }
         return ChainResult(
-            self.original,
-            repaired,
-            matched,
-            output,
-            not bypass and project.needs_reanalysis,
-            equalized,
-            compressed,
-            pre_output,
-            loudness,
-            true_peak,
-            pre_limiter,
-            limiting,
+            original=self.original,
+            repaired=repaired,
+            matched=matched,
+            output=output,
+            analysis_stale=not bypass and project.needs_reanalysis,
+            equalized=equalized,
+            compression=compressed,
+            pre_output=pre_output,
+            loudness=loudness,
+            true_peak=true_peak,
+            pre_limiter=pre_limiter,
+            limiting=limiting,
+            filtered=filtered,
         )
 
 

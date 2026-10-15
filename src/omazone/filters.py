@@ -5,7 +5,7 @@ sections. Each channel has independent history. There is no buffering delay,
 but causal IIR phase and frequency-dependent group delay are not compensated.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 from scipy import signal
@@ -28,6 +28,28 @@ class FilterSettings:
 @dataclass(frozen=True)
 class FiltersSettings:
     filters: tuple[FilterSettings, ...] = ()
+
+
+def filter_parameters(settings):
+    return {"kind": "filters-v1", "filters": [asdict(item) for item in settings.filters]}
+
+
+def filters_from_parameters(parameters):
+    """Decode a recipe without silently replacing unknown or malformed data."""
+    if parameters == {}:
+        return FiltersSettings()
+    if (
+        not isinstance(parameters, dict)
+        or set(parameters) != {"kind", "filters"}
+        or parameters["kind"] != "filters-v1"
+        or not isinstance(parameters["filters"], list)
+        or len(parameters["filters"]) > MAX_FILTERS
+    ):
+        raise ValueError("Unrecognised corrective filter recipe. Settings have not been replaced.")
+    fields = {"kind", "frequency", "slope", "q", "enabled"}
+    if any(not isinstance(item, dict) or set(item) != fields for item in parameters["filters"]):
+        raise ValueError("Invalid saved corrective filter controls.")
+    return FiltersSettings(tuple(FilterSettings(**item) for item in parameters["filters"]))
 
 
 def _positive_integer(value, name):

@@ -6,8 +6,9 @@ from uuid import uuid4
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .engine import MatchSettings, analyse, audition_pair
+from .engine import MatchSettings
 from .project import MatchCalibration
+from .render_payload import RenderPayload
 from .sections import (
     SectionAssignment,
     capture_target,
@@ -503,13 +504,7 @@ class SectionWorkbench(QtWidgets.QWidget):
             chain = renderer.render(snapshot)
             return (
                 result,
-                analyse(chain.output, source[1]),
-                audition_pair(chain.repaired, chain.matched, source[1], chain.loudness),
-                chain,
-                audition_pair(chain.matched, chain.equalized, source[1], chain.loudness),
-                audition_pair(chain.equalized, chain.pre_output, source[1], chain.loudness),
-                audition_pair(chain.pre_output, chain.pre_limiter, source[1], chain.loudness),
-                audition_pair(chain.pre_limiter, chain.output, source[1], chain.loudness),
+                RenderPayload.from_chain(chain, result.curves[0].filter, source[1]),
             )
 
         self.owner.start_job(

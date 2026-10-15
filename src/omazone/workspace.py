@@ -606,10 +606,11 @@ class SongWorkspace(QtWidgets.QWidget):
                     and (
                         self.owner.project.match_mode != "none"
                         or not self.owner.project.stages["eq"].bypassed
+                        or not self.owner.project.stages["filters"].bypassed
                     )
                 ):
                     messages.append(
-                        "Render the chain for the compressor input after EQ. Showing earlier source context."
+                        "Render the chain for the compressor input after EQ and filters. Showing earlier source context."
                     )
                 if (
                     self.owner.views.currentWidget() is self.owner.output_view
@@ -617,6 +618,7 @@ class SongWorkspace(QtWidgets.QWidget):
                     and (
                         self.owner.project.match_mode != "none"
                         or not self.owner.project.stages["eq"].bypassed
+                        or not self.owner.project.stages["filters"].bypassed
                         or not self.owner.project.stages["dynamics"].bypassed
                     )
                 ):

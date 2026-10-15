@@ -8,6 +8,7 @@ STAGE_TITLES = (
     ("repair", "Repair"),
     ("match", "Match"),
     ("eq", "Manual EQ"),
+    ("filters", "Corrective filters"),
     ("dynamics", "Dynamics"),
     ("output", "Output gain"),
     ("limiter", "Final limiter"),

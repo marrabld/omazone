@@ -90,6 +90,10 @@ SPECS = (
         "after EQ",
     ),
     ComparisonSpec(
+        "filters", "filters", "Corrective filters", "Chain before filters", "Chain after filters",
+        "before filters", "after filters",
+    ),
+    ComparisonSpec(
         "dynamics",
         "dynamics",
         "Dynamics",

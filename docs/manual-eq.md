@@ -3,7 +3,7 @@
 Implemented order:
 
 ```text
-Retained original -> selected repairs -> learned matching -> manual bell EQ -> compression -> output gain -> export
+Retained original -> selected repairs -> learned matching -> manual bell EQ -> corrective filters -> compression -> output gain -> export
 ```
 
 Broadband compression and explicit output gain follow manual EQ. A limiter and

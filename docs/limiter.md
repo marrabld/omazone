@@ -6,7 +6,7 @@ it does not repair clipping already present in a recording.
 ![Final limiter controls, peak measurements and rendered gain-reduction history](images/omazone-limiter.png)
 
 ```text
-Original -> repair -> matching -> manual EQ -> compression -> output gain -> limiter -> export
+Original -> repair -> matching -> manual EQ -> filters -> compression -> output gain -> limiter -> export
 ```
 
 ## Using it

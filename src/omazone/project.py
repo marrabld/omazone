@@ -24,7 +24,7 @@ from .sections import (
 from .waveform import PeakIndex, SampleRegion
 from .workflow_steps import LEGACY_ORDER, is_legacy_step_key, is_step_key
 
-STAGES = ("repair", "match", "eq", "dynamics", "output", "limiter")
+STAGES = ("repair", "match", "eq", "filters", "dynamics", "output", "limiter")
 
 
 def fingerprint(path):
@@ -357,6 +357,14 @@ def validate_project(project):
             eq_from_parameters(project.stages["eq"].parameters),
             project.source.sample_rate if project.source else 48000,
             project.regions,
+        )
+    if project.stages["filters"].parameters:
+        from .filters import filters_from_parameters
+        from .filters import validate_settings as validate_filters
+
+        validate_filters(
+            filters_from_parameters(project.stages["filters"].parameters),
+            project.source.sample_rate if project.source else 48000,
         )
     if project.stages["dynamics"].parameters.get("kind") in ("compressor-v1", "dynamics-v2"):
         from .dynamics import settings_from_parameters, validate_settings
@@ -705,6 +713,7 @@ def load_project(path):
         )
         # Additive stage migration: old projects must never enable a new effect.
         project.stages.setdefault("limiter", StageState(bypassed=True))
+        project.stages.setdefault("filters", StageState(bypassed=True))
         for item in data["repairs"]:
             project.repairs.append(
                 RepairOperation(

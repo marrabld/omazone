@@ -23,6 +23,7 @@ from .project import (
     load_project,
     save_project,
 )
+from .render_payload import RenderPayload
 from .waveform import SampleRegion
 from .workflow_steps import clamp, is_step_key, legacy_step_key
 
@@ -59,6 +60,7 @@ class ProjectController:
             ("repair", "Skip repair"),
             ("match", "Skip matching"),
             ("eq", "Skip manual EQ"),
+            ("filters", "Skip corrective filters"),
             ("dynamics", "Skip compressor"),
             ("output", "Skip output gain"),
             ("limiter", "Skip final limiter"),
@@ -149,7 +151,7 @@ class ProjectController:
             item.setEnabled(
                 not busy
                 and (
-                    key in ("repair", "match", "eq", "dynamics", "output", "limiter")
+                    key in ("repair", "match", "eq", "filters", "dynamics", "output", "limiter")
                     or not self.project.stages[key].bypassed
                 )
             )
@@ -469,6 +471,8 @@ class ProjectController:
         if stage == "eq":
             self.invalidate_eq()
             self.manual_eq_view.restore()
+        elif stage == "filters":
+            self.invalidate_filters()
         elif stage == "dynamics":
             self.invalidate_dynamics()
             self.compressor_view.restore()
@@ -507,17 +511,7 @@ class ProjectController:
                 spec = MatchFilter(
                     np.ones(1), np.asarray([0, renderer.rate / 2]), np.zeros(2), renderer.rate
                 )
-            return (
-                result.output,
-                analyse(result.output, renderer.rate),
-                spec,
-                audition_pair(result.repaired, result.matched, renderer.rate, result.loudness),
-                result,
-                audition_pair(result.matched, result.equalized, renderer.rate, result.loudness),
-                audition_pair(result.equalized, result.pre_output, renderer.rate, result.loudness),
-                audition_pair(result.pre_output, result.pre_limiter, renderer.rate, result.loudness),
-                audition_pair(result.pre_limiter, result.output, renderer.rate, result.loudness),
-            )
+            return RenderPayload.from_chain(result, spec, renderer.rate)
 
         def completed(payload):
             self.processed(payload, learn=False)

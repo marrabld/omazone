@@ -1,8 +1,62 @@
 # Corrective filter core
 
-This is the DSP-only first part of [#6](https://github.com/marrabld/omazone/issues/6).
-The filters are not yet connected to the project renderer or Manual EQ controls.
-Existing projects, audition and exports do not change.
+The DSP core and saved-recipe integration for
+[#6](https://github.com/marrabld/omazone/issues/6) are implemented. The parameter
+inspector and response-plot controls are still planned. Filters default to off;
+existing projects retain their output until filters are explicitly configured
+and enabled.
+
+## Chain and saved recipes
+
+The fixed processing order is:
+
+```text
+Repair -> matching -> manual EQ -> corrective filters -> dynamics
+       -> output gain -> final limiter -> export
+```
+
+The `filters` stage stores a versioned recipe inside the existing project format:
+
+```json
+{
+  "bypassed": false,
+  "parameters": {
+    "kind": "filters-v1",
+    "filters": [
+      {"kind": "highpass", "frequency": 30.0, "slope": 12, "q": 1.0, "enabled": true},
+      {"kind": "notch", "frequency": 50.0, "slope": 12, "q": 30.0, "enabled": false}
+    ]
+  }
+}
+```
+
+Empty parameters mean no filters. All five per-filter fields are explicit in
+`filters-v1`. Unknown versions, extra/missing fields and invalid values are
+rejected rather than replaced with defaults. Project loading validates saved
+controls even when the stage is bypassed. Projects predating filters migrate to
+an empty, bypassed stage before stage validation.
+
+Changing a filter preserves matching calibration and the EQ recipe. The renderer
+reuses repair, matching and EQ prefixes, then rerenders filters and downstream
+processing. Changing EQ rerenders filters too. Bypassed, empty and individually
+disabled cascades share the EQ output array, so cached LUFS measurements do not
+repeat for the same audio. They also avoid allocating a new full-song audition
+pair unless someone selects that identity comparison. An active stage retains
+one float64 filtered recording and two float32 audition buffers, about 553 MB
+for six minutes of 48 kHz stereo. These are in addition to other chain buffers.
+
+`ChainResult.filtered` is the dynamics input. Corrective-filter A/B compares EQ
+output against filtered output, without compression, output gain or limiting.
+Whole-song matching, section matching and saved recipes use one named
+`RenderPayload` to carry these pairs from the render worker to the GUI. Preview
+gain matching never changes full-chain export.
+
+Until the parameter inspector is added, **Project > Stage bypass > Skip
+corrective filters** controls stage bypass, the comparison selector can audition
+rendered filters, and Export lists their status. Filter status routes to Manual
+EQ without adding a navigation step. An enabled empty stage asks for configuration
+or bypass; it does not pretend a filter was rendered. There are no filter
+parameter-editing widgets yet.
 
 ## Responses and controls
 
@@ -55,7 +109,7 @@ assessment of real recordings.
 
 ## Verification
 
-Run `uv run pytest tests/test_filters.py -q`.
+Run `uv run pytest tests/test_filters.py tests/test_filter_integration.py -q`.
 
 Tests cover:
 
@@ -70,6 +124,11 @@ Tests cover:
   independent channel histories and preservation of stereo amplitude relations.
 - Exact bypass, unchanged input, output length, two-sample recordings, combined
   response, settling and rejection of invalid control/block values.
+- Recipe precision and bypass round-trips, old-project migration, original-chain
+  output equality, fixed chain order, prefix-cache reuse and complete-chain block
+  equivalence. GUI tests also cover all three render paths, correct stage pairs,
+  stale-output clearing, project reload and full-length export while auditioning
+  only the filters.
 
 The plotting helper returns Hz and dB on the same 8192-point grid as manual EQ.
 Displayed magnitudes have a -240 dB floor. A narrow notch can fall between grid
@@ -77,7 +136,7 @@ points; its measured centre depth must not be inferred from that plot alone.
 
 ## Follow-up integration
 
-Chain and recipe integration, individual bypass controls, a response plot and
-aligned A/B remain required before #6 is complete. New controls must not alter
+The Manual EQ secondary inspector, editable individual bypass controls and a
+response plot remain required before #6 is complete. New controls must not alter
 existing saved matching or manual EQ. Dynamic EQ #8 and selective-filtering
 research #83 remain separate.

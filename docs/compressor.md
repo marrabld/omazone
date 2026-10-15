@@ -4,7 +4,7 @@ Dynamics also offers an optional [three-band mode](multiband.md). Broadband stay
 the default, with its existing settings and detector behaviour. Switching modes
 retains both recipes; it does not replace broadband with a new algorithm silently.
 
-The processing order is repair -> learned matching -> manual EQ -> stereo-linked
+The processing order is repair -> learned matching -> manual EQ -> corrective filters -> stereo-linked
 compressor -> output gain -> export. The compressor can run without matching or EQ. Its settings
 live in the saved project; it never relearns reference filters during rendering.
 
@@ -23,7 +23,7 @@ live in the saved project; it never relearns reference filters during rendering.
 4. Continue to Output or export. To omit compression, use **Skip Dynamics**, or
    uncheck the compressor and click **Render without compression**.
 
-Before compression is the chain after repair, matching and EQ. Compression never
+Before compression is the chain after repair, matching, EQ and corrective filters. Compression never
 changes that input. It is not the raw source, which you can hear with
 **View > Original recording**. A/B applies constant preview gain for loudness
 matching and shared headroom, not compression to the before side.

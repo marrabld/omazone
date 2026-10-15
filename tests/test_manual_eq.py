@@ -133,7 +133,7 @@ def test_chain_matches_direct_processing_caches_prefixes_and_retains_calibration
     project.stages["eq"].parameters = {"kind": "bell-v1", "band": asdict(BellSettings(gain_db=-4))}
     second = renderer.render(project)
     assert second.matched is first.matched
-    assert renderer.computations == {"repair": 1, "match": 1, "eq": 2, "dynamics": 2, "output": 2}
+    assert renderer.computations == {"repair": 1, "match": 1, "eq": 2, "filters": 2, "dynamics": 2, "output": 2}
     np.testing.assert_allclose(
         second.output, render_eq(first.matched, 16000, BellSettings(gain_db=-4)), atol=1e-12
     )

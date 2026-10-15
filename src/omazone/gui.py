@@ -18,7 +18,6 @@ from .comparison import SPECS, Side, StagePair, resolve, spec_for
 from .compressor_view import CompressorView
 from .engine import (
     analyse,
-    audition_pair,
     design_match,
     peak_db,
     rms_db,
@@ -30,6 +29,7 @@ from .pipeline import ChainRenderer
 from .playback import AuditionProcessor, PlaybackCursor
 from .project import STAGES, AudioReference, MatchCalibration, Project
 from .project_controller import ProjectController
+from .render_payload import RenderPayload
 from .section_view import SectionWorkbench
 from .sections import TargetProfile
 from .tool_panel import ToolPanel
@@ -225,6 +225,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_preview = None
         self.eq_preview = None
         self.eq_before = None
+        self.filters_preview = self.filters_before = self.filters_after = None
         self.dynamics_preview = None
         self.dynamics_before = None
         self.output_preview = None
@@ -693,17 +694,25 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 self.dynamics_after if self.dynamics_preview is not None else None,
                 self.dynamics_preview,
             )
+        if stage == "filters":
+            return StagePair(
+                self.filters_before,
+                self.filters_after,
+                self.filters_preview,
+            )
         if stage == "limiter":
             return StagePair(
                 self.limiter_before,
                 self.limiter_after if self.limiter_preview is not None else None,
                 self.limiter_preview,
             )
-        return StagePair(
-            self.output_before,
-            self.output_after if self.output_preview is not None else None,
-            self.output_preview,
-        )
+        if stage == "output":
+            return StagePair(
+                self.output_before,
+                self.output_after if self.output_preview is not None else None,
+                self.output_preview,
+            )
+        raise KeyError(stage)
 
     def comparison_pairs(self):
         return {stage: self.stage_pair(stage) for stage in STAGES}
@@ -748,6 +757,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return None
         if stage == "limiter":
             return step_for("output")
+        if stage == "filters":
+            return step_for("eq")
         return next((item for item in STEPS if item.stage == stage and not item.secondary), None)
 
     def apply_comparison(self, key=None, side=None):
@@ -900,7 +911,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             ("dynamics", self.compressor_view),
             ("output", self.output_view),
         ):
-            status = workflow.stages[stage]
+            status = self.eq_status(workflow) if stage == "eq" else workflow.stages[stage]
             if not status.comparison_available:
                 view.summary.setText(status.reason)
 
@@ -991,7 +1002,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         elif clipping:
             message = self.clipping_inspector.result_heading.text()
         elif manual_eq:
-            stage = workflow.stages["eq"]
+            stage = self.eq_status(workflow)
             message = (
                 "EQ rendered. Click the listening button to compare before/after EQ, or export."
                 if stage.state is RenderState.READY
@@ -1179,6 +1190,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             # Skipping gain changes the limiter's input. Stay on Output so its
             # new result can be rendered before moving to Export.
             following = None
+        if step.key == "eq" and not self.project.stages["filters"].bypassed:
+            following = None
         if following is not None:
             self.views.setStep(following.key)
 
@@ -1192,7 +1205,16 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return READY_STAGE
         if step.key == "output":
             return self.output_status(workflow)
+        if step.key == "eq":
+            return self.eq_status(workflow)
         return workflow.stages[step.stage]
+
+    def eq_status(self, workflow):
+        """Manual EQ also routes corrective-filter status until its inspector lands."""
+        eq, filters = workflow.stages["eq"], workflow.stages["filters"]
+        if eq.state is RenderState.SKIPPED or (eq.can_continue and not filters.can_continue):
+            return filters if filters.state is not RenderState.SKIPPED else eq
+        return eq
 
     def output_status(self, workflow):
         """Output contains independently bypassable gain and limiter stages."""
@@ -1207,6 +1229,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         for step in NAVIGATION:
             status = (
                 self.output_status(workflow) if step.key == "output"
+                else self.eq_status(workflow) if step.key == "eq"
                 else workflow.stages[step.stage] if step.stage else None
             )
             if step.key == "export":
@@ -1411,6 +1434,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.section_result = None
         self.mastering_preview = self.match_after = None
         self.eq_preview = self.eq_before = self.eq_after = self.chain_result = None
+        self.filters_preview = self.filters_before = self.filters_after = None
         self.dynamics_preview = self.dynamics_before = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
         self.limiter_preview = self.limiter_before = self.limiter_after = None
@@ -1424,6 +1448,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.stop()
         self.output = None
         self.eq_preview = self.eq_after = None
+        self.filters_preview = self.filters_before = self.filters_after = None
         self.dynamics_preview = None
         self.dynamics_before = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
@@ -1433,6 +1458,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.meters.setText("Render to update measurements.")
         self.workspace.completed_key = None
         self.update_buttons()
+
+    def invalidate_filters(self):
+        self.filters_preview = self.filters_after = None
+        self.dynamics_before = None
+        self.invalidate_dynamics()
 
     def invalidate_dynamics(self):
         self.project_changed()
@@ -1541,46 +1571,37 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 snapshot.config_key(), snapshot.input_key(), whole=spec
             )
             result = renderer.render(snapshot)
-            return (
-                result.output,
-                analyse(result.output, rate),
-                spec,
-                audition_pair(result.repaired, result.matched, rate, result.loudness),
-                result,
-                audition_pair(result.matched, result.equalized, rate, result.loudness),
-                audition_pair(result.equalized, result.pre_output, rate, result.loudness),
-                audition_pair(result.pre_output, result.pre_limiter, rate, result.loudness),
-                audition_pair(result.pre_limiter, result.output, rate, result.loudness),
-            )
+            return RenderPayload.from_chain(result, spec, rate)
 
         self.invalidate()
         self.start_job(calculate, self.processed, "Designing filter and rendering blocks…")
 
     def processed(self, result, learn=True):
-        self.output = result[:3]
-        self.mastering_preview = self.preview = result[3]
-        if len(result) > 4:
-            self.chain_result = result[4]
+        self.output = (result.output, result.spectrum, result.spec)
+        self.mastering_preview = self.preview = result.matching_preview
+        if result.chain is not None:
+            self.chain_result = chain = result.chain
             # The old chain's arrays are about to be freed, and a new array can
             # land on the same id(). Caches keyed by id() must not survive that,
             # or they hand back the previous render's audio.
             self._identity_playback = None
             self.workspace.wave_key = None
-            self.match_after = result[4].matched
-            self.eq_before = result[4].matched
-            self.eq_after = result[4].equalized
-            self.eq_preview = result[5]
-            self.dynamics_before = result[4].equalized
-            self.dynamics_after = result[4].pre_output
-            self.dynamics_preview = result[6]
-            self.output_before = result[4].pre_output
-            self.output_after = (
-                result[4].pre_limiter if result[4].pre_limiter is not None else result[4].output
-            )
-            self.output_preview = result[7]
+            self.match_after = chain.matched
+            self.eq_before = chain.matched
+            self.eq_after = chain.equalized
+            self.eq_preview = result.eq_preview
+            self.filters_before = chain.equalized
+            self.filters_after = chain.filtered
+            self.filters_preview = result.filters_preview
+            self.dynamics_before = chain.filtered
+            self.dynamics_after = chain.pre_output
+            self.dynamics_preview = result.dynamics_preview
+            self.output_before = chain.pre_output
+            self.output_after = chain.pre_limiter
+            self.output_preview = result.output_preview
             self.limiter_before = self.output_after
-            self.limiter_after = result[4].output
-            self.limiter_preview = result[8] if len(result) > 8 else None
+            self.limiter_after = chain.output
+            self.limiter_preview = result.limiter_preview
         self.apply_comparison("mastering", Side.BEFORE)
         self.plot_spectra()
         spec = self.output[2]
@@ -1644,11 +1665,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_plot.setYRange(-8, 8, padding=0)
 
     def sections_rendered(self, payload, learn=True):
-        result, spectrum, previews = payload[:3]
-        output = payload[3].output if len(payload) > 3 else result.audio
-        self.processed(
-            (output, spectrum, result.curves[0].filter, previews, *payload[3:]), learn=False
-        )
+        result, rendered = payload
+        self.processed(rendered, learn=False)
         if learn:
             self.project.match_mode = "sections"
             self.record_calibration(sections=result.curves)
