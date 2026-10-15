@@ -114,6 +114,10 @@ step. Step comparison should coordinate the visible signal with the audible
 before/after choice. Show actual processing values; preview-only level matching
 must not disguise exported peaks or silently rescale analysis.
 
+The scrolling processing inspector includes [before/after stage measurements](stage-measurements.md):
+sample peak and integrated LUFS for the exact raw comparison pair, over the whole
+recording or the selected passage. These readings do not use audition gain matching.
+
 When output needs rendering, retain the waveform context and label pending/stale
 results. Do not show a cached old output as though it used the new settings.
 

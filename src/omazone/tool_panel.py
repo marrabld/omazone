@@ -16,6 +16,36 @@ class CurrentPageStack(QtWidgets.QStackedWidget):
         page = self.currentWidget()
         return page.minimumSizeHint() if page is not None else super().minimumSizeHint()
 
+    def heightForWidth(self, width):
+        # QStackedLayout otherwise budgets for hidden pages too. That creates
+        # empty space before shared inspector content below the selected page.
+        page = self.currentWidget()
+        if page is None:
+            return super().heightForWidth(width)
+        height = page.heightForWidth(width)
+        return height if height >= 0 else page.sizeHint().height()
+
+
+class InspectorContent(QtWidgets.QWidget):
+    def heightForWidth(self, width):
+        # Ask each widget explicitly: Qt's QWidgetItem can bypass a stack's
+        # override and ask its all-pages QStackedLayout for height-for-width.
+        layout = self.layout()
+        margins = layout.contentsMargins()
+        heights = []
+        for index in range(layout.count()):
+            widget = layout.itemAt(index).widget()
+            if widget is not None and not widget.isHidden():
+                height = widget.heightForWidth(width - margins.left() - margins.right())
+                heights.append(max(
+                    widget.minimumSizeHint().height(),
+                    height if height >= 0 else widget.sizeHint().height(),
+                ))
+        return (
+            sum(heights) + max(0, len(heights) - 1) * layout.spacing()
+            + margins.top() + margins.bottom()
+        )
+
 
 class ToolPanel(QtWidgets.QWidget):
     currentChanged = QtCore.Signal(int)
@@ -33,7 +63,12 @@ class ToolPanel(QtWidgets.QWidget):
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        self.scroll_area.setWidget(self.stack)
+        self.settings_content = InspectorContent()
+        self.settings_layout = QtWidgets.QVBoxLayout(self.settings_content)
+        self.settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        self.settings_layout.addWidget(self.stack)
+        self.scroll_area.setWidget(self.settings_content)
         layout.addWidget(self.scroll_area, 1)
         self.action_bar = QtWidgets.QWidget()
         self.action_layout = QtWidgets.QHBoxLayout(self.action_bar)
