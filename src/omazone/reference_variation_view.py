@@ -8,7 +8,7 @@ from scipy.interpolate import PchipInterpolator
 from .reference_variation import DB_EDGES, FLOOR_DB, MIN_WINDOWS, band_density
 
 
-def smooth_display(centres, values, x):
+def smooth_display(centres, values, x, edges=None):
     """Shape-preserving interpolation in log frequency, never across missing bands."""
     result = np.full(x.shape, np.nan)
     supported = np.flatnonzero(np.isfinite(values))
@@ -20,6 +20,8 @@ def smooth_display(centres, values, x):
             x <= (right if run[-1] != len(centres) - 1 else np.inf)
         )
         if len(run) == 1:
+            if edges is not None:
+                mask = (x >= edges[run[0]]) & (x <= edges[run[0] + 1])
             result[mask] = values[run[0]]
         else:
             result[mask] = PchipInterpolator(centres[run], values[run])(
@@ -32,7 +34,9 @@ def display_envelope(variation, x):
     centres = np.log10(variation.frequency)
 
     def interpolate(values):
-        return smooth_display(centres, np.where(variation.valid, values, np.nan), x)
+        return smooth_display(
+            centres, np.where(variation.valid, values, np.nan), x, np.log10(variation.edges)
+        )
 
     median = interpolate(variation.median_db)
     # Interpolate nonnegative distances so boundaries cannot cross the median.
@@ -57,6 +61,14 @@ def density_image(variation):
     mass = variation.counts / np.maximum(variation.band_counts[:, None], 1)
     mass = np.where(variation.valid[:, None], mass, np.nan)
     density = np.array([np.interp(x, centres, row) for row in mass.T]).T
+    isolated = (
+        variation.valid & ~np.r_[False, variation.valid[:-1]] & ~np.r_[variation.valid[1:], False]
+    )
+    for band in np.flatnonzero(isolated):
+        # One supported band has no neighbour to interpolate toward. Its
+        # histogram describes its own bandwidth, not an invisible single point.
+        mask = (x >= np.log10(variation.edges[band])) & (x <= np.log10(variation.edges[band + 1]))
+        density[mask] = mass[band]
     density = np.repeat(density, subdivisions, axis=1)
     lower, _, upper = display_envelope(variation, x)
     display_edges = np.linspace(DB_EDGES[0], DB_EDGES[-1], len(density[0]) + 1)
@@ -93,6 +105,10 @@ class ReferenceVariationView(QtWidgets.QGroupBox):
         super().__init__("Reference variation")
         self.owner = owner
         self.image = None
+        # One-entry identity cache, holding only the small analysis and raster.
+        # Plot.clear() detaches the item; it can be reused on the next redraw.
+        self._density_variation = None
+        self._density_item = None
         # Keep the small profile alive while its id is in the spectrum key.
         # Otherwise replacing a target can reuse that id and leave an old image.
         self.target = None
@@ -175,14 +191,18 @@ class ReferenceVariationView(QtWidgets.QGroupBox):
             plot.setLabel("left", "Power", units="dB")
             return False
         variation = target.variation
-        self.image = SmoothDensityImage(density_image(variation), axisOrder="col-major")
+        if self._density_variation is not variation:
+            self._density_item = SmoothDensityImage(density_image(variation), axisOrder="col-major")
+            self._density_variation = variation
+        self.image = self._density_item
         x0, x1 = np.log10(variation.edges[[0, -1]])
         self.image.setRect(QtCore.QRectF(x0, FLOOR_DB, x1 - x0, -FLOOR_DB))
         self.image.setZValue(-10)
         plot.addItem(self.image, ignoreBounds=True)
         centres = np.log10(variation.frequency)
+        edges = np.log10(variation.edges)
         # Include measured centres exactly, alongside dense display-only samples.
-        x = np.unique(np.r_[centres, np.linspace(centres[0], centres[-1], len(centres) * 64)])
+        x = np.unique(np.r_[centres, edges, np.linspace(edges[0], edges[-1], len(centres) * 64)])
         frequency = 10**x
         lower, median, upper = display_envelope(variation, x)
         curves = []
@@ -225,7 +245,7 @@ class ReferenceVariationView(QtWidgets.QGroupBox):
                 )
                 plot.plot(
                     frequency,
-                    smooth_display(centres, band_density(spectrum, variation.edges), x),
+                    smooth_display(centres, band_density(spectrum, variation.edges), x, edges),
                     pen=pg.mkPen(colour, width=1.5, style=style),
                     name=name,
                     connect="finite",
