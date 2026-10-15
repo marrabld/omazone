@@ -5,17 +5,9 @@ import pyqtgraph as pg
 from PySide6 import QtCore
 
 from .manual_eq import frequency_response
+from .response_canvas import ResponseCanvas
 
 COLORS = ("#63dfc0", "#eabb6b", "#c99bff", "#73a8ff", "#ff9086", "#83cfef")
-
-
-def display_spectrum(spectrum):
-    """Auto-scale spectral density for the background; left axis remains EQ dB."""
-    spacing = spectrum.frequency[1] - spectrum.frequency[0]
-    density = spectrum.power / max(np.sum(spectrum.power) * spacing, 1e-30)
-    db = 10 * np.log10(np.maximum(density[1:], 1e-15))
-    ceiling = np.percentile(db, 98)
-    return spectrum.frequency[1:], np.clip((db - ceiling) * 0.5 + 8, -12, 12)
 
 
 class BandHandle(pg.TargetItem):
@@ -64,7 +56,7 @@ class BandHandle(pg.TargetItem):
         self.label().setVisible(not ev.isExit())
 
 
-class EQCanvas(pg.PlotWidget):
+class EQCanvas(ResponseCanvas):
     moved = QtCore.Signal(int, float, float)
     committed = QtCore.Signal(int)
     selected = QtCore.Signal(int)
@@ -72,21 +64,7 @@ class EQCanvas(pg.PlotWidget):
     placed = QtCore.Signal(float, float)
 
     def __init__(self, axis_type):
-        super().__init__(axisItems={"bottom": axis_type(orientation="bottom")})
-        self.setLogMode(x=True)
-        self.setLabel("bottom", "Frequency", units="Hz")
-        self.setLabel("left", "EQ gain", units="dB")
-        self.getAxis("bottom").enableAutoSIPrefix(False)
-        self.setXRange(np.log10(20), np.log10(20000), padding=0)
-        self.getViewBox().setLimits(xMin=np.log10(20), xMax=np.log10(20000), yMin=-20, yMax=20)
-        self.getViewBox().setMouseEnabled(x=False, y=False)
-        self.setYRange(-12, 12, padding=0)
-        self.showGrid(x=True, y=True, alpha=0.12)
-        self.plot([20, 20000], [0, 0], pen=pg.mkPen("#647085", style=QtCore.Qt.PenStyle.DashLine))
-        self.input_curve = self.plot(
-            pen=pg.mkPen("#73a8ff", width=1), fillLevel=-12, brush=pg.mkBrush(115, 168, 255, 35)
-        )
-        self.output_curve = self.plot(pen=pg.mkPen("#eabb6b", width=1))
+        super().__init__(axis_type)
         self.response = self.plot(pen=pg.mkPen("#63dfc0", width=3))
         self.individual = self.plot(
             pen=pg.mkPen("#ffffff", width=1, style=QtCore.Qt.PenStyle.DashLine)
@@ -177,16 +155,3 @@ class EQCanvas(pg.PlotWidget):
             self.setTitle(f"Manual EQ | {scope}" + (" | bypassed" if bypassed else ""))
         finally:
             self.updating = False
-
-    def set_spectra(self, before=None, after=None, previous=None):
-        if before is None:
-            self.input_curve.clear()
-        else:
-            frequency, values = display_spectrum(before)
-            if previous is not None and len(previous) == len(values):
-                values = 0.35 * values + 0.65 * previous
-            self.input_curve.setData(frequency, values)
-        if after is None:
-            self.output_curve.clear()
-        else:
-            self.output_curve.setData(*display_spectrum(after))
