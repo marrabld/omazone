@@ -126,6 +126,7 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#70](https://github.com/marrabld/omazone/issues/70) | Confirm the layout works at laptop widths below 1440px | Layout #36, #38 |
 | [#86](https://github.com/marrabld/omazone/issues/86) | Remember an audition output device with exact-format checks; implemented, real-platform listening pending | #14 |
 | [#87](https://github.com/marrabld/omazone/issues/87) | Before/after sample peak and integrated LUFS per stage; implemented with scoped background measurements | Comparison #27 |
+| [#98](https://github.com/marrabld/omazone/issues/98) | Reference envelope/density display first; optional range-aware matching planned next | Reference targets #16 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -292,6 +293,8 @@ with a fixed EQ cut; listen for clicks, pumping and crossover colouration.
 - [ ] Offer longer FIR filters and show the latency/resolution tradeoff.
 - [ ] Explore minimum-phase matching as an alternative to linear phase.
 - [x] Save reference spectral profiles.
+- [x] Show measured within-passage reference variation and empirical density, without changing ordinary matching. See [reference variation](docs/reference-variation.md).
+- [ ] Add deterministic, optional Range-aware matching using conservative correction toward a reference range (#98). Bootstrap stability reporting remains separate stretch work.
 - [x] Save whole-song matching settings and retained learned curves in project recipes.
 - [ ] Profile memory and render time on full-length songs.
 

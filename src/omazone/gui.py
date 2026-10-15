@@ -33,6 +33,8 @@ from .pipeline import ChainRenderer
 from .playback import AuditionProcessor, PlaybackCursor
 from .project import STAGES, AudioReference, MatchCalibration, Project
 from .project_controller import ProjectController
+from .reference_variation import analyse_variation
+from .reference_variation_view import ReferenceVariationView
 from .render_payload import RenderPayload
 from .section_view import SectionWorkbench
 from .sections import TargetProfile
@@ -109,11 +111,11 @@ class SeekSlider(QtWidgets.QSlider):
         )
 
 
-def load_audio(path):
+def load_audio(path, include_reference_variation=False):
     audio, rate = sf.read(path, always_2d=True, dtype="float64")
     if audio.shape[1] > 2:
         raise ValueError("This workbench supports mono and stereo files.")
-    return (
+    result = (
         audio,
         rate,
         analyse(audio, rate),
@@ -121,6 +123,7 @@ def load_audio(path):
         PeakIndex(audio),
         AudioReference.from_path(path),
     )
+    return (*result, analyse_variation(audio, rate)) if include_reference_variation else result
 
 
 class FrequencyAxis(pg.AxisItem):
@@ -566,6 +569,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.match_sections_link.clicked.connect(self.go_to_sections)
         match_layout.addWidget(self.match_sections_link)
         match_layout.addWidget(self.mastering_controls)
+        self.reference_variation = ReferenceVariationView(self)
+        self.views.settings_layout.insertWidget(1, self.reference_variation)
         match_layout.addStretch(1)
         for index in range(self.views.stack.count()):
             page = self.views.stack.widget(index)
@@ -1470,7 +1475,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def load_audio_path(self, target, path):
         self.start_job(
-            lambda: load_audio(path),
+            lambda: load_audio(path, include_reference_variation=target == "reference"),
             lambda data: self.loaded(target, data),
             "Loading and analysing…",
         )
@@ -1488,6 +1493,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                     data[1],
                     SampleRegion(0, len(data[0])),
                     data[3],
+                    data[6] if len(data) > 6 else None,
                 )
         setattr(self, target, data)
         if target == "source":
@@ -2337,7 +2343,7 @@ def main():
         finally:
             window.project.mark_saved()
             window.close()
-        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ and limiter")
+        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter and reference variation")
         return
     sys.exit(app.exec())
 

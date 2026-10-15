@@ -16,6 +16,13 @@ from .engine import (
     render,
     validate_audio,
 )
+from .reference_variation import (
+    ReferenceVariation,
+    analyse_variation,
+    parse_variation,
+    validate_variation,
+    variation_dict,
+)
 from .waveform import SampleRegion
 
 
@@ -27,6 +34,7 @@ class TargetProfile:
     sample_rate: int
     region: SampleRegion
     source_name: str
+    variation: ReferenceVariation | None = None
 
 
 @dataclass(frozen=True)
@@ -74,7 +82,8 @@ def capture_target(audio, rate, region, name, target_id, source_name):
     if not name.strip() or not target_id:
         raise ValueError("Targets need a name and a unique identifier.")
     spectrum = analyse(audio[region.start : region.end], rate)
-    return TargetProfile(target_id, name.strip(), spectrum, rate, region, source_name)
+    variation = analyse_variation(audio[region.start:region.end], rate)
+    return TargetProfile(target_id, name.strip(), spectrum, rate, region, source_name, variation)
 
 
 def validate_profile(profile, minimum_seconds=0.1):
@@ -101,6 +110,10 @@ def validate_profile(profile, minimum_seconds=0.1):
         raise ValueError("Target frequency grid is invalid.")
     if np.any(power < 0) or np.sum(power) <= 1e-24:
         raise ValueError("Target spectrum is silent or invalid.")
+    if profile.variation is not None:
+        validate_variation(profile.variation)
+        if profile.variation.rate != profile.sample_rate or profile.variation.frames != profile.region.end - profile.region.start:
+            raise ValueError("Reference variation does not describe this target passage.")
 
 
 def save_targets(path, profiles):
@@ -120,11 +133,13 @@ def save_targets(path, profiles):
                 "region": asdict(profile.region),
                 "frequency": profile.spectrum.frequency.tolist(),
                 "power": profile.spectrum.power.tolist(),
+                **({"variation": variation_dict(profile.variation)} if profile.variation is not None else {}),
             }
         )
     Path(path).write_text(
         json.dumps(
-            {"format": "omazone-targets", "version": 1, "targets": entries}, allow_nan=False
+            {"format": "omazone-targets", "version": 2 if any("variation" in item for item in entries) else 1,
+             "targets": entries}, allow_nan=False
         ),
         encoding="utf-8",
     )
@@ -136,7 +151,7 @@ def load_targets(path):
         if (
             data["format"] != "omazone-targets"
             or type(data["version"]) is not int
-            or data["version"] != 1
+            or data["version"] not in (1, 2)
         ):
             raise ValueError("Unsupported target-profile format or version.")
         if not isinstance(data["targets"], list):
@@ -144,6 +159,8 @@ def load_targets(path):
         profiles = []
         ids = set()
         for entry in data["targets"]:
+            if data["version"] == 1 and "variation" in entry:
+                raise ValueError("Reference variation requires target-profile version 2.")
             profile = TargetProfile(
                 entry["id"],
                 entry["name"],
@@ -154,6 +171,7 @@ def load_targets(path):
                 entry["sample_rate"],
                 SampleRegion(**entry["region"]),
                 entry["source_name"],
+                parse_variation(entry.get("variation")),
             )
             validate_profile(profile)
             if profile.id in ids:
