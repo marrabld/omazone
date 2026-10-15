@@ -23,6 +23,7 @@ from .engine import (
     rms_db,
 )
 from .export_view import ExportView
+from .filter_view import FilterView
 from .manual_eq_view import ManualEQView
 from .output_view import OutputView
 from .pipeline import ChainRenderer
@@ -356,6 +357,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.section_workbench = SectionWorkbench(self)
         self.clipping_inspector = ClippingInspector(self)
         self.manual_eq_view = ManualEQView(self)
+        self.filter_view = FilterView(self)
         self.compressor_view = CompressorView(self)
         self.output_view = OutputView(self)
         self.export_view = ExportView(self)
@@ -368,6 +370,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             (self.section_workbench.reference_page, "reference"),
             (self.section_workbench, "sections"),
             (self.manual_eq_view, "eq"),
+            (self.filter_view, "filters"),
             (self.compressor_view, "dynamics"),
             (self.output_view, "output"),
             (self.export_view, "export"),
@@ -393,6 +396,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.manual_eq_view.canvas,
             self.compressor_view.canvas,
             self.output_view.canvas,
+            self.filter_view.canvas,
         )
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.workspace_split.addWidget(self.workspace)
@@ -470,6 +474,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         ]
         self.views.action_layout.addWidget(self.manual_eq_view.render_button)
         self.task_actions.append(self.manual_eq_view.render_button)
+        self.views.action_layout.addWidget(self.filter_view.render_button)
+        self.task_actions.append(self.filter_view.render_button)
         self.views.action_layout.addWidget(self.compressor_view.render_button)
         self.task_actions.append(self.compressor_view.render_button)
         self.views.layout().insertWidget(
@@ -535,6 +541,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         for index in range(self.views.stack.count()):
             page = self.views.stack.widget(index)
             for label in page.findChildren(QtWidgets.QLabel):
+                if label.property("formLabel"):
+                    continue
                 label.setWordWrap(True)
                 label.setSizePolicy(
                     QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
@@ -758,7 +766,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if stage == "limiter":
             return step_for("output")
         if stage == "filters":
-            return step_for("eq")
+            return step_for("filters")
         return next((item for item in STEPS if item.stage == stage and not item.secondary), None)
 
     def apply_comparison(self, key=None, side=None):
@@ -884,6 +892,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.manual_eq_view.canvas.setEnabled(not busy and self.source is not None)
         self.manual_eq_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.manual_eq_view.listen_button.setEnabled(not busy and self.comparison("eq").available)
+        self.filter_view.setEnabled(not busy and self.source is not None)
+        self.filter_view.canvas.setEnabled(not busy and self.source is not None)
+        self.filter_view.render_button.setEnabled(not busy and workflow.render_allowed)
+        self.filter_view.listen_button.setEnabled(not busy and self.comparison("filters").available)
         self.compressor_view.setEnabled(not busy and self.source is not None)
         self.compressor_view.set_rendering(busy)
         self.compressor_view.canvas.setEnabled(not busy and self.source is not None)
@@ -908,10 +920,19 @@ class Window(ProjectController, QtWidgets.QMainWindow):
     def update_stage_summaries(self, workflow):
         for stage, view in (
             ("eq", self.manual_eq_view),
+            ("filters", self.filter_view),
             ("dynamics", self.compressor_view),
             ("output", self.output_view),
         ):
             status = self.eq_status(workflow) if stage == "eq" else workflow.stages[stage]
+            if stage == "filters":
+                view.summary.setText(
+                    view.invalid_recipe or (
+                        "Filters rendered. A/B isolates these filters; export contains the full chain."
+                        if status.state is RenderState.READY else status.reason
+                    )
+                )
+                continue
             if not status.comparison_available:
                 view.summary.setText(status.reason)
 
@@ -923,6 +944,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         reference = self.views.currentWidget() is self.section_workbench.reference_page
         clipping = self.views.currentWidget() is self.clipping_inspector
         manual_eq = self.views.currentWidget() is self.manual_eq_view
+        filters = self.views.currentWidget() is self.filter_view
         compressor = self.views.currentWidget() is self.compressor_view
         output = self.views.currentWidget() is self.output_view
         exporting = self.views.currentWidget() is self.export_view
@@ -945,6 +967,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             shown.add(self.clipping_inspector.primary_action())
         elif manual_eq:
             shown.add(self.manual_eq_view.render_button)
+        elif filters:
+            shown.add(self.filter_view.render_button)
         elif compressor:
             shown.add(self.compressor_view.render_button)
         elif output:
@@ -1008,6 +1032,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 if stage.state is RenderState.READY
                 else stage.reason
             )
+        elif filters:
+            stage = workflow.stages["filters"]
+            message = "Filters rendered. Compare this step or export the full chain." if stage.state is RenderState.READY else stage.reason
         elif compressor:
             stage = workflow.stages["dynamics"]
             message = (
@@ -1191,7 +1218,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             # new result can be rendered before moving to Export.
             following = None
         if step.key == "eq" and not self.project.stages["filters"].bypassed:
-            following = None
+            following = step_for("filters") if not bypassing else None
         if following is not None:
             self.views.setStep(following.key)
 
@@ -1210,7 +1237,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         return workflow.stages[step.stage]
 
     def eq_status(self, workflow):
-        """Manual EQ also routes corrective-filter status until its inspector lands."""
+        """The Manual EQ navigation group contains bell EQ and corrective filters."""
         eq, filters = workflow.stages["eq"], workflow.stages["filters"]
         if eq.state is RenderState.SKIPPED or (eq.can_continue and not filters.can_continue):
             return filters if filters.state is not RenderState.SKIPPED else eq
@@ -1320,6 +1347,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.configure_workflow_layout()
         if self.views.currentWidget() is self.manual_eq_view:
             self.manual_eq_view.draw_response()
+        if self.views.currentWidget() is self.filter_view:
+            self.filter_view.draw_response()
         if self.views.currentWidget() is self.compressor_view:
             self.compressor_view.draw()
         if self.views.currentWidget() is self.output_view:
@@ -1407,6 +1436,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.renderer = None
             self.renderer_key = None
             self.manual_eq_view.restore()
+            self.filter_view.restore()
             self.compressor_view.restore()
             self.output_view.restore()
             with QtCore.QSignalBlocker(self.seek_slider):
@@ -1637,6 +1667,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         tool = self.views.currentWidget()
         key = {
             id(self.manual_eq_view): "eq",
+            id(self.filter_view): "filters",
             id(self.compressor_view): self.compressor_view.comparison_key,
             id(self.output_view): self.output_view.comparison_key,
         }.get(id(tool))
@@ -1771,7 +1802,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if self.stream is not None and not self.playing:
             self.stop()
         self.update_transport()
-        if self.playing and self.views.currentWidget() is self.manual_eq_view:
+        if self.playing and self.views.currentWidget() in (self.manual_eq_view, self.filter_view):
             if not self.workspace.timer.isActive():
                 self.workspace.timer.start()
 

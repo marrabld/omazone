@@ -58,8 +58,9 @@ STEPS = (
         "reference", "Reference targets", "match", part_of="match", secondary=True, short="Targets"
     ),
     Step("sections", "Mix sections", "match", part_of="match", secondary=True, short="Sections"),
-    # Until the filters inspector is added, its status routes to Manual EQ.
-    Step("eq", "Manual EQ", "eq", spectral=True, skippable=True, aliases=("filters",), short="EQ"),
+    Step("eq", "Manual EQ", "eq", spectral=True, skippable=True, short="EQ"),
+    Step("filters", "Corrective filters", "filters", part_of="eq", spectral=True,
+         skippable=True, secondary=True, short="Filters"),
     Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True, aliases=("band-solo",), short="Dynamics"),
     Step(
         "output",

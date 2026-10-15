@@ -59,7 +59,7 @@ developers, and people who enjoy building audio interfaces are welcome.
   routes you to whichever stage is holding up delivery.
 
 Output gain, LUFS, true-peak metering and an optional final limiter are implemented.
-The next processing features are dynamic EQ and three-band compression; see the roadmap.
+Three-band compression is implemented. Dynamic EQ remains planned; see the roadmap.
 See the [approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for
 implementation priorities and contribution tasks.
 
@@ -564,6 +564,11 @@ freezes playback on the original and disables comparison, which is why the liste
 button then reads "Listening: original"; choose **View → Step input** to come back.
 
 ![Manual EQ graph with draggable bands and a combined response over the spectrum](docs/images/omazone-manual-eq.png)
+
+For high-pass, low-pass and notch filters, open **Corrective filters** inside
+Manual EQ. These apply to the whole recording after bell EQ and before dynamics,
+with independent bypass and filter-only A/B. See the
+[filter controls, response screenshot and phase tradeoffs](docs/filters.md).
 
 **View → Both** shows the region and spectrum together. Purple dashed windows mark
 entry/exit fades inside the selected region. They shorten if the passage is too

@@ -110,7 +110,7 @@ CONFIGURE_GUIDANCE = {
     "repair": "Find and accept peaks to repair, or skip this step.",
     "match": "Analyse the reference to build a filter, or skip this step.",
     "eq": "Add a band to use this step, or skip it.",
-    "filters": "Configure corrective filters in a saved recipe, or skip them in Project > Stage bypass.",
+    "filters": "Add and enable a corrective filter, or skip this step.",
     "dynamics": "Set threshold and ratio, then render.",
     "output": "Set output gain, then render.",
     "limiter": "Set the limiter ceiling, then render.",

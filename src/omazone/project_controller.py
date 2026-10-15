@@ -239,6 +239,7 @@ class ProjectController:
             self.restoring_project = False
         self.refresh_named_regions()
         self.manual_eq_view.restore()
+        self.filter_view.restore()
         self.compressor_view.restore()
         self.output_view.restore()
         self.update_project_title()
@@ -429,6 +430,7 @@ class ProjectController:
         self.refresh_named_regions()
         self.update_project_title()
         self.manual_eq_view.restore()
+        self.filter_view.restore()
         self.compressor_view.restore()
         self.output_view.restore()
         self.plot_spectra()
@@ -473,6 +475,7 @@ class ProjectController:
             self.manual_eq_view.restore()
         elif stage == "filters":
             self.invalidate_filters()
+            self.filter_view.restore()
         elif stage == "dynamics":
             self.invalidate_dynamics()
             self.compressor_view.restore()

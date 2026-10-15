@@ -36,7 +36,8 @@ VIEWER_MODES = ("waveform", "spectrum", "both")
 
 class SongWorkspace(QtWidgets.QWidget):
     def __init__(
-        self, owner, waveform, spectra, reference, eq_canvas, compressor_canvas, output_canvas
+        self, owner, waveform, spectra, reference, eq_canvas, compressor_canvas, output_canvas,
+        filter_canvas,
     ):
         super().__init__()
         self.owner, self.waveform, self.reference_waveform = owner, waveform, reference
@@ -183,6 +184,8 @@ class SongWorkspace(QtWidgets.QWidget):
         self.plot_stack.addWidget(spectra)
         self.eq_canvas = eq_canvas
         self.plot_stack.addWidget(eq_canvas)
+        self.filter_canvas = filter_canvas
+        self.plot_stack.addWidget(filter_canvas)
         self.compressor_canvas = compressor_canvas
         self.plot_stack.addWidget(compressor_canvas)
         self.output_canvas = output_canvas
@@ -295,6 +298,8 @@ class SongWorkspace(QtWidgets.QWidget):
         self.plot_stack.setCurrentWidget(
             self.eq_canvas
             if tool is self.owner.manual_eq_view
+            else self.filter_canvas
+            if tool is self.owner.filter_view
             else self.compressor_canvas
             if tool is self.owner.compressor_view
             else self.output_canvas
@@ -310,6 +315,7 @@ class SongWorkspace(QtWidgets.QWidget):
         key = self.owner.views.currentStep()
         if key != self.active_tool:
             self.active_tool = key
+            self.live_spectrum = self.live_scope_end = None
             self.mode.setCurrentIndex(self.mode.findData(self.tool_modes.get(key, "waveform")))
         matching = key == "match"
         self.mode_actions["spectrum"].setText(
@@ -337,6 +343,7 @@ class SongWorkspace(QtWidgets.QWidget):
         widget = self.owner.views.currentWidget()
         for view, key in (
             (self.owner.manual_eq_view, "eq"),
+            (self.owner.filter_view, "filters"),
             (self.owner.compressor_view, self.owner.compressor_view.comparison_key),
             (self.owner.output_view, self.owner.output_view.comparison_key),
         ):
@@ -351,6 +358,8 @@ class SongWorkspace(QtWidgets.QWidget):
             return "Repair" + (" preview (stage skipped)" if stages["repair"].bypassed else "")
         if key == "eq":
             return "Manual EQ" + (" (bypassed)" if stages["eq"].bypassed else "")
+        if key == "filters":
+            return "Corrective filters | whole recording" + (" (bypassed)" if stages["filters"].bypassed else "")
         if key == "dynamics":
             return "Compression" + (" (bypassed)" if stages["dynamics"].bypassed else "")
         if key == "band-solo":
@@ -385,6 +394,7 @@ class SongWorkspace(QtWidgets.QWidget):
     def reference_target(self):
         if self.owner.views.currentWidget() in (
             self.owner.manual_eq_view,
+            self.owner.filter_view,
             self.owner.compressor_view,
             self.owner.output_view,
         ):
@@ -509,6 +519,7 @@ class SongWorkspace(QtWidgets.QWidget):
                 self.owner.spectrum_plot.clear()
                 self.owner.eq_plot.clear()
                 self.eq_canvas.set_spectra()
+                self.filter_canvas.set_spectra()
                 self.compressor_canvas.show_result(None)
                 self.output_canvas.show_peaks((None, None, None))
                 # No audio on screen means one of two quite different things:
@@ -579,6 +590,9 @@ class SongWorkspace(QtWidgets.QWidget):
                     )
                 if self.owner.views.currentWidget() is self.owner.manual_eq_view:
                     self.owner.manual_eq_view.draw_response()
+                elif self.owner.views.currentWidget() is self.owner.filter_view:
+                    self.waveform.set_eq_scope(None)
+                    self.owner.filter_view.draw_response()
                 elif self.owner.views.currentWidget() is self.owner.compressor_view:
                     self.owner.compressor_view.draw()
                 elif self.owner.views.currentWidget() is self.owner.output_view:
@@ -763,12 +777,13 @@ class SongWorkspace(QtWidgets.QWidget):
             return
         before, after, rate, title = self.spectral_pair()
         selected = self.waveform.selection
-        eq = self.owner.views.currentWidget() is self.owner.manual_eq_view
+        canvas = self.active_response_canvas()
+        eq = canvas is not None
         region = self.spectrum_scope(before, rate, selected, eq)
         if region[1] - region[0] < max(2, round(rate * 0.1)):
             self.requested_key = None
             if eq:
-                self.eq_canvas.set_spectra()
+                canvas.set_spectra()
             else:
                 self.owner.spectrum_plot.clear()
                 self.owner.spectrum_plot.setTitle(
@@ -795,14 +810,15 @@ class SongWorkspace(QtWidgets.QWidget):
             return
         actual_before, actual_after, rate, title = self.spectral_pair()
         selection = self.waveform.selection
-        eq = self.owner.views.currentWidget() is self.owner.manual_eq_view
+        canvas = self.active_response_canvas()
+        eq = canvas is not None
         region = self.spectrum_scope(actual_before, rate, selection, eq)
         target = self.reference_target() if self.owner.views.currentStep() != "repair" else None
         if key != (id(actual_before), id(actual_after), rate, region, id(target), title):
             return
         if eq:
             if error:
-                self.eq_canvas.set_spectra()
+                canvas.set_spectra()
             else:
                 previous = (
                     self.live_spectrum
@@ -811,9 +827,9 @@ class SongWorkspace(QtWidgets.QWidget):
                     and 0 < region[1] - self.live_scope_end <= rate // 3
                     else None
                 )
-                self.eq_canvas.set_spectra(before, after, previous)
+                canvas.set_spectra(before, after, previous)
                 self.live_spectrum = (
-                    self.eq_canvas.input_curve.yData if self.owner.playing else None
+                    canvas.input_curve.yData if self.owner.playing else None
                 )
                 self.live_scope_end = region[1] if self.owner.playing else None
             self.completed_key = key
@@ -834,6 +850,14 @@ class SongWorkspace(QtWidgets.QWidget):
             if target:
                 self.owner.draw_spectrum(target.spectrum, "Reference target", "#eabb6b")
         self.completed_key = key
+
+    def active_response_canvas(self):
+        tool = self.owner.views.currentWidget()
+        if tool is self.owner.manual_eq_view:
+            return self.eq_canvas
+        if tool is self.owner.filter_view:
+            return self.filter_canvas
+        return None
 
     def spectrum_scope(self, before, rate, selection, eq):
         if eq and self.owner.playing:
