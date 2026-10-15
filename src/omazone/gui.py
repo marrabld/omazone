@@ -1917,6 +1917,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         return self.stream is None
 
     def check_playback(self):
+        # A missed activity-timer tick should catch up whenever the existing UI
+        # heartbeat runs again. No additional timer or audio-thread work.
+        self.compressor_view.update_render_message()
         if self.stream is not None and self.playing:
             try:
                 if not self.stream.active:

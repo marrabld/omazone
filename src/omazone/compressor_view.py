@@ -249,6 +249,7 @@ class CompressorView(QtWidgets.QWidget):
         self.render_progress.setAccessibleName("Rendering in progress")
         activity_layout.addWidget(self.render_progress)
         self.render_activity.hide()
+        self.rendering = False
         self.render_elapsed = QtCore.QElapsedTimer()
         self.render_timer = QtCore.QTimer(self)
         self.render_timer.setInterval(1000)
@@ -321,22 +322,32 @@ class CompressorView(QtWidgets.QWidget):
         self.restore()
 
     def set_rendering(self, busy):
-        if busy and not self.render_timer.isActive():
+        # Timer delivery is not the render's lifetime: a delayed/stopped timer
+        # must not rebase the clock when another UI refresh catches up.
+        if busy and not self.rendering:
             self.render_elapsed.start()
-            self.render_timer.start()
+        self.rendering = busy
+        if busy:
+            if not self.render_timer.isActive():
+                self.render_timer.start()
             self.update_render_message()
-        elif not busy:
+        else:
             self.render_timer.stop()
+            self.render_elapsed.invalidate()
         self.render_activity.setVisible(
             busy and self.owner.views.currentWidget() in (self, self.owner.output_view)
         )
 
     def update_render_message(self):
+        if not self.rendering or not self.render_elapsed.isValid():
+            return
         seconds = self.render_elapsed.elapsed() // 1000
-        self.render_message.setText(
+        message = (
             f"Processing audio, {seconds}s elapsed. The full song is processed before "
             "comparison is ready. Longer songs can take a while."
         )
+        if message != self.render_message.text():
+            self.render_message.setText(message)
 
     def spin(self, layout, name, low, high, value, suffix, decimals):
         layout.addWidget(QtWidgets.QLabel(name))
