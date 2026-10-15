@@ -497,6 +497,8 @@ def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch, unsmoothed_
     import sounddevice as sd
 
     class FakeStream:
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
             self.options = kwargs
@@ -657,6 +659,9 @@ def test_default_audition_smooths_ab_seek_pause_and_resume_without_reopening_for
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -753,6 +758,9 @@ def test_scrubbing_resumes_at_requested_sample_before_or_after_pause_fade(
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -798,6 +806,9 @@ def test_selection_playback_looping_edits_and_mode_changes(monkeypatch, unsmooth
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -1088,6 +1099,9 @@ def test_selective_repair_audition_export_matching_and_reset(
     from omazone.sections import capture_target
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -1226,6 +1240,9 @@ def test_guided_clipping_flow_hides_details_and_handles_stereo_automatically(
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -1660,6 +1677,9 @@ def test_stage_viewer_and_playback_use_the_same_chain_prefixes(tmp_path, monkeyp
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -1791,6 +1811,9 @@ def test_comparison_model_covers_every_stage_and_preserves_cursor_and_loop(tmp_p
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -1920,6 +1943,9 @@ def test_a_running_stream_always_has_a_comparable_pair(tmp_path, monkeypatch):
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -2733,6 +2759,9 @@ def test_manual_region_eq_keeps_matching_and_compares_only_the_eq_step(
     from omazone.project import NamedRegion
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -3052,6 +3081,9 @@ def test_three_band_controls_solo_export_and_saved_mode_presets(
     from omazone.dynamics import settings_from_parameters as dynamics_settings
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -3214,6 +3246,9 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
     from omazone.manual_eq import render_eq
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -3350,6 +3385,9 @@ def test_final_limiter_output_ui_ab_export_and_retained_gain(
     from omazone.limiter import render_limiter
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 
@@ -3540,6 +3578,9 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch, un
     import sounddevice as sd
 
     class FakeStream:
+        active = True
+        latency = 0.05
+
         def __init__(self, **kwargs):
             self.callback = kwargs["callback"]
 

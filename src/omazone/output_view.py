@@ -139,6 +139,7 @@ class OutputView(QtWidgets.QWidget):
         )
         prompt.setWordWrap(True)
         layout.addWidget(prompt)
+        layout.addWidget(owner.audio_device_view)
         layout.addWidget(QtWidgets.QLabel("Output gain"))
         self.gain = QtWidgets.QDoubleSpinBox()
         self.gain.setRange(-36, 18)

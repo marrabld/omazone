@@ -12,6 +12,7 @@ import pyqtgraph as pg
 import soundfile as sf
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .audio_device_view import AudioDeviceView
 from .clipping_view import ClippingInspector
 from .comparison import ORIGINAL as ORIGINAL_ONLY
 from .comparison import SPECS, Side, StagePair, resolve, spec_for
@@ -243,6 +244,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.audition_mode = "mastering"
         self.worker = None
         self.stream = None
+        self._audio_stream_epoch = 0
         self.preview = None
         self.transport = PlaybackCursor()
         self.audition = AuditionProcessor()
@@ -360,6 +362,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.manual_eq_view = ManualEQView(self)
         self.filter_view = FilterView(self)
         self.compressor_view = CompressorView(self)
+        self.audio_device_view = AudioDeviceView(self)
         self.output_view = OutputView(self)
         self.export_view = ExportView(self)
         # Register every page once, in the order a learner moves through them.
@@ -1441,6 +1444,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.compressor_view.restore()
             self.output_view.restore()
             self.export_view.reset_delivery()
+            self.audio_device_view.source_changed()
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
@@ -1730,6 +1734,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         )
 
     def play(self):
+        if self.source is None or self.worker is not None:
+            return
         if self.playing:
             if self.audition.enabled:
                 if self.audition.pause_requested:
@@ -1741,7 +1747,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             else:
                 self.stop()
             return
-        self.stop()
+        if not self.stop():
+            return
         if self.preview is None:
             self.preview = self.comparison().playback_arrays
         if self.transport.region is not None:
@@ -1750,17 +1757,27 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 self.position = region.start
         elif self.position >= len(self.source[0]):
             self.position = 0
+        device = None
         try:
             import sounddevice as sd
 
+            device = self.audio_device_view.prepare_playback(
+                self.source[1], self.source[0].shape[1]
+            )
             self.playback_dropouts = 0
             self.reported_playback_dropouts = 0
             self.audition.prepare(
                 self.source[1], self.source[0].shape[1], 2048, self.listen_processed
             )
+            stream_epoch = self._audio_stream_epoch
 
             def callback(outdata, frames, time_info, status):
                 # Keep device diagnostics out of Qt and off the audio thread.
+                if stream_epoch != self._audio_stream_epoch:
+                    # A late callback from a stopped/unclosed stream must not
+                    # audition a new project or advance its cursor.
+                    outdata[:] = 0
+                    raise sd.CallbackStop
                 if status and status.output_underflow:
                     self.playback_dropouts += 1
                 if self.audition.fill(self.transport, self.preview, self.listen_processed, outdata):
@@ -1768,6 +1785,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                     raise sd.CallbackStop
 
             self.stream = sd.OutputStream(
+                device=device.index,
                 samplerate=self.source[1],
                 channels=self.source[0].shape[1],
                 dtype="float32",
@@ -1780,21 +1798,52 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.playing = True
             self.stream.start()
             self.play_button.setText("Pause")
+            self.audio_device_view.playback_started(
+                device, self.source[1], self.source[0].shape[1], self.stream.latency
+            )
         except Exception as error:  # noqa: BLE001 -- audio backend failures need a UI message
             self.stop()
-            self.error(f"Playback unavailable: {error}")
+            message = f"Playback unavailable{f' on {device.label}' if device else ''}: {error}"
+            self.audio_device_view.show_error(message)
+            self.error(message)
 
     def stop(self):
+        self._audio_stream_epoch += 1
         self.selection_timer.stop()
         self.resume_after_selection_edit = False
-        if self.stream is not None:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
         self.playing = False
         self.play_button.setText("Play")
+        self.audio_device_view.playback_stopped()
+        stream = self.stream
+        errors = []
+        if stream is not None:
+            try:
+                stream.stop()
+            except Exception as error:
+                errors.append(f"Could not stop audio output: {error}")
+            try:
+                stream.close()
+            except Exception as error:
+                errors.append(f"Could not close audio output: {error}. Retry Stop or restart Omazone.")
+            else:
+                self.stream = None
+        if errors:
+            message = " ".join(errors)
+            self.audio_device_view.show_error(message)
+            self.status.setText(message)
+        # Retain an unclosed stream so Play cannot open another over it.
+        return self.stream is None
 
     def check_playback(self):
+        if self.stream is not None and self.playing:
+            try:
+                if not self.stream.active:
+                    raise RuntimeError("The output stream stopped unexpectedly; the device may have disconnected.")
+            except Exception as error:
+                self.stop()
+                message = f"Audio output unavailable: {error} Refresh devices in Output and choose an output before retrying."
+                self.audio_device_view.show_error(message)
+                self.status.setText(message)
         if self.stream is not None and self.playback_dropouts > self.reported_playback_dropouts:
             self.reported_playback_dropouts = self.playback_dropouts
             self.status.setText(
