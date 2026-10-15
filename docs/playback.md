@@ -66,3 +66,58 @@ For a real-device listening check:
   contains the full rendered chain, not the preview fades.
 
 Windows/macOS audible device validation remains tracked in issue #14.
+
+## Listening device
+
+Open **Output > Listening device** to choose an output. The list includes the
+backend, output-channel capacity and reported default sample rate. Outputs with
+too few channels for the current recording are disabled. System default resolves
+the operating system's current output each time playback starts.
+
+The choice is remembered in local Omazone app preferences, not in the project or
+processing recipe. Named devices are stored by backend and name, never by the
+numeric index that PortAudio assigns for one session. Duplicate names within a
+backend cannot be distinguished safely; rename them in system settings or choose
+System default explicitly. A missing saved device stays selected and blocks
+playback until it returns or you choose another output.
+
+Changing the choice stops and closes the previous stream. Press Play to start on
+the new output. Refresh only updates the list; it does not switch a running
+stream. PortAudio may require restarting Omazone to discover newly connected
+devices. No fallback output is chosen after an error.
+
+Before opening a stream, Omazone checks the exact recording sample rate, mono or
+stereo channel count and float32 playback format. Audition is not resampled. A
+device's reported default rate is not its complete set of supported rates. If
+the check fails, try another output or check that device's system audio settings.
+Neither this check nor device selection changes processing or export samples.
+The OS audio server or device driver may perform its own conversion; Omazone
+does not claim a bit-perfect hardware path.
+
+**Copy diagnostics** copies the OS, selected output, last successfully opened
+device/backend, playback format, reported stream latency, underflow count and
+last error. It does not include recording or project paths. These are backend
+reports, not proof of audible correctness.
+
+### Windows and macOS listening report
+
+Use the development build containing device selection, and record its version
+or commit alongside the report in issue #14.
+
+1. Load a mono recording, then a stereo recording. Try 44.1 and 48 kHz where the
+   device supports them. Confirm stereo left/right routing with a known signal.
+2. Choose System default, then your interface or headphones explicitly. Press
+   Play after each change. Confirm sound comes only from the intended output.
+3. Repeat the A/B, seek, loop and pause checks above. Report clicks or dropouts,
+   including whether the loop endpoints themselves are discontinuous.
+4. Stop, disconnect the selected external device, refresh and try Play. Confirm
+   a clear error and no sound from an unintended output. Reconnect and retry;
+   restart the app if PortAudio does not discover it.
+5. Restart Omazone. Confirm the named choice survives, including a clear error
+   if the device is absent. Load another project and confirm it does not switch
+   your app-level output preference.
+6. Export a float WAV and play it in another application. Confirm the full chain
+   is present regardless of the audition side or device selection.
+7. Paste Copy diagnostics, OS version, app version, interface model and the
+   results. Note any driver/backend settings changed during the test. Do not
+   upload recordings unless you have permission.

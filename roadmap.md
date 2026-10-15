@@ -123,6 +123,7 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#54](https://github.com/marrabld/omazone/issues/54) | Share render and matching-analysis status across the UI | Chain #1 |
 | [#64](https://github.com/marrabld/omazone/issues/64) | Save a project when the recording has no relative path | Cross-drive storage |
 | [#70](https://github.com/marrabld/omazone/issues/70) | Confirm the layout works at laptop widths below 1440px | Layout #36, #38 |
+| [#86](https://github.com/marrabld/omazone/issues/86) | Remember an audition output device with exact-format checks; implemented, real-platform listening pending | #14 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
