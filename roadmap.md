@@ -47,41 +47,64 @@ optional View action and a persistent seek/time display. See
 
 ## Next development milestones
 
-1. **Output measurements, #9/#44.** Integrated LUFS is implemented: BS.1770-4
-   with gated silence and short-audio handling, shown beside the sample peaks and
-   used for preview matching that never changes export gain. See
-   [loudness](docs/loudness.md). Oversampled true peaks are also implemented; see
-   [true peak](docs/true-peak.md). Neither meter changes export gain or prevents
-   clipping on its own.
-2. **Final peak control, #45.** An optional stereo-linked lookahead limiter is
-   implemented after output gain, with a reconstructed-peak safety check,
-   reduction history and aligned stage-only A/B. See [limiting](docs/limiter.md).
-3. **Advanced dynamics, #8/#46.** The three-band crossover prototype is implemented
-   with verified neutral reconstruction, per-band compression and audition-only
-   solo. See [three-band compression](docs/multiband.md). Listen on real mixes
-   before expanding processing or starting the selective-filtering research #83.
-   One independent downward dynamic-EQ band is also implemented before compression;
-   see [dynamic EQ](docs/dynamic-eq.md).
+The working 1.0 priority is to finish useful matching and delivery, rather than
+add more processing modules. These are scoped features, not a release date or a
+claim of parity with a commercial mastering suite.
 
-#46 still benefits from real-mix listening and review. The corrective filters in
-#6 and the one-band dynamic EQ in #8 are implemented. Selective-filtering
-research #83 remains gated on using the three-band prototype.
-Neither #6 nor
-#14 appears in the plan above:
-#6 is a prerequisite rather than a goal, and #14 now covers only the audible
-platform checks that continuous integration cannot perform. A/B crossfades and
-smoothed seek/pause/resume transitions (#10) are implemented with callback-owned
-envelopes and aligned cursors. See [audition transitions](docs/playback.md).
+| Order | Feature | Acceptance focus |
+| --- | --- | --- |
+| 1 | [Optional range-aware correction #100](https://github.com/marrabld/omazone/issues/100) | Restrained, deterministic correction toward a supported reference range; ordinary matching stays the default. |
+| 2 | [Export sample-rate conversion #101](https://github.com/marrabld/omazone/issues/101) | Deliver at a chosen supported rate, with post-conversion measurements and safe final quantisation. |
+| 3 | [Loudness targeting #102](https://github.com/marrabld/omazone/issues/102) | Explicit requested LUFS/peak ceiling, consent-based processing and the actual achievable result. |
 
-Workflow consolidation (#25/#27) is complete: repair, matching, manual EQ,
-compression, output, comparison, and export now behave as one guided application,
-with guarded unsaved work, shared status and comparison state, seven-step
-navigation, an Export step, and milestone acceptance journeys. The remaining
-measurement work attaches to that single contract. See
-[the workflow specification](docs/workflow-consolidation.md).
+The envelope and empirical density display from #98 shipped in PR #99. Its
+remaining correction method is tracked separately in #100. Range-aware matching
+is not inherently better or more trustworthy than ordinary average-spectrum
+matching. Compare both on music and document where they fail. The visual curves
+are interpolated for readability, not extra analysis resolution or confidence.
 
-Initial processing order is fixed. Advanced reordering, multiband dynamics, and
-real-time/plugin integration follow once this workflow is stable and understandable.
+### Working 1.0 acceptance criteria
+
+A musician should be able to load a supported mono/stereo recording, make and
+compare intentional changes, reopen those choices, and export a deliverable at
+a supported rate and chosen loudness with measurements they can inspect.
+
+- [ ] The three features above meet their issue acceptance criteria, including
+  bounded worker execution, versioned recipes and compatibility with old projects.
+- [ ] The full journey works with and without a reference, with optional stages
+  skipped, and after save/open/relink. Downstream edits preserve upstream work
+  and learned matching calibration.
+- [ ] Aligned stage A/B, preview-only level matching and the exported full chain
+  remain distinct. Verify sample position, transition behaviour and measurements;
+  evaluate sound through listening as well as numerical tests.
+- [ ] Delivery review checks the actual post-conversion audio. No silent clipping,
+  hidden gain changes, unintended device fallback or implicit audition resampling.
+  Unattainable loudness/peak combinations are explained rather than reported as
+  successfully met. No universal streaming loudness target is implied.
+- [ ] DSP/GUI regressions, bundled self-tests and supported-platform builds pass.
+  Review render time, memory, cancellation and failure handling on full songs.
+- [ ] Maintainer listening feedback on the new processing is recorded alongside
+  limitations, and the README/workflow explain the supported formats and choices.
+
+The maintainer already listens and tests during development. Windows/macOS device
+reports (#14) and real-display layout checks (#70) remain welcome community work;
+unavailable hardware is not a mandatory 1.0 feature-development gate. Do not infer
+that unreported listening has not happened. Known reproducible failures should
+still be triaged on their impact.
+
+Stereo imaging and additional dynamic-EQ bands are deferred from this working
+1.0 scope. Bootstrap stability reporting, automation #88, general restyling #79,
+selective-filtering research #83, advanced chain reordering and real-time/plugin
+integration remain separate later work. Address concrete usability defects now,
+without making a visual redesign a release prerequisite.
+
+### Implemented foundation
+
+The guided workflow, saved recipes, reference/section matching, manual EQ,
+corrective filters, one downward dynamic-EQ band, broadband/three-band compression,
+stage measurements, output gain, true-peak metering, final limiter, device
+selection and float/24-bit delivery are implemented. See the linked guides below
+and [workflow specification](docs/workflow-consolidation.md).
 
 ## Contributor issue backlog
 
@@ -127,6 +150,9 @@ The later experiments below remain roadmap ideas until they are scoped as issues
 | [#86](https://github.com/marrabld/omazone/issues/86) | Remember an audition output device with exact-format checks; implemented, real-platform listening pending | #14 |
 | [#87](https://github.com/marrabld/omazone/issues/87) | Before/after sample peak and integrated LUFS per stage; implemented with scoped background measurements | Comparison #27 |
 | [#98](https://github.com/marrabld/omazone/issues/98) | Reference envelope/density display first; optional range-aware matching planned next | Reference targets #16 |
+| [#100](https://github.com/marrabld/omazone/issues/100) | Optional deterministic range-aware correction, following the shipped display | #98 / PR #99 |
+| [#101](https://github.com/marrabld/omazone/issues/101) | Export-only sample-rate conversion with final delivery checks | Delivery #85, true peak #44 |
+| [#102](https://github.com/marrabld/omazone/issues/102) | Explicit loudness targeting with measured peak-constrained delivery | LUFS #9, limiter #45, conversion #101 |
 
 Browse [all open issues](https://github.com/marrabld/omazone/issues) for current
 status. Numerical prototypes can often start before their GUI integration dependencies.
@@ -216,7 +242,8 @@ Repair → matching EQ → manual bell EQ → corrective filters → optional dy
 Repair remains a file/region operation before the streaming stages. Reordering
 the other modules can follow once their individual behaviour is established.
 Input filtering before matching is an advanced extension rather than the default
-learner workflow. Dynamic EQ can extend the corrective/dynamics tools later.
+learner workflow. One dynamic-EQ band already follows corrective filters and
+precedes either compressor mode.
 
 ## 3. Broadband compression
 
@@ -294,7 +321,7 @@ with a fixed EQ cut; listen for clicks, pumping and crossover colouration.
 - [ ] Explore minimum-phase matching as an alternative to linear phase.
 - [x] Save reference spectral profiles.
 - [x] Show measured within-passage reference variation and empirical density, without changing ordinary matching. See [reference variation](docs/reference-variation.md).
-- [ ] Add deterministic, optional Range-aware matching using conservative correction toward a reference range (#98). Bootstrap stability reporting remains separate stretch work.
+- [ ] Add deterministic, optional Range-aware matching using conservative correction toward a reference range (#100, following #98). Bootstrap stability reporting remains separate stretch work.
 - [x] Save whole-song matching settings and retained learned curves in project recipes.
 - [ ] Profile memory and render time on full-length songs.
 
