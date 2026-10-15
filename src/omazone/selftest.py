@@ -5,6 +5,9 @@ import numpy as np
 from .dynamic_eq import DynamicEQSettings, dynamic_eq_parameters
 from .engine import analyse
 from .multiband import MultibandResult
+from .reference_variation import analyse_variation
+from .sections import TargetProfile
+from .waveform import SampleRegion
 
 
 def verify(window):
@@ -34,3 +37,14 @@ def verify(window):
         raise RuntimeError("Bundled dynamic EQ did not attenuate the target band.")
     if dynamic.output.shape != audio.shape or not np.all(np.isfinite(dynamic.output)):
         raise RuntimeError("Bundled dynamic EQ produced invalid audio.")
+    reference = np.tile(audio, (20, 1))
+    reference[rate * 2:] += (0.04 * np.sin(2 * np.pi * 3000 * np.arange(rate * 2) / rate))[:, None]
+    variation = analyse_variation(reference, rate)
+    if variation is None or not variation.available:
+        raise RuntimeError("Bundled reference-variation analysis failed.")
+    target = TargetProfile("selftest", "Generated reference", analyse(reference, rate), rate,
+                           SampleRegion(0, len(reference)), "Generated", variation)
+    window.project.reference_target = target
+    window.views.setStep("match")
+    if not window.reference_variation.draw(analyse(audio, rate), None, target):
+        raise RuntimeError("Bundled reference-variation display failed.")

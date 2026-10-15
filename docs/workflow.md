@@ -62,6 +62,8 @@ lists and detailed editors scroll within the inspector. Region naming, target
 capture, section assignment and repair all keep the waveform prominent.
 Matching starts with large spectrum/filter plots and a compact settings panel
 beside them on wider displays, or a small controls strip below on narrow ones.
+An optional [reference variation envelope](reference-variation.md) shows measured
+within-passage variation and density. It is a display, not a different EQ method.
 Only Match amount is initially exposed; the remaining settings are optional.
 Reference targets retain mix context while giving the independent reference pane
 most of the detail-view width. Other tools use the same compact View menu and

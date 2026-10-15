@@ -27,7 +27,7 @@ class CurrentPageStack(QtWidgets.QStackedWidget):
 
 
 class InspectorContent(QtWidgets.QWidget):
-    def heightForWidth(self, width):
+    def child_heights(self, width):
         # Ask each widget explicitly: Qt's QWidgetItem can bypass a stack's
         # override and ask its all-pages QStackedLayout for height-for-width.
         layout = self.layout()
@@ -37,14 +37,43 @@ class InspectorContent(QtWidgets.QWidget):
             widget = layout.itemAt(index).widget()
             if widget is not None and not widget.isHidden():
                 height = widget.heightForWidth(width - margins.left() - margins.right())
-                heights.append(max(
+                heights.append((widget, max(
                     widget.minimumSizeHint().height(),
                     height if height >= 0 else widget.sizeHint().height(),
-                ))
+                )))
+        return heights
+
+    def heightForWidth(self, width):
+        layout = self.layout()
+        margins = layout.contentsMargins()
+        heights = self.child_heights(width)
         return (
-            sum(heights) + max(0, len(heights) - 1) * layout.spacing()
+            sum(height for _, height in heights) + max(0, len(heights) - 1) * layout.spacing()
             + margins.top() + margins.bottom()
         )
+
+    def fit_children(self):
+        if self.layout() is None or getattr(self, "fitting", False):
+            return
+        self.fitting = True
+        try:
+            # Budgeting the correct total is not enough: QBoxLayout can still
+            # give a hidden-page stack extra space by squeezing shared panels.
+            # Make each visible child's actual wrapped height its minimum.
+            for widget, height in self.child_heights(self.width()):
+                if widget.minimumHeight() != height:
+                    widget.setMinimumHeight(height)
+        finally:
+            self.fitting = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_children()
+
+    def event(self, event):
+        if event.type() == QtCore.QEvent.Type.LayoutRequest:
+            self.fit_children()
+        return super().event(event)
 
 
 class ToolPanel(QtWidgets.QWidget):

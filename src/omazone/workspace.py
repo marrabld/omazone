@@ -56,6 +56,7 @@ class SongWorkspace(QtWidgets.QWidget):
         self.job = None
         self.requested_key = None
         self.completed_key = None
+        self.cached_spectrum = None
         self.peak_cache = []
         self.pending_key = None
         self.live_spectrum = None
@@ -278,9 +279,12 @@ class SongWorkspace(QtWidgets.QWidget):
             "reference_split": self.panes.sizes(),
             "viewer_tool_modes": dict(self.tool_modes),
             "matching_overview": self.matching_overview,
+            "show_reference_variation": self.owner.reference_variation.show_range.isChecked()
+            if hasattr(self.owner, "reference_variation") else True,
         }
 
     def restore_preferences(self, view):
+        previous_range = self.owner.reference_variation.show_range.isChecked()
         self.syncing = True
         try:
             self.tool_modes.update(
@@ -293,6 +297,8 @@ class SongWorkspace(QtWidgets.QWidget):
             current = self.active_tool
             self.tool_modes[current] = view.get("viewer_mode", self.tool_modes[current])
             self.matching_overview = bool(view.get("matching_overview", False))
+            with QtCore.QSignalBlocker(self.owner.reference_variation.show_range):
+                self.owner.reference_variation.show_range.setChecked(view.get("show_reference_variation", True))
             with QtCore.QSignalBlocker(self.overview_action):
                 self.overview_action.setChecked(self.matching_overview)
             self.mode.setCurrentIndex(max(0, self.mode.findData(self.tool_modes[current])))
@@ -307,6 +313,8 @@ class SongWorkspace(QtWidgets.QWidget):
         finally:
             self.syncing = False
         self.mode_changed()
+        if previous_range != self.owner.reference_variation.show_range.isChecked():
+            self.owner.reference_variation.changed()
 
     def mode_changed(self):
         mode = self.mode.currentData()
@@ -707,6 +715,8 @@ class SongWorkspace(QtWidgets.QWidget):
                 if self.mode.currentData() != "waveform":
                     self.timer.start()
             self.refresh_reference()
+            if hasattr(self.owner, "reference_variation"):
+                self.owner.reference_variation.refresh()
             if hasattr(self.owner, "stage_measurements"):
                 self.owner.stage_measurements.refresh()
             editable = self.owner.worker is None and self.owner.source is not None
@@ -829,7 +839,7 @@ class SongWorkspace(QtWidgets.QWidget):
             or self.mode.currentData() == "waveform"
             or self.owner.source is None
             or self.owner.views.currentWidget()
-            in (self.owner.compressor_view, self.owner.output_view)
+            in (self.owner.compressor_view, self.owner.dynamic_eq_view, self.owner.output_view)
         ):
             return
         before, after, rate, title = self.spectral_pair()
@@ -863,7 +873,7 @@ class SongWorkspace(QtWidgets.QWidget):
 
     def spectrum_ready(self, payload):
         key, before, after, error = payload
-        if self.closing or key != self.requested_key:
+        if self.closing or self.owner.source is None or key != self.requested_key:
             return
         actual_before, actual_after, rate, title = self.spectral_pair()
         selection = self.waveform.selection
@@ -873,6 +883,7 @@ class SongWorkspace(QtWidgets.QWidget):
         target = self.reference_target() if self.owner.views.currentStep() != "repair" else None
         if key != (id(actual_before), id(actual_after), rate, region, id(target), title):
             return
+        self.cached_spectrum = payload
         if eq:
             if error:
                 canvas.set_spectra()
@@ -895,6 +906,10 @@ class SongWorkspace(QtWidgets.QWidget):
         if error:
             self.owner.spectrum_plot.setTitle("Spectrum unavailable: " + error)
         else:
+            target = self.reference_target() if self.owner.views.currentStep() != "repair" else None
+            if self.owner.reference_variation.draw(before, after, target):
+                self.completed_key = key
+                return
             self.owner.spectrum_plot.setTitle("Before/after tonal balance for the selected scope")
             self.owner.draw_spectrum(
                 before,

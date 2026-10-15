@@ -14,6 +14,7 @@ import soundfile as sf
 from .clipping import ClipInterval, ClipReport, DetectionSettings, detect_clipping
 from .declipping import RepairResult, RepairSettings, repair_clipping
 from .engine import MatchFilter, MatchSettings, Spectrum, analyse
+from .reference_variation import parse_variation, variation_dict
 from .sections import (
     SectionAssignment,
     SectionCurve,
@@ -236,6 +237,7 @@ def target_dict(target):
         "sample_rate": target.sample_rate,
         "region": asdict(target.region),
         "source_name": target.source_name,
+        **({"variation": variation_dict(target.variation)} if target.variation is not None else {}),
     }
 
 
@@ -247,6 +249,7 @@ def parse_target(data, minimum_seconds=0.1):
         data["sample_rate"],
         SampleRegion(**data["region"]),
         data["source_name"],
+        parse_variation(data.get("variation")),
     )
     validate_profile(target, minimum_seconds)
     return target
@@ -519,6 +522,8 @@ def validate_project(project):
         raise ValueError("Invalid saved step-specific viewer modes.")
     if type(project.view.get("matching_overview", False)) is not bool:
         raise ValueError("Invalid saved matching overview preference.")
+    if type(project.view.get("show_reference_variation", True)) is not bool:
+        raise ValueError("Invalid saved reference variation preference.")
     reference_rate = (
         project.reference.sample_rate
         if project.reference
