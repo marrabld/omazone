@@ -62,8 +62,9 @@ optional View action and a persistent seek/time display. See
    before expanding processing or starting the selective-filtering research #83.
    The single downward dynamic-EQ band remains planned.
 
-#46 now needs real-mix listening and review. #8 still needs the filter modules
-in #6; selective-filtering research #83 remains gated on using the prototype.
+#46 still benefits from real-mix listening and review. The corrective filters in
+#6 are implemented; #8 remains the next scoped dynamic-EQ task. Selective-filtering
+research #83 remains gated on using the three-band prototype.
 Neither #6 nor
 #14 appears in the plan above:
 #6 is a prerequisite rather than a goal, and #14 now covers only the audible
@@ -194,8 +195,8 @@ Keep one application, with independently usable and testable processing modules.
 - [x] Extend stage comparisons and sample-peak readings to output gain.
 - [x] Extend measured rendering to true peaks, LUFS and limiting.
 - [ ] Show measurements before and after each stage ([#87](https://github.com/marrabld/omazone/issues/87)).
-- [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
-- [ ] Make filter slope, phase behaviour, and latency explicit.
+- [x] Add high-pass, low-pass, and notch filters with frequency-response plots.
+- [x] Make filter slope, phase behaviour, and latency explicit. See [corrective filters](docs/filters.md).
 - [ ] Add parametric bell and shelving EQ bands.
 - [x] Region-limited manual bell EQ after matching, with smooth dry/wet region automation.
 - [x] Multiple manually adjustable bell bands with a shared named-region scope.
@@ -204,7 +205,7 @@ Keep one application, with independently usable and testable processing modules.
 The approved initial processing chain is:
 
 ```text
-Repair → matching EQ → manual corrective EQ → optional dynamics
+Repair → matching EQ → manual bell EQ → corrective filters → optional dynamics
        → output gain / limiting → export
 ```
 

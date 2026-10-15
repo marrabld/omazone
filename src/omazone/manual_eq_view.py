@@ -25,6 +25,9 @@ class ManualEQView(QtWidgets.QWidget):
         self.canvas = EQCanvas(type(owner.spectrum_plot.getAxis("bottom")))
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.filters_button = QtWidgets.QPushButton("Corrective filters…")
+        self.filters_button.clicked.connect(lambda: owner.views.setStep("filters"))
+        layout.addWidget(self.filters_button)
         prompt = QtWidgets.QLabel(
             "Click the graph to add a band. Drag its dot to set frequency and gain; scroll over it to change width."
         )

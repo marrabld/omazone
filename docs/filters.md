@@ -1,10 +1,46 @@
-# Corrective filter core
+# Corrective filters
 
-The DSP core and saved-recipe integration for
-[#6](https://github.com/marrabld/omazone/issues/6) are implemented. The parameter
-inspector and response-plot controls are still planned. Filters default to off;
-existing projects retain their output until filters are explicitly configured
-and enabled.
+High-pass, low-pass and notch filters are available inside Manual EQ. Filters
+default to off; existing projects retain their output until filters are
+explicitly configured and enabled. They always process the whole recording,
+independently of the bell EQ's named-region scope.
+
+## Using the inspector
+
+1. Open **Manual EQ**, then **Corrective filters**. The navigation bar stays at
+   seven steps. **Back to bell EQ** returns to the region-scoped bell controls.
+2. Choose a type and click **Add filter**, or click the graph at a frequency.
+   Up to six filters can be added, duplicated or removed.
+3. Set frequency and slope for high/low passes, or frequency and Q for a notch.
+   Drag a vertical line to change frequency. Scroll over it to change slope or Q.
+   The corresponding spin boxes and selectors support keyboard editing.
+4. Use **Apply selected filter** for individual bypass, and **Apply corrective
+   filters** for stage bypass. Settings are retained while bypassed. Selecting a
+   different type preserves irrelevant slope/Q settings rather than discarding
+   them. Only the applicable control is enabled.
+5. Click **Render filters**. The graph previews settings immediately, but new
+   processing is audible only after rendering. **Listen and compare filters**
+   auditions this stage, using the selected passage if there is one. Selection
+   affects audition and spectrum analysis, not where the filters are applied.
+6. Export writes the full rendered chain. Preview gain matching is not exported.
+
+The combined response and selected filter have separate curves. Input/output
+spectra are relative displays, not absolute dBFS readings. Plot sampling includes
+notch centres and nearby bandwidth points so narrow notches do not disappear
+between uniform frequency bins. The visible response range ends at -72 dB;
+notch attenuation can extend below it.
+
+Broad notches require `Q > 2 * frequency / sample_rate`. The Q control adjusts
+its minimum with frequency. If a deliberate frequency/type edit would violate
+that bound, Q rises to the next valid displayed value and the inspector explains
+the change. Merely restoring or selecting a filter never rewrites its saved
+precision. Invalid recipes remain retained and blocked until explicitly cleared
+or corrected, rather than being replaced with an empty recipe.
+
+![Corrective filter inspector showing high-pass, notch and low-pass responses over the song spectrum](images/omazone-filters.png)
+
+Regenerate with `uv run python tools/render_filter_demo.py docs/images`. The
+fixture uses generated rumble, tones and seeded noise, not a private recording.
 
 ## Chain and saved recipes
 
@@ -51,12 +87,10 @@ Whole-song matching, section matching and saved recipes use one named
 `RenderPayload` to carry these pairs from the render worker to the GUI. Preview
 gain matching never changes full-chain export.
 
-Until the parameter inspector is added, **Project > Stage bypass > Skip
-corrective filters** controls stage bypass, the comparison selector can audition
-rendered filters, and Export lists their status. Filter status routes to Manual
-EQ without adding a navigation step. An enabled empty stage asks for configuration
-or bypass; it does not pretend a filter was rendered. There are no filter
-parameter-editing widgets yet.
+**Project > Stage bypass > Skip corrective filters** also controls stage bypass,
+and Export lists filter status. Export's correction link opens the filter
+inspector directly. An enabled empty or fully disabled stage asks for an active
+filter or stage bypass; it does not pretend a filter was rendered.
 
 ## Responses and controls
 
@@ -134,9 +168,7 @@ The plotting helper returns Hz and dB on the same 8192-point grid as manual EQ.
 Displayed magnitudes have a -240 dB floor. A narrow notch can fall between grid
 points; its measured centre depth must not be inferred from that plot alone.
 
-## Follow-up integration
+## Scope
 
-The Manual EQ secondary inspector, editable individual bypass controls and a
-response plot remain required before #6 is complete. New controls must not alter
-existing saved matching or manual EQ. Dynamic EQ #8 and selective-filtering
-research #83 remain separate.
+Shelves, region-scoped filters, automation, dynamic EQ #8 and selective-filtering
+research #83 remain separate. These are static, offline-configured filters.

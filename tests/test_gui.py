@@ -239,7 +239,7 @@ def test_corrective_filter_handoff_comparisons_invalidation_save_and_export(
         window.close()
 
 
-def test_filters_without_controls_still_report_status_and_can_be_skipped():
+def test_empty_filters_report_status_route_to_inspector_and_can_be_skipped():
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = Window()
     audio = np.random.default_rng(617).normal(0, 0.05, (16000, 2))
@@ -248,11 +248,11 @@ def test_filters_without_controls_still_report_status_and_can_be_skipped():
         window.set_stage_bypass("filters", False)
         window.views.setStep("eq")
         assert not window.continue_button.isEnabled()
-        assert "corrective filters" in window.views.action_label.text()
+        assert "corrective filter" in window.views.action_label.text()
         window.views.setStep("export")
-        assert window.export_view.route_target == ("step", "eq")
+        assert window.export_view.route_target == ("step", "filters")
         window.export_view.activate_route()
-        assert window.views.currentStep() == "eq"
+        assert window.views.currentStep() == "filters"
         assert window.stage_actions["filters"].isEnabled()
         window.stage_actions["filters"].setChecked(True)
         assert window.current_step_status(window.workflow_status()).can_continue
@@ -262,6 +262,235 @@ def test_filters_without_controls_still_report_status_and_can_be_skipped():
         window.project.mark_saved()
         window.close()
         app.processEvents()
+
+
+@pytest.fixture
+def filter_session(tmp_path):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    rate = 48000
+    t = np.arange(rate) / rate
+    audio = np.column_stack((0.2 * np.sin(2 * np.pi * 1000 * t), 0.1 * np.sin(2 * np.pi * 300 * t)))
+    source = tmp_path / "filters-source.wav"
+    sf.write(source, audio, rate, subtype="DOUBLE")
+    window.loaded("source", load_audio(source))
+    window.show()
+    window.manual_eq_view.filters_button.click()
+
+    def wait():
+        deadline = time.monotonic() + 20
+        while (window.worker is not None or window.workspace.job is not None) and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    yield window, window.filter_view, wait, app
+    if window.worker is not None:
+        window.worker.wait()
+        app.processEvents()
+    window.project.mark_saved()
+    window.close()
+    app.processEvents()
+
+
+def test_filter_inspector_navigation_list_types_bypass_and_limits(filter_session):
+    from omazone.filters import filters_from_parameters
+
+    window, view, _, _ = filter_session
+    assert window.views.currentStep() == "filters"
+    assert len(window.views.visibleSteps()) == 7
+    assert "filters" not in window.views.visibleSteps()
+    assert window.workspace.plot_stack.currentWidget() is view.canvas
+    assert window.workspace.viewer_context_key() == "filters"
+    assert view.render_button.isVisible()
+    for label in view.findChildren(QtWidgets.QLabel):
+        if label.property("formLabel"):
+            assert label.width() >= label.minimumWidth()
+            assert label.text()
+            control = {"Type": view.kind, "Frequency": view.frequency,
+                       "Slope": view.slope, "Notch Q": view.q}[label.text()]
+            assert label.geometry().right() < control.geometry().left()
+    view.add_button.click()
+    assert not window.project.stages["filters"].bypassed
+    assert view.items[0].kind == "highpass"
+    assert view.slope.isEnabled() and not view.q.isEnabled()
+    view.frequency.setValue(70)
+    view.slope.setCurrentIndex(view.slope.findData(24))
+    view.kind.setCurrentIndex(view.kind.findData("notch"))
+    assert view.q.isEnabled() and not view.slope.isEnabled()
+    view.q.setValue(30)
+    view.filter_enabled.setChecked(False)
+    assert not view.items[0].enabled and "(off)" in view.filter_list.item(0).text()
+    assert view.canvas.markers[0].opacity() < 1
+    view.filter_enabled.setChecked(True)
+    while len(view.items) < 6:
+        view.duplicate_button.click()
+    assert not view.add_button.isEnabled() and not view.duplicate_button.isEnabled()
+    view.add_filter()
+    assert len(view.items) == 6
+    assert filters_from_parameters(window.project.stages["filters"].parameters) == view.settings()
+    view.remove_button.click()
+    assert len(view.items) == 5 and view.add_button.isEnabled()
+    saved = dict(window.project.stages["filters"].parameters)
+    view.enabled.setChecked(False)
+    assert window.project.stages["filters"].bypassed
+    assert window.project.stages["filters"].parameters == saved
+    np.testing.assert_array_equal(view.canvas.response.yData, 0)
+    view.back_button.click()
+    assert window.views.currentStep() == "eq"
+    window.manual_eq_view.filters_button.click()
+    view.clear_button.click()
+    assert not view.items and window.project.stages["filters"].bypassed
+
+
+def test_filter_canvas_click_drag_wheel_and_notch_response(filter_session):
+    from omazone.filter_canvas import response_points
+
+    window, view, _, app = filter_session
+
+    class Click:
+        def button(self):
+            return QtCore.Qt.MouseButton.LeftButton
+
+        def isAccepted(self):
+            return False
+
+        def scenePos(self):
+            return view.canvas.getViewBox().mapViewToScene(QtCore.QPointF(np.log10(1000), -10))
+
+    class Wheel:
+        def delta(self):
+            return 120
+
+        def accept(self):
+            pass
+
+    app.processEvents()
+    view.canvas.plot_clicked(Click())
+    assert len(view.items) == 1 and view.items[0].frequency == pytest.approx(1000)
+    marker = view.canvas.markers[0]
+    start = view.canvas.mapFromScene(view.canvas.getViewBox().mapViewToScene(QtCore.QPointF(3, -20)))
+    end = view.canvas.mapFromScene(view.canvas.getViewBox().mapViewToScene(QtCore.QPointF(np.log10(2000), -20)))
+    QtTest.QTest.mousePress(view.canvas.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=start)
+    QtTest.QTest.mouseMove(view.canvas.viewport(), end, 20)
+    QtTest.QTest.mouseRelease(view.canvas.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=end)
+    app.processEvents()
+    assert len(view.items) == 1, "Dragging a marker must not add another filter"
+    assert view.items[0].frequency == pytest.approx(2000, rel=0.04)
+    marker.wheelEvent(Wheel())
+    assert view.items[0].slope == 18
+    view.kind.setCurrentIndex(view.kind.findData("notch"))
+    view.q.setValue(100)
+    marker.wheelEvent(Wheel())
+    assert view.items[0].q == 100
+    frequency, db = response_points(view.settings(), view.rate)
+    assert np.min(db[frequency == view.items[0].frequency]) < -100
+    # A notifier on the static plot changes choices, never an existing render.
+    assert window.output is None and not window.comparison("filters").available
+
+
+def test_filter_q_floor_adjusts_on_user_edits_without_corrupting_saved_precision(filter_session):
+    from omazone.filters import FilterSettings, FiltersSettings, filter_parameters
+
+    window, view, _, _ = filter_session
+    precise = FilterSettings(kind="notch", frequency=1000.123456789, q=0.100123456789)
+    recipe = filter_parameters(FiltersSettings((precise,)))
+    window.project.stages["filters"].parameters = recipe
+    view.restore()
+    assert window.project.stages["filters"].parameters == recipe
+    view.filter_enabled.setChecked(False)
+    assert view.items[0].frequency == precise.frequency and view.items[0].q == precise.q
+    view.frequency.setValue(20000)
+    assert view.items[0].q > 2 * 20000 / 48000
+    assert view.q.minimum() > 2 * 20000 / 48000
+    assert "Q raised" in view.summary.text()
+    assert view.items[0].frequency / view.items[0].q < view.rate / 2
+
+
+def test_filter_inspector_preserves_invalid_recipe_until_explicit_clear(filter_session):
+    window, view, _, _ = filter_session
+    recipe = {"kind": "future-filter", "unknown": "retain me"}
+    window.project.stages["filters"].parameters = dict(recipe)
+    window.project.stages["filters"].bypassed = False
+    view.restore()
+    assert view.invalid_recipe and not view.add_button.isEnabled()
+    assert "not been replaced" in view.summary.text()
+    assert window.project.stages["filters"].parameters == recipe
+    view.enabled.setChecked(False)
+    assert window.project.stages["filters"].parameters == recipe
+    view.clear_button.click()
+    assert window.project.stages["filters"].parameters == {"kind": "filters-v1", "filters": []}
+    assert view.add_button.isEnabled()
+
+
+def test_filter_inspector_render_audition_scope_save_restore_and_export(filter_session, tmp_path, monkeypatch):
+    window, view, wait, _ = filter_session
+    selection = SampleRegion(1000, 4000)
+    window.waveform.set_selection(selection)
+    view.add_button.click()
+    view.frequency.setValue(500)
+    view.render_button.click()
+    wait()
+    assert window.audition_mode == "filters"
+    assert window.workspace.pairs()[0] is window.chain_result.equalized
+    assert window.workspace.pairs()[1] is window.chain_result.filtered
+    assert "whole recording" in window.workspace.pairs()[3]
+    assert window.waveform.selection == selection
+    assert view.listen_button.isEnabled()
+    assert "Filters rendered" in view.summary.text()
+    before = window.filters_before
+    calls = []
+    monkeypatch.setattr(window, "play_selection", lambda: calls.append(window.audition_mode))
+    view.listen_button.click()
+    assert calls == ["filters"]
+    recipe = dict(window.project.stages["filters"].parameters)
+    expected = window.output[0].copy()
+    saved = tmp_path / "filter-ui.omazone.json"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved), ""))
+    window.save_current_project()
+    wait()
+    window.new_project()
+    assert not view.items
+    window.open_project_path(saved)
+    wait()
+    assert window.views.currentStep() == "filters"
+    assert window.workspace.viewer_context_key() == "filters"
+    assert window.project.stages["filters"].parameters == recipe
+    assert view.items[0].frequency == 500
+    view.render_button.click()
+    wait()
+    np.testing.assert_array_equal(window.output[0], expected)
+    exported = tmp_path / "filter-ui.wav"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(exported), ""))
+    window.export()
+    wait()
+    written, rate = sf.read(exported, always_2d=True)
+    assert rate == view.rate and len(written) == view.rate
+    np.testing.assert_array_equal(written, expected.astype(np.float32))
+    view.frequency.setValue(600)
+    assert not window.comparison("filters").available
+    assert window.output is None
+    assert before.shape == window.filters_before.shape
+
+
+@pytest.mark.parametrize("width,height", [(820, 660), (1120, 800), (1400, 1000)])
+def test_filter_inspector_narrow_layout_and_keyboard_access(filter_session, width, height):
+    window, view, _, app = filter_session
+    window.resize(width, height)
+    view.add_button.click()
+    for _ in range(5):
+        app.processEvents()
+    assert window.views.navigationFits()
+    assert len(window.views.visibleSteps()) == 7
+    assert view.width() <= window.tool_scroll.viewport().width()
+    assert view.render_button.isVisible()
+    assert window.views.action_bar.geometry().bottom() <= window.views.height()
+    view.frequency.setFocus()
+    old = view.frequency.value()
+    QtTest.QTest.keyClick(view.frequency, QtCore.Qt.Key.Key_Up)
+    assert view.items[0].frequency > old
 
 
 def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch, unsmoothed_audition):

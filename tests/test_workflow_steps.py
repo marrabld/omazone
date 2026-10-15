@@ -58,6 +58,7 @@ def test_processor_steps_name_the_stage_they_explain():
         "sections": "match",
         "repair": "repair",
         "eq": "eq",
+        "filters": "filters",
         "dynamics": "dynamics",
         "output": "output",
     }
@@ -78,6 +79,7 @@ def test_spectral_pages_are_the_ones_that_plot_a_response():
     assert {step.key for step in STEPS if step.spectral} == {
         "match",
         "eq",
+        "filters",
         "dynamics",
         "output",
     }

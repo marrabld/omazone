@@ -266,7 +266,7 @@ def test_filter_workflow_configuration_and_comparison_boundaries(state):
         assert workflow.blocking_stage == "filters"
     if state == "invalid":
         assert workflow.stages["dynamics"].state is RenderState.BLOCKED
-    assert resolve_step_key("filters") == "eq"
+    assert resolve_step_key("filters") == "filters"
 
 
 def test_stale_filter_comparison_keeps_eq_input_and_dynamics_prefers_rendered_filters():
