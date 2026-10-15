@@ -3,7 +3,7 @@
 The current saved processing order places optional limiting after output gain:
 
 ```text
-Original -> repair -> matching -> manual EQ -> filters -> compression -> output gain -> limiter -> float WAV
+Original -> repair -> matching -> manual EQ -> filters -> compression -> output gain -> limiter -> WAV
 ```
 
 An output-gain edit rerenders gain and the enabled limiter after it. It never changes saved

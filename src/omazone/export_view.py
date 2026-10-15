@@ -2,6 +2,7 @@
 
 from PySide6 import QtCore, QtWidgets
 
+from .delivery import FORMATS, DeliverySettings, format_label, measure, quantises
 from .workflow_status import AnalysisState, describe
 
 STAGE_TITLES = (
@@ -29,9 +30,8 @@ class ExportView(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         prompt = QtWidgets.QLabel(
-            "Export writes the full-chain render, never a preview. "
-            "Review the stages below, then click Export WAV to choose a filename and save. "
-            "This is the final step."
+            "Exports the full rendered chain, never a preview. Review the stages, "
+            "choose a format, then click Export WAV. This is the final step."
         )
         prompt.setWordWrap(True)
         prompt.setSizePolicy(
@@ -39,7 +39,7 @@ class ExportView(QtWidgets.QWidget):
         )
         layout.addWidget(prompt)
         self.chain = QtWidgets.QListWidget()
-        self.chain.setMinimumHeight(150)
+        self.chain.setMinimumHeight(122)
         self.chain.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.chain.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
@@ -58,15 +58,86 @@ class ExportView(QtWidgets.QWidget):
         self.route.clicked.connect(self.activate_route)
         self.route.setVisible(False)
         layout.addWidget(self.route)
+        self.delivery = QtWidgets.QGroupBox("Delivery format")
+        delivery_layout = QtWidgets.QVBoxLayout(self.delivery)
+        # The panel wraps prose like the other pages, so it must not force the
+        # window wider than the narrow-layout budget.
+        self.delivery.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+        )
+        format_row = QtWidgets.QHBoxLayout()
+        format_row.addWidget(QtWidgets.QLabel("Write as"))
+        self.format = QtWidgets.QComboBox()
+        for key, title, _ in FORMATS:
+            self.format.addItem(title, key)
+        format_row.addWidget(self.format)
+        format_row.addStretch(1)
+        delivery_layout.addLayout(format_row)
+        self.dither = QtWidgets.QCheckBox("Apply dither")
+        self.dither.setChecked(True)
+        self.dither.setToolTip(
+            "Dither only matters when reducing to 24 or 16-bit, where it trades a "
+            "small noise floor for lower quantisation distortion. Leave it off if a "
+            "later tool will requantise the file."
+        )
+        delivery_layout.addWidget(self.dither)
+        self.delivery_note = QtWidgets.QLabel()
+        self.delivery_note.setWordWrap(True)
+        delivery_layout.addWidget(self.delivery_note)
+        for label in self.delivery.findChildren(QtWidgets.QLabel):
+            label.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+            )
+        layout.addWidget(self.delivery)
         layout.addStretch(1)
         self.export_button = QtWidgets.QPushButton("Export WAV…")
         self.export_button.clicked.connect(owner.export)
-        self.export_button.setToolTip(
-            "Choose a filename and save the full rendered chain as a 32-bit float WAV. "
-            "Preview loudness matching is not included."
-        )
         self.requested = None
         self.route_target = None
+        self.format.currentIndexChanged.connect(lambda: self.refresh_delivery())
+        self.dither.toggled.connect(lambda: self.refresh_delivery())
+        self.refresh_delivery()
+
+    def delivery_settings(self):
+        """The chosen target format. Applies at write time only, never to playback."""
+        return DeliverySettings(
+            format=self.format.currentData(), dither=self.dither.isChecked()
+        )
+
+    def refresh_delivery(self):
+        settings = self.delivery_settings()
+        self.dither.setEnabled(quantises(settings))
+        report = self.output_view_delivery_report()
+        if report is None:
+            self.delivery_note.setText("Render the chain to see this format's headroom.")
+        elif not quantises(settings):
+            self.delivery_note.setText(
+                f"Float keeps headroom, so the peak of {report.peak_dbfs:+.2f} dBFS "
+                "is written without clipping. No dither is used."
+            )
+        elif report.clipped:
+            self.delivery_note.setText(
+                f"Peak {report.peak_dbfs:+.2f} dBFS exceeds this format's ceiling. "
+                f"Export will ask to attenuate by {report.attenuation_db:.2f} dB."
+            )
+        else:
+            self.delivery_note.setText(
+                f"Peak {report.peak_dbfs:+.2f} dBFS fits this format"
+                + (" with dither applied." if report.dithered else " without dither.")
+            )
+        # The action row is shared by every step and has a fixed narrow-width
+        # budget, so the button names the step, not the format. The selected
+        # format is stated in the panel and in the tooltip.
+        self.export_button.setText("Export WAV…")
+        self.export_button.setToolTip(
+            f"Choose a filename and save the full rendered chain as {format_label(settings)}. "
+            "Preview loudness matching is not included."
+        )
+
+    def output_view_delivery_report(self):
+        if self.owner.chain_result is None:
+            return None
+        return measure(self.owner.chain_result.output, self.delivery_settings())
 
     def rows(self, workflow):
         """One row per processing stage, in the order the chain renders them."""
@@ -97,8 +168,13 @@ class ExportView(QtWidgets.QWidget):
             self.analysis.setText(
                 "Matching analysis is missing. Analyse or skip Matching before rendering."
             )
-        measurements = [*self.owner.output_view.readouts, self.owner.output_view.limiter_input_readout]
-        self.peaks.setText(" | ".join(label.text() for label in measurements if label.text()))
+        # The delivery panel is the answer to "can I write this format?", so it
+        # carries the peak. Everything else stays available on the Output step.
+        final = self.owner.output_view.readouts[-1].text() if self.owner.output_view.readouts else ""
+        peak = final.replace("Final export: ", "").split("|")[0].strip()
+        self.peaks.setText(
+            f"Final export: {peak}" if peak else "Render to measure the final export peak."
+        )
         self.summary.setText(
             "Ready to export the rendered chain."
             if workflow.export_available
@@ -106,6 +182,7 @@ class ExportView(QtWidgets.QWidget):
         )
         busy = self.owner.worker is not None
         self.export_button.setEnabled(workflow.export_available and not busy)
+        self.refresh_delivery()
         self.set_route(workflow, busy)
 
     def set_route(self, workflow, busy=False):
