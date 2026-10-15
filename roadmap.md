@@ -193,13 +193,13 @@ Keep one application, with independently usable and testable processing modules.
 - [x] Extend stage comparisons and measured rendering to broadband compression.
 - [x] Extend stage comparisons and sample-peak readings to output gain.
 - [x] Extend measured rendering to true peaks, LUFS and limiting.
-- [ ] Show measurements before and after each stage.
+- [ ] Show measurements before and after each stage ([#87](https://github.com/marrabld/omazone/issues/87)).
 - [ ] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [ ] Make filter slope, phase behaviour, and latency explicit.
 - [ ] Add parametric bell and shelving EQ bands.
 - [x] Region-limited manual bell EQ after matching, with smooth dry/wet region automation.
 - [x] Multiple manually adjustable bell bands with a shared named-region scope.
-- [ ] Free-form gain/frequency automation.
+- [ ] Free-form gain/frequency automation ([#88](https://github.com/marrabld/omazone/issues/88)).
 
 The approved initial processing chain is:
 
@@ -249,8 +249,8 @@ Work in small stages so a louder export cannot be mistaken for a safer one:
 - [x] Oversampled true-peak estimation.
 - [x] A modest lookahead limiter with ceiling and gain-reduction display.
 - [x] Crossfaded A/B changes and smoother seek/pause/resume transitions (#10).
-- [ ] Audio output-device selection.
-- [ ] Export options for bit depth, headroom, and deliberate dither when quantising.
+- [ ] Audio output-device selection ([#86](https://github.com/marrabld/omazone/issues/86)).
+- [ ] Export options for bit depth, headroom, and deliberate dither when quantising ([#85](https://github.com/marrabld/omazone/issues/85)).
 
 A limiter prevents new overload; declipping treats existing damage. Check
 metering against known reference results, then inspect limiter overshoot,
