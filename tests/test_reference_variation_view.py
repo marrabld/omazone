@@ -167,6 +167,73 @@ def test_old_mean_only_target_and_late_results_never_show_old_envelope(session):
     assert len(window.spectrum_plot.listDataItems()) == 2
 
 
+def test_redraw_reuses_density_item_but_new_analysis_replaces_it(session, monkeypatch):
+    from dataclasses import replace
+
+    window, view, path, wait, _ = session
+    load_reference(window, path, wait)
+    image = view.image
+    original = window.project.reference_target
+
+    def unexpected(*args):
+        raise AssertionError("Unchanged reference density must not be rebuilt")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("omazone.reference_variation_view.density_image", unexpected)
+        window.waveform.set_selection(SampleRegion(16000, 16000 * 3))
+        window.workspace.refresh()
+        wait()
+        assert view.image is image
+        view.show_range.setChecked(False)
+        wait()
+        assert view.image is None
+        view.show_range.setChecked(True)
+        wait()
+        assert view.image is image
+        assert sum(item is image for item in window.spectrum_plot.items()) == 1
+
+    # A distinct analysis object invalidates the one-entry cache, even when
+    # target metadata and numerical values happen to match the previous one.
+    variation = replace(original.variation, counts=original.variation.counts.copy())
+    window.project.reference_target = replace(original, variation=variation)
+    window.workspace.refresh()
+    wait()
+    assert view.image is not image
+    np.testing.assert_array_equal(view.image.image, image.image)
+
+
+def test_isolated_tonal_bands_have_visible_curve_segments_in_plot(session):
+    from omazone.engine import analyse
+    from omazone.reference_variation import analyse_variation
+    from omazone.waveform import PeakIndex
+
+    window, view, _, wait, _ = session
+    rate = 48000
+    t = np.arange(rate) / rate
+    audio = np.concatenate(
+        [
+            0.1 * np.sin(2 * np.pi * 1000 * t)
+            + (0.01 + second * 0.02) * np.sin(2 * np.pi * 8000 * t)
+            for second in range(4)
+        ]
+    )[:, None]
+    variation = analyse_variation(audio, rate)
+    window.views.setStep("match")
+    window.loaded(
+        "reference",
+        (audio, rate, analyse(audio, rate), "Tonal reference", PeakIndex(audio), None, variation),
+    )
+    wait()
+    assert view.image is not None and np.max(view.image.image[..., 3]) > 0
+    median = next(
+        item for item in window.spectrum_plot.listDataItems() if item.name() == "Reference median"
+    )
+    polygons = median.curve.getPath().toSubpathPolygons()
+    assert len(polygons) == 2
+    for polygon in polygons:
+        assert polygon.boundingRect().width() > 0
+
+
 def test_restored_view_preference_redraws_and_late_results_after_reset_are_ignored(session):
     window, view, path, wait, _ = session
     load_reference(window, path, wait)

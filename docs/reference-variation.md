@@ -95,6 +95,9 @@ its nonnegative distances to each boundary so the boundaries cannot cross.
 The density mask follows those same curves. Histogram concentration still uses
 linear frequency interpolation. These are drawing choices, not finer analysis
 or changes to the matching filter.
+An isolated supported band is drawn across its own measured bandwidth, with no
+line or shading across the unsupported bands beside it. A zero-width range is
+still a line, not fabricated variation.
 
 A constant observed value produces a line, not an invented band of variation.
 Multimodal distributions can show separate concentrations, including an empty
@@ -120,6 +123,9 @@ profiles retain scalar summaries and a small fixed histogram, not audio or all
 FFT frames. Display toggles reuse the currently valid spectrum payload and do
 not repeat reference analysis or matching. Old responses cannot restore an
 envelope belonging to a different target or an unloaded recording.
+The view also keeps a one-entry reference-density image cache, so a changed mix
+selection does not rebuild unchanged shading on the GUI thread. A different
+variation analysis replaces that cached item; raw audio is not retained by it.
 
 The toggle is a saved view preference. It changes neither processing settings,
 audition gain nor export samples. The panel scrolls with settings; plots and
