@@ -155,6 +155,92 @@ def test_matching_has_usable_plot_area_and_bounded_linked_frequency_axes():
         window.close()
 
 
+def test_matching_plots_remain_readable_at_laptop_and_stacked_sizes():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    rate = 16000
+    audio = np.random.default_rng(70).normal(0, 0.05, (rate, 2))
+    try:
+        window.show()
+        window.loaded("source", (audio, rate, analyse(audio, rate), "mix"))
+        window.views.setStep("match")
+        wait_jobs(app, window)
+        for width, height in ((1366, 768), (1280, 800), (949, 768), (900, 768), (820, 560)):
+            window.resize(width, height)
+            for _ in range(10):
+                app.processEvents()
+            # Assert actual geometry too: a forced larger window must not make
+            # these viewbox tests pass while lying about laptop compatibility.
+            assert window.width() == width and window.height() == height
+            assert window.views.navigationFits()
+            assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+            for plot, minimum in ((window.spectrum_plot, 100), (window.eq_plot, 80)):
+                view = plot.getViewBox()
+                assert view.height() >= minimum - 1
+                assert view.height() >= plot.getAxis("left").label.boundingRect().width() - 1
+                assert plot.isVisible()
+            assert not window.spectrum_plot.getAxis("bottom").isVisible()
+            assert window.eq_plot.getAxis("bottom").isVisible()
+            scroll = window.workspace_scroll
+            if height >= 768:
+                assert scroll.verticalScrollBar().maximum() == 0
+            else:
+                assert scroll.verticalScrollBar().maximum() > 0
+                # Overflow is explicit and reachable, not a plot drawn outside
+                # its viewport with no means of reaching its labels.
+                scroll.ensureWidgetVisible(window.eq_plot)
+                app.processEvents()
+                assert scroll.verticalScrollBar().value() > 0
+            assert window.workspace.height() < 800, "Do not scroll pyqtgraph's 1500px preferred scene"
+    finally:
+        window.close()
+
+
+def test_wrapped_workspace_warning_gets_space_without_squeezing_plots():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        window.show()
+        window.views.setStep("match")
+        window.resize(900, 700)
+        badge = window.workspace.badge
+        badge.setText("The selected output needs rendering before you can compare it. " * 12)
+        badge.show()
+        for _ in range(10):
+            app.processEvents()
+        assert badge.height() >= badge.heightForWidth(badge.width())
+        assert window.workspace_scroll.verticalScrollBar().maximum() > 0
+        assert window.spectrum_plot.getViewBox().height() >= 99
+        assert window.eq_plot.getViewBox().height() >= 79
+    finally:
+        window.close()
+
+
+def test_matching_plot_minima_account_for_larger_axis_fonts():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    try:
+        window.show()
+        window.views.setStep("match")
+        window.resize(900, 768)
+        for plot in (window.spectrum_plot, window.eq_plot):
+            axis = plot.getAxis("left")
+            font = axis.label.font()
+            font.setPointSize(18)
+            axis.label.setFont(font)
+            plot.getAxis("bottom").setStyle(tickFont=font)
+        for _ in range(10):
+            app.processEvents()
+        for plot, minimum in ((window.spectrum_plot, 100), (window.eq_plot, 80)):
+            window.workspace.protect_plot_height(plot, minimum)
+        for _ in range(10):
+            app.processEvents()
+        for plot in (window.spectrum_plot, window.eq_plot):
+            assert plot.getViewBox().height() >= plot.getAxis("left").label.boundingRect().width() - 1
+    finally:
+        window.close()
+
+
 def test_actual_output_visualisation_and_pending_input_context():
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = Window()

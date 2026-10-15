@@ -76,6 +76,26 @@ it by default to reserve space for the plots; its View menu can show it, and see
 and elapsed/total time remain visible. Spectrum analysis should identify whether it represents
 that selected passage or the full recording.
 
+### Laptop and short-window layouts
+
+The viewer and inspector sit side by side at window widths of 950 logical pixels
+or more, and stack below that threshold. Navigation labels shorten to keep Export
+reachable. The supported window minimum remains 820 by 560 logical pixels.
+
+Matching keeps both plots visible, with one shared frequency axis underneath the
+filter plot. Short y-axis labels avoid cropped rotated text; the spectrum tooltip
+explains that Power is relative spectral power, not dBFS. Plot minimum heights
+include their titles and axes and protect at least 100 pixels of spectrum drawing
+area and 80 pixels of filter drawing area, increasing for larger y-axis labels.
+
+Empty warning badges take no space. On short windows, or when warnings need more
+room, the viewer can scroll vertically instead of compressing plot contents. The
+inspector scrolls independently; navigation, primary actions and playback remain
+outside both scroll areas. At 900 by 768 with no warnings, both matching plots fit
+without viewer scrolling in the tested offscreen layout. Automated checks also
+cover 1366 by 768, 1280 by 800, the 949-pixel stacked boundary and 820 by 560.
+Real-display scaling and usability checks remain part of issue #70.
+
 ### Reference capture
 
 Reference selection is independent of mix selection. Show a clearly labelled

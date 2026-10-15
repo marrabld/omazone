@@ -1,6 +1,7 @@
 """Persistent song context around tool controls, with independent references."""
 
 from dataclasses import replace
+from math import ceil
 
 import numpy as np
 import pyqtgraph as pg
@@ -219,11 +220,17 @@ class SongWorkspace(QtWidgets.QWidget):
         self.panes.setSizes([700, 420])
         self.reference_pane.hide()
         layout.addWidget(self.panes, 1)
-        self.setMinimumHeight(270)
         self.panes.setChildrenCollapsible(False)
         self.mix_detail.setChildrenCollapsible(False)
-        owner.spectrum_plot.setMinimumHeight(80)
-        owner.eq_plot.setMinimumHeight(70)
+        # Widget heights must include axes/title as well as the drawing area.
+        # An 80px PlotWidget can have a zero-height ViewBox. The enclosing scroll
+        # area honours these minima even when the stacked viewer has less room.
+        owner.spectrum_plot.setMinimumHeight(150)
+        owner.eq_plot.setMinimumHeight(154)
+        for plot, drawing_height in ((owner.spectrum_plot, 100), (owner.eq_plot, 80)):
+            plot.getViewBox().sigResized.connect(
+                lambda _, plot=plot, height=drawing_height: self.protect_plot_height(plot, height)
+            )
         self.timer = QtCore.QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(80)
@@ -232,6 +239,30 @@ class SongWorkspace(QtWidgets.QWidget):
         self.reference_waveform.selection_changed.connect(lambda _: self.refresh_reference())
         owner.section_workbench.target_list.itemSelectionChanged.connect(self.refresh_reference)
         self.mode_changed()
+
+    def minimumSizeHint(self):
+        # Do not impose plot/long-label width hints on a laptop window. Vertical
+        # overflow belongs in the viewer scroll area, never inside a plot.
+        return QtCore.QSize(0, self.layout().minimumSize().height())
+
+    @staticmethod
+    def protect_plot_height(plot, drawing_height):
+        # Include the actual title/tick geometry and the rotated y-axis label,
+        # so larger fonts do not eat the promised drawing area or cut the label.
+        view_height = plot.getViewBox().height()
+        label_height = plot.getAxis("left").label.boundingRect().width()
+        chrome = max(0, plot.height() - view_height)
+        plot.setMinimumHeight(ceil(chrome + max(drawing_height, label_height)))
+
+    def heightForWidth(self, width):
+        # Qt's default height-for-width includes pyqtgraph's preferred scene
+        # sizes, which can turn a small viewer into 1500px of scrollable space.
+        # Only wrapped workspace labels need extra height beyond the minima.
+        height = self.minimumSizeHint().height()
+        for label in (self.label, self.badge):
+            if not label.isHidden():
+                height += max(0, label.heightForWidth(width) - label.minimumSizeHint().height())
+        return height
 
     def preferences(self):
         return {
@@ -533,6 +564,7 @@ class SongWorkspace(QtWidgets.QWidget):
                     else "Load a mix to see the song."
                 )
                 self.badge.setText(" | ".join(self.owner.asset_messages))
+                self.badge.setVisible(bool(self.badge.text()))
             else:
                 selection = self.waveform.selection
                 scope = (
@@ -649,6 +681,7 @@ class SongWorkspace(QtWidgets.QWidget):
                         "Render the chain to obtain limiter input after output gain. Showing earlier source context."
                     )
                 self.badge.setText(" | ".join(messages))
+                self.badge.setVisible(bool(self.badge.text()))
                 if self.mode.currentData() != "waveform":
                     self.timer.start()
             self.refresh_reference()

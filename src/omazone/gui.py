@@ -298,9 +298,14 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         spectra = QtWidgets.QWidget()
         spectra_layout = QtWidgets.QVBoxLayout(spectra)
         spectra_layout.setContentsMargins(0, 0, 0, 0)
-        self.spectrum_plot = self.plot("Relative spectral power", "dB", spectra_layout)
+        self.spectrum_plot = self.plot("Power", "dB", spectra_layout)
+        self.spectrum_plot.setToolTip("Relative spectral power in dB, not absolute level in dBFS.")
+        # These plots share frequency coordinates. Keep the axis on the bottom
+        # plot rather than spending two rows on the same ticks and label.
+        self.spectrum_plot.hideAxis("bottom")
         self.spectrum_plot.addLegend()
-        self.eq_plot = self.plot("Filter gain", "dB", spectra_layout)
+        self.eq_plot = self.plot("Gain", "dB", spectra_layout)
+        self.eq_plot.setToolTip("Matching filter gain in dB.")
         self.eq_plot.addLegend()
         self.eq_plot.setYRange(-8, 8)
         self.eq_plot.setXLink(self.spectrum_plot)
@@ -403,7 +408,14 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.filter_view.canvas,
         )
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self.workspace_split.addWidget(self.workspace)
+        self.workspace_scroll = QtWidgets.QScrollArea()
+        self.workspace_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.workspace_scroll.setWidgetResizable(True)
+        self.workspace_scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.workspace_scroll.setWidget(self.workspace)
+        self.workspace_split.addWidget(self.workspace_scroll)
         self.tool_scroll = self.views.scroll_area
         self.views.setMinimumHeight(175)
         self.workspace_split.addWidget(self.views)
@@ -1131,19 +1143,27 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         matching = self.views.currentWidget() is self.match_page
         wide = self.width() >= NARROW_WIDTH
         orientation = QtCore.Qt.Orientation.Horizontal if wide else QtCore.Qt.Orientation.Vertical
-        if self.workspace_split.orientation() != orientation:
+        orientation_changed = self.workspace_split.orientation() != orientation
+        if orientation_changed:
             self.workspace_split.setOrientation(orientation)
-            self.workspace_split.setSizes(
-                [max(1, self.width() - 320), 320] if wide else [max(1, self.height() - 250), 175]
-            )
         self.views.setMinimumWidth(250 if wide else 0)
         self.views.setMaximumWidth((300 if matching else 340) if wide else 16777215)
-        self.views.setMinimumHeight(0 if wide else 155)
+        self.views.setMinimumHeight(0 if wide else 120)
         self.views.action_layout.setDirection(
             QtWidgets.QBoxLayout.Direction.TopToBottom
             if wide
             else QtWidgets.QBoxLayout.Direction.LeftToRight
         )
+        if orientation_changed:
+            self.views.layout().activate()
+            self.workspace_split.setSizes(
+                [max(1, self.width() - 320), 320]
+                if wide
+                else [
+                    max(1, self.workspace_split.height() - 120 - self.workspace_split.handleWidth()),
+                    120,
+                ]
+            )
         self.preview_mode.hide()
         self.playback_selection_controls.hide()
         self.details_toggle.hide()
