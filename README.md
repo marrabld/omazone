@@ -24,6 +24,10 @@ and developers helping through listening reports, code and documentation.
 
 - Match a whole song or give different passages their own reference targets.
   Adjust the amount, octave smoothing and boost/cut limits.
+- Choose ordinary average-spectrum EQ matching or optional
+  [range-aware correction](docs/range-aware-matching.md), which seeks the nearest
+  supported reference boundary instead of its central curve. Ordinary matching
+  remains the default; compare both by listening.
 - Compare the requested correction with the actual linear-phase FIR response.
   Rendering compensates filter delay and preserves the song's length.
 - See a reference's measured tonal variation with an optional percentile envelope,
@@ -32,8 +36,8 @@ and developers helping through listening reports, code and documentation.
 - Capture named reference passages and save their profiles without embedding
   the recordings. References can use a different sample rate from your mix.
 
-The envelope is a display only. Ordinary reference EQ matching is unchanged;
-optional range-aware correction is still planned. See
+The envelope is a display only and does not use the correction method's
+common-frequency normalisation. Ordinary reference EQ matching is unchanged. See
 [reference variation](docs/reference-variation.md) for how the picture is made.
 
 ### EQ and dynamics, with isolated before/after listening
@@ -330,6 +334,11 @@ The **Reference variation** panel is below the matching settings, not on Listen
 and Mark. Load a reference or capture a passage with at least four full seconds
 to see **Show envelope and density**. Scroll the settings panel if needed. Older
 mean-only targets need new analysis before they can show an envelope.
+Choose **Matching method** to try range-aware correction. It needs new excerpt
+data from both a reference and at least four full seconds of source material;
+older envelope-only targets need reloading or recapturing. **Inspect proposed
+curve** is under Advanced settings and does not render audio. See the
+[method and its limitations](docs/range-aware-matching.md).
 At narrower widths, controls become a strip below the plots. Basic matching
 playback across all tools is Play/Stop, A/B, seeking, and time; looping and view
 options are in **View**. The tabs and primary action bar do not scroll. **Analyse + process** stays visible

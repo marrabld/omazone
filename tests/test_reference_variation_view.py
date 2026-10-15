@@ -234,6 +234,96 @@ def test_isolated_tonal_bands_have_visible_curve_segments_in_plot(session):
         assert polygon.boundingRect().width() > 0
 
 
+def test_range_method_inspection_render_save_reopen_and_new_project(session, tmp_path, monkeypatch):
+    from omazone.project import save_project
+    from omazone.range_match import design_range_match
+
+    window, view, path, wait, app = session
+    load_reference(window, path, wait)
+    assert window.match_method.currentData() == "reference-eq"
+    calls = []
+
+    def measured(*args, **kwargs):
+        calls.append(QtCore.QThread.currentThread())
+        return design_range_match(*args, **kwargs)
+
+    monkeypatch.setattr("omazone.range_match.design_range_match", measured)
+    window.match_method.setCurrentIndex(window.match_method.findData("range-aware-v1"))
+    wait()
+    assert window.project.matching.method == "range-aware-v1"
+    assert "common resolved bands" in window.match_method_note.text()
+    calibration = window.project.calibration
+    window.inspect_match()
+    wait()
+    assert window.project.calibration is calibration and window.output is None
+    assert "audio not rendered" in window.eq_plot.plotItem.titleLabel.text
+    window.process()
+    wait()
+    assert calls and all(thread is not app.thread() for thread in calls)
+    assert not window.project.needs_reanalysis
+    assert window.output is not None and view.image is not None
+    expected = window.output[0].copy()
+    window.sync_project()
+    saved = tmp_path / "range.omazone.json"
+    save_project(saved, window.project)
+    window.project.mark_saved()
+    window.load_project_path(saved)
+    wait()
+    assert window.match_method.currentData() == "range-aware-v1"
+    assert window.project.matching.method == "range-aware-v1"
+    window.render_saved_recipe()
+    wait()
+    np.testing.assert_array_equal(window.output[0], expected)
+    assert len(calls) == 2  # Inspection and explicit analysis, never saved replay.
+    window.project.mark_saved()
+    window.new_project()
+    assert window.match_method.currentData() == "reference-eq"
+    assert window.section_workbench.match_method.currentData() == "reference-eq"
+
+
+def test_old_envelope_can_display_but_cannot_silently_become_range_correction(session):
+    from dataclasses import replace
+
+    window, view, path, wait, _ = session
+    load_reference(window, path, wait)
+    target = window.project.reference_target
+    window.project.reference_target = replace(
+        target, variation=replace(target.variation, observations_db=None)
+    )
+    window.match_method.setCurrentIndex(window.match_method.findData("range-aware-v1"))
+    wait()
+    assert view.image is not None
+    assert "Reload" in window.match_method_note.text()
+    errors = []
+    window.error = errors.append
+    window.process()
+    wait()
+    assert errors and "Reload" in errors[-1]
+    assert window.output is None and window.project.calibration is None
+
+
+def test_section_method_control_is_saved_and_selected_independently(session):
+    window, _, path, wait, _ = session
+    load_reference(window, path, wait)
+    target = window.project.reference_target
+    workbench = window.section_workbench
+    workbench.targets[target.id] = target
+    workbench.refresh_targets()
+    window.views.setStep("sections")
+    workbench.name.setText("Whole passage")
+    workbench.start.setValue(0)
+    workbench.end.setValue(8)
+    workbench.match_method.setCurrentIndex(workbench.match_method.findData("range-aware-v1"))
+    workbench.add_section()
+    workbench.render_all()
+    wait()
+    assert workbench.sections[0].settings.method == "range-aware-v1"
+    assert window.project.calibration.sections[0].section.settings.method == "range-aware-v1"
+    assert window.project.matching.method == "reference-eq"
+    workbench.select_row()
+    assert workbench.match_method.currentData() == "range-aware-v1"
+
+
 def test_restored_view_preference_redraws_and_late_results_after_reset_are_ignored(session):
     window, view, path, wait, _ = session
     load_reference(window, path, wait)
@@ -255,9 +345,12 @@ def test_restored_view_preference_redraws_and_late_results_after_reset_are_ignor
 
 
 @pytest.mark.parametrize("width,height", [(820, 560), (900, 768), (1280, 800)])
-def test_density_display_keeps_plots_and_fixed_actions_readable(session, width, height):
+@pytest.mark.parametrize("method", ["reference-eq", "range-aware-v1"])
+def test_density_display_keeps_plots_and_fixed_actions_readable(session, width, height, method):
     window, view, path, wait, app = session
     load_reference(window, path, wait)
+    window.match_method.setCurrentIndex(window.match_method.findData(method))
+    wait()
     window.resize(width, height)
     for _ in range(8):
         app.processEvents()

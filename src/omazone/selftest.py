@@ -3,8 +3,9 @@
 import numpy as np
 
 from .dynamic_eq import DynamicEQSettings, dynamic_eq_parameters
-from .engine import analyse
+from .engine import MatchSettings, analyse
 from .multiband import MultibandResult
+from .range_match import design_range_match
 from .reference_variation import analyse_variation
 from .sections import TargetProfile
 from .waveform import SampleRegion
@@ -42,6 +43,9 @@ def verify(window):
     variation = analyse_variation(reference, rate)
     if variation is None or not variation.available:
         raise RuntimeError("Bundled reference-variation analysis failed.")
+    range_spec = design_range_match(reference, rate, variation, MatchSettings(method="range-aware-v1"))
+    if np.max(np.abs(range_spec.requested_db)) > 1e-9:
+        raise RuntimeError("Bundled range-aware matching changed an identical reference.")
     target = TargetProfile("selftest", "Generated reference", analyse(reference, rate), rate,
                            SampleRegion(0, len(reference)), "Generated", variation)
     window.project.reference_target = target

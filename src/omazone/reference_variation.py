@@ -15,7 +15,8 @@ from scipy import signal
 
 from .engine import Spectrum, validate_audio
 
-KIND = "reference-variation-v1"
+LEGACY_KIND = "reference-variation-v1"
+KIND = "reference-variation-v2"
 MIN_WINDOWS = 4
 MAX_WINDOWS = 4096
 FLOOR_DB = -120
@@ -42,6 +43,8 @@ POLICY = {
     "maximum_windows": MAX_WINDOWS,
     "minimum_band_coverage": 0.8,
 }
+LEGACY_POLICY = deepcopy(POLICY)
+POLICY = {**POLICY, "retained_observations": "accepted-excerpt-relative-db-hz"}
 
 
 def band_edges(rate):
@@ -87,6 +90,7 @@ class ReferenceVariation:
     valid: np.ndarray
     counts: np.ndarray
     band_counts: np.ndarray
+    observations_db: np.ndarray | None = None
 
     @property
     def frequency(self):
@@ -97,17 +101,15 @@ class ReferenceVariation:
         return bool(np.any(self.valid))
 
 
-def analyse_variation(audio, rate):
+def excerpt_observations(audio, rate, edges):
+    """Bounded, equal-weight accepted rows on a caller-supplied band grid."""
     audio = validate_audio(audio)
     if type(rate) is not int or rate <= 40 or audio.shape[1] not in (1, 2):
         raise ValueError("Reference variation needs mono/stereo audio above 40 Hz sample rate.")
-    if rate < 100:
-        return None
     candidates = len(audio) // rate
     if candidates < MIN_WINDOWS:
-        return None  # Keep short targets usable for ordinary mean-spectrum matching.
+        raise ValueError("Range analysis needs at least four full seconds of audio.")
     starts = np.linspace(0, candidates - 1, min(candidates, MAX_WINDOWS), dtype=int) * rate
-    edges = band_edges(rate)
     size = fft_samples(rate)
     rows = np.empty((len(starts), len(edges) - 1))
     energies = np.empty(len(starts))
@@ -125,7 +127,18 @@ def analyse_variation(audio, rate):
         rows[index] = band_density(Spectrum(frequency, power), edges)
         energies[index] = np.sum(power) * (frequency[1] - frequency[0])
     gate = max(10 ** (-90 / 10), float(np.max(energies)) * 10 ** (-40 / 10))
-    rows = rows[energies > gate]
+    return rows[energies > gate], len(starts)
+
+
+def analyse_variation(audio, rate):
+    audio = validate_audio(audio)
+    if type(rate) is not int or rate <= 40 or audio.shape[1] not in (1, 2):
+        raise ValueError("Reference variation needs mono/stereo audio above 40 Hz sample rate.")
+    if rate < 100 or len(audio) // rate < MIN_WINDOWS:
+        return None
+    edges = band_edges(rate)
+    rows, sampled = excerpt_observations(audio, rate, edges)
+    size = fft_samples(rate)
     good = np.isfinite(rows) & (rows > FLOOR_DB)
     band_counts = np.sum(good, axis=0)
     # Reject under-resolved bands and bands mostly absent/below the display floor.
@@ -142,7 +155,7 @@ def analyse_variation(audio, rate):
         if valid[band]:
             bounds[:, band] = np.quantile(values, [0.1, 0.5, 0.9], method="linear")
     result = ReferenceVariation(
-        rate, len(audio), len(starts), len(rows), edges, *bounds, valid, counts, band_counts
+        rate, len(audio), sampled, len(rows), edges, *bounds, valid, counts, band_counts, rows
     )
     validate_variation(result)
     return result
@@ -210,6 +223,25 @@ def validate_variation(value):
         )
     ):
         raise ValueError("Invalid reference-variation range ordering.")
+    if value.observations_db is not None:
+        rows = value.observations_db
+        if (
+            rows.shape != (value.accepted_windows, bands)
+            or not np.all(np.isfinite(rows))
+            or np.any((rows < FLOOR_DB) | (rows > 0))
+        ):
+            raise ValueError("Invalid reference-variation excerpt observations.")
+        for band in range(bands):
+            values = rows[rows[:, band] > FLOOR_DB, band]
+            if not np.array_equal(np.histogram(values, bins=DB_EDGES)[0], value.counts[band]):
+                raise ValueError("Reference observations do not match density counts.")
+            if valid[band] and not np.allclose(
+                np.quantile(values, [0.1, 0.5, 0.9], method="linear"),
+                [value.lower_db[band], value.median_db[band], value.upper_db[band]],
+                rtol=0,
+                atol=1e-10,
+            ):
+                raise ValueError("Reference observations do not match quantiles.")
 
 
 def variation_dict(value):
@@ -217,13 +249,14 @@ def variation_dict(value):
         return None
     validate_variation(value)
     return {
-        "kind": KIND,
-        "policy": deepcopy(POLICY),
+        "kind": KIND if value.observations_db is not None else LEGACY_KIND,
+        "policy": deepcopy(POLICY if value.observations_db is not None else LEGACY_POLICY),
         **{
             name: getattr(value, name).tolist()
             if isinstance(getattr(value, name), np.ndarray)
             else getattr(value, name)
             for name in value.__dataclass_fields__
+            if name != "observations_db" or value.observations_db is not None
         },
     }
 
@@ -231,15 +264,19 @@ def variation_dict(value):
 def parse_variation(data):
     if data is None:
         return None
+    legacy = isinstance(data, dict) and data.get("kind") == LEGACY_KIND
+    fields = set(ReferenceVariation.__dataclass_fields__) - (
+        {"observations_db"} if legacy else set()
+    )
     if (
         not isinstance(data, dict)
-        or set(data) != {"kind", "policy", *ReferenceVariation.__dataclass_fields__}
-        or data["kind"] != KIND
+        or set(data) != {"kind", "policy", *fields}
+        or data["kind"] not in (KIND, LEGACY_KIND)
     ):
         raise ValueError("Unsupported reference-variation format or policy.")
     try:
         if json.dumps(data["policy"], sort_keys=True, allow_nan=False) != json.dumps(
-            POLICY, sort_keys=True
+            LEGACY_POLICY if legacy else POLICY, sort_keys=True
         ):
             raise ValueError("Unsupported reference-variation analysis policy.")
         if (
@@ -265,6 +302,22 @@ def parse_variation(data):
             array = np.asarray(data[name])
             if array.dtype.kind not in "iu":
                 raise ValueError("Reference density counts must be integers.")
+        if not legacy:
+            rows = data["observations_db"]
+            accepted = data["accepted_windows"]
+            if (
+                type(accepted) is not int
+                or not 0 <= accepted <= MAX_WINDOWS
+                or not isinstance(rows, list)
+                or len(rows) != accepted
+                or any(
+                    not isinstance(row, list)
+                    or len(row) != len(data["edges"]) - 1
+                    or any(type(item) not in (int, float) for item in row)
+                    for row in rows
+                )
+            ):
+                raise ValueError("Invalid reference excerpt observation array.")
         value = ReferenceVariation(
             data["rate"],
             data["frames"],
@@ -281,6 +334,11 @@ def parse_variation(data):
                     "counts",
                     "band_counts",
                 )
+            ),
+            None
+            if legacy
+            else np.asarray(data["observations_db"], dtype=float).reshape(
+                data["accepted_windows"], len(data["edges"]) - 1
             ),
         )
         validate_variation(value)

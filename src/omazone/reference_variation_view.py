@@ -5,6 +5,7 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 from scipy.interpolate import PchipInterpolator
 
+from .range_match import range_unavailable
 from .reference_variation import DB_EDGES, FLOOR_DB, MIN_WINDOWS, band_density
 
 
@@ -171,12 +172,20 @@ class ReferenceVariationView(QtWidgets.QGroupBox):
                 f"1 reference passage: {target.name}, {start:.2f}-{end:.2f} s. "
                 f"{variation.accepted_windows}/{variation.sampled_windows} sampled 1 s excerpts passed the gates. "
                 "10-90% range; dashed median. Brighter = larger fraction per 1 dB bin. "
-                "Within-passage variation, not confidence. Display only; EQ is unchanged."
+                "Within-passage variation, not confidence. Display toggle does not change EQ."
             )
         self.note.setToolTip(
             "Each band's histogram is divided by its number of above-floor observations, on one shared 0..1 scale with square-root opacity. Frequency shading is interpolated for display. Blank bands have insufficient observations, energy or FFT resolution. Spectra are band-averaged relative power density, not dBFS or a measure of musical quality."
         )
         self.note.setText(text)
+        if self.owner.match_method.currentData() == "range-aware-v1":
+            whole = self.owner.project.reference_target
+            reason = range_unavailable(whole.variation if whole else None)
+            self.owner.match_method_note.setText(reason or (
+                "Uses equal-weight excerpts over common resolved bands. The envelope uses full-spectrum units. Static EQ; compare by ear."
+            ))
+        else:
+            self.owner.match_method_note.setText("Match the average reference spectrum. The envelope is an optional display.")
 
     def draw(self, before, after, target):
         plot = self.owner.spectrum_plot

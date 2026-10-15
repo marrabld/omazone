@@ -7,9 +7,10 @@ the analysis automatically when enough material is available.
 
 ![Measured reference variation overlaid with the mix and output](images/omazone-reference-variation.png)
 
-This first implementation is a display, **not range-aware correction**. Ordinary
-reference EQ matching remains unchanged. The optional Range-aware matching method
-is subsequent work under issue #98. No bootstrap confidence estimate is included.
+The envelope itself is a display. Ordinary reference EQ matching remains
+unchanged. An optional [Range-aware matching method](range-aware-matching.md)
+uses retained excerpt statistics for static correction; it has a different
+normalisation from the display. No bootstrap confidence estimate is included.
 
 ## What the picture means
 
@@ -60,7 +61,7 @@ attractive without making those claims.
    material remains above the absolute gate. Full-spectrum normalisation also
    means differing bandwidth or ultrasonic content can shift relative levels.
    Do not interpret a boundary crossing as proof of an audible EQ problem; a
-   later correction method needs an explicit common-frequency-range policy.
+   Range-aware correction therefore uses an explicit common-frequency-range policy.
 5. Integrate the PSD into equally log-spaced bands from 20 Hz to the lower of
    20 kHz and Nyquist, with approximately three bands per octave. Fractional
    FFT-bin overlap is included. Divide band power by bandwidth and total spectral
@@ -106,8 +107,12 @@ area around the median. Neither appearance is evidence of statistical confidence
 ## Targets, projects and performance
 
 New distribution-bearing target libraries use `omazone-targets` version 2, with
-an embedded `reference-variation-v1` policy, quantiles, support mask and histogram
-counts. Projects retain that optional data alongside their reference targets.
+an embedded `reference-variation-v2` policy, quantiles, support mask, histogram
+counts and accepted excerpt-by-band observations. The displayed statistics are
+unchanged from v1; retained observations support per-excerpt common-domain
+normalisation for optional range-aware correction. V1 variation data remains
+displayable without inventing the missing observations.
+Projects retain that optional data alongside their reference targets.
 Raw audio is not embedded. The mean spectrum remains unchanged, so storing or
 viewing variation does not invalidate saved matching calibration.
 
@@ -119,8 +124,8 @@ of silently being dropped or replaced.
 
 Reference analysis runs in the existing loading/capture workers, not the audio
 callback or GUI thread. Temporary observations are bounded by 4096 excerpts;
-profiles retain scalar summaries and a small fixed histogram, not audio or all
-FFT frames. Display toggles reuse the currently valid spectrum payload and do
+profiles retain summaries, a small fixed histogram and at most 4096 excerpt-by-band
+observations, not audio or FFT frames. Display toggles reuse the currently valid spectrum payload and do
 not repeat reference analysis or matching. Old responses cannot restore an
 envelope belonging to a different target or an unloaded recording.
 The view also keeps a one-entry reference-density image cache, so a changed mix

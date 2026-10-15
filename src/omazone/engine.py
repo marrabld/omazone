@@ -4,7 +4,7 @@ Audio arrays always have shape (samples, channels). Power spectra are channel
 averages, not spectra of a mono sum, so out-of-phase stereo is not cancelled.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 from scipy import signal
@@ -31,6 +31,18 @@ class MatchSettings:
     max_boost_db: float = 6.0
     max_cut_db: float = 6.0
     taps: int = 2049
+    method: str = "reference-eq"
+
+
+MATCH_METHODS = ("reference-eq", "range-aware-v1")
+
+
+def matching_dict(settings):
+    """Keep legacy ordinary-matching calibration signatures byte-compatible."""
+    result = asdict(settings)
+    if settings.method == "reference-eq":
+        result.pop("method")
+    return result
 
 
 @dataclass(frozen=True)
@@ -72,6 +84,8 @@ def analyse(audio, sample_rate):
 
 def design_match(source, reference, sample_rate, settings=None):
     settings = settings if settings is not None else MatchSettings()
+    if settings.method != "reference-eq":
+        raise ValueError("Range-aware matching requires excerpt observations, not mean spectra.")
     if not 0 <= settings.amount <= 1:
         raise ValueError("Amount must be between zero and one.")
     if settings.taps < 3 or settings.taps % 2 != 1:

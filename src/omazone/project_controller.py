@@ -85,6 +85,7 @@ class ProjectController:
             self.retained_number(self.boost, old.max_boost_db),
             self.retained_number(self.cut, old.max_cut_db),
             old.taps,
+            self.match_method.currentData(),
         )
         self.project.transition_ms = self.retained_number(
             self.section_workbench.transition_ms, self.project.transition_ms
@@ -229,6 +230,10 @@ class ProjectController:
             self.section_workbench.targets = {}
             self.section_workbench.sections = []
             self.section_workbench.refresh_targets()
+            with QtCore.QSignalBlocker(self.match_method):
+                self.match_method.setCurrentIndex(0)
+            with QtCore.QSignalBlocker(self.section_workbench.match_method):
+                self.section_workbench.match_method.setCurrentIndex(0)
             self.section_workbench.refresh()
             self.clipping_inspector.clear()
             self.clipping_inspector.reset_repair_status()
@@ -378,6 +383,8 @@ class ProjectController:
             self.section_workbench.targets = dict(project.targets)
             self.section_workbench.sections = list(project.sections)
             self.section_workbench.refresh_targets()
+            with QtCore.QSignalBlocker(self.match_method):
+                self.match_method.setCurrentIndex(self.match_method.findData(project.matching.method))
             for control, value in (
                 (self.amount, project.matching.amount * 100),
                 (self.smoothing, project.matching.smoothing_octaves),
