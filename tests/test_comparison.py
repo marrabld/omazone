@@ -55,6 +55,7 @@ def test_every_comparison_names_a_stage_and_the_original_names_none():
         "repair",
         "original",
         "eq",
+        "filters",
         "dynamics",
         "output-gain",
         "limiter",

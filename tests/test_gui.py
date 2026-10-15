@@ -104,6 +104,166 @@ def test_bundled_selftest_checks_generated_three_band_and_limiter_without_device
         window.close()
 
 
+@pytest.mark.parametrize("render_path", ["saved", "whole", "sections"])
+def test_corrective_filter_handoff_comparisons_invalidation_save_and_export(
+    tmp_path, monkeypatch, render_path
+):
+    from omazone.filters import (
+        FilterSettings,
+        FiltersSettings,
+        filter_parameters,
+        render_filters,
+    )
+    from omazone.sections import capture_target
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    errors = []
+    window.error = errors.append
+    audio = np.random.default_rng(616).normal(0, 0.08, (16000, 2))
+    source = tmp_path / "source.wav"
+    reference = tmp_path / "reference.wav"
+    sf.write(source, audio, RATE, subtype="DOUBLE")
+    sf.write(reference, audio * 0.8, RATE, subtype="DOUBLE")
+    recipe = FiltersSettings((FilterSettings(frequency=80, slope=24),))
+
+    def wait():
+        deadline = time.monotonic() + 20
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert window.worker is None and not errors
+
+    try:
+        window.loaded("source", load_audio(source))
+        window.manual_eq_view.add_band(1800, -4)
+        window.compressor_view.enabled.setChecked(True)
+        window.compressor_view.threshold.setValue(-30)
+        window.compressor_view.ratio.setValue(3)
+        window.output_view.gain.setValue(-2)
+        window.output_view.limiter_enabled.setChecked(True)
+        window.project.stages["filters"].parameters = filter_parameters(recipe)
+        window.set_stage_bypass("filters", False)
+        if render_path == "whole":
+            window.loaded("reference", load_audio(reference))
+            window.process()
+        elif render_path == "sections":
+            target = capture_target(
+                audio * 0.8, RATE, SampleRegion(0, len(audio)), "Target", "target", "Generated"
+            )
+            window.section_workbench.targets = {target.id: target}
+            window.section_workbench.sections = [
+                SectionAssignment("section", "Song", SampleRegion(0, len(audio)), target.id)
+            ]
+            window.section_workbench.refresh_targets()
+            window.section_workbench.refresh()
+            window.section_workbench.render_all()
+        else:
+            window.render_saved_recipe()
+        wait()
+        result = window.chain_result
+        np.testing.assert_array_equal(
+            result.filtered, render_filters(result.equalized, RATE, recipe)
+        )
+        assert window.filters_before is result.equalized
+        assert window.filters_after is result.filtered
+        assert window.dynamics_before is result.filtered
+        assert window.dynamics_after is result.pre_output
+        assert window.stage_pair("filters").before is result.equalized
+        assert window.stage_pair("filters").after is result.filtered
+        assert window.stage_pair("filters").after is not result.output
+        with pytest.raises(KeyError):
+            window.stage_pair("unknown")
+        window.apply_comparison("filters", Side.BEFORE)
+        assert window.comparison().before is result.equalized
+        window.toggle_ab()
+        assert window.comparison().side is Side.AFTER
+        assert window.preview is window.filters_preview
+
+        calibration = window.project.calibration
+        eq_recipe = dict(window.project.stages["eq"].parameters)
+        eq_preview = window.eq_preview
+        eq_audio = result.equalized
+        recipe = FiltersSettings((FilterSettings(frequency=120, slope=24),))
+        window.project.stages["filters"].parameters = filter_parameters(recipe)
+        window.invalidate_filters()
+        assert window.eq_preview is eq_preview
+        assert window.filters_before is eq_audio
+        assert not window.comparison("filters").available
+        assert window.dynamics_before is None and not window.comparison("dynamics").available
+        assert window.output is None and not window.export_button.isEnabled()
+        window.render_saved_recipe()
+        wait()
+        assert window.chain_result.equalized is eq_audio
+        assert window.renderer.computations["eq"] == 1
+        assert window.renderer.computations["filters"] == 2
+        assert window.project.calibration is calibration
+        assert window.project.stages["eq"].parameters == eq_recipe
+
+        saved = tmp_path / "filters.omazone.json"
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved), ""))
+        window.save_current_project()
+        wait()
+        expected = window.chain_result.output.copy()
+        window.open_project_path(saved)
+        wait()
+        assert not window.project.stages["filters"].bypassed
+        assert window.project.stages["filters"].parameters == filter_parameters(recipe)
+        window.render_saved_recipe()
+        wait()
+        np.testing.assert_array_equal(window.chain_result.output, expected)
+        window.views.setStep("export")
+        rows = [window.export_view.chain.item(i).text() for i in range(window.export_view.chain.count())]
+        assert "Corrective filters: ready" in rows
+        window.apply_comparison("filters", Side.AFTER)
+        window.waveform.set_selection(SampleRegion(100, 500))
+        exported = tmp_path / "full-chain.wav"
+        monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(exported), ""))
+        window.export()
+        wait()
+        written, rate = sf.read(exported, always_2d=True)
+        assert rate == RATE and written.shape == audio.shape
+        np.testing.assert_array_equal(written, expected.astype(np.float32))
+
+        window.stage_actions["filters"].setChecked(True)
+        assert window.project.stages["filters"].bypassed
+        assert window.project.stages["filters"].parameters == filter_parameters(recipe)
+        window.render_saved_recipe()
+        wait()
+        assert window.chain_result.filtered is window.chain_result.equalized
+    finally:
+        if window.worker is not None:
+            window.worker.wait()
+            app.processEvents()
+        window.project.mark_saved()
+        window.close()
+
+
+def test_filters_without_controls_still_report_status_and_can_be_skipped():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    audio = np.random.default_rng(617).normal(0, 0.05, (16000, 2))
+    try:
+        window.loaded("source", (audio, RATE, analyse(audio, RATE), "Generated"))
+        window.set_stage_bypass("filters", False)
+        window.views.setStep("eq")
+        assert not window.continue_button.isEnabled()
+        assert "corrective filters" in window.views.action_label.text()
+        window.views.setStep("export")
+        assert window.export_view.route_target == ("step", "eq")
+        window.export_view.activate_route()
+        assert window.views.currentStep() == "eq"
+        assert window.stage_actions["filters"].isEnabled()
+        window.stage_actions["filters"].setChecked(True)
+        assert window.current_step_status(window.workflow_status()).can_continue
+        window.go_continue()
+        assert window.views.currentStep() == "dynamics"
+    finally:
+        window.project.mark_saved()
+        window.close()
+        app.processEvents()
+
+
 def test_scrub_and_ab_share_cursor_without_audio_device(monkeypatch, unsmoothed_audition):
     import sounddevice as sd
 
@@ -1903,6 +2063,7 @@ def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path)
             "Repair: skipped",
             "Match: skipped",
             "Manual EQ: ready",
+            "Corrective filters: skipped",
             "Dynamics: skipped",
             "Output gain: ready",
             "Final limiter: skipped",
@@ -2893,6 +3054,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
             "repair": 1,
             "match": 1,
             "eq": 1,
+            "filters": 1,
             "dynamics": 1,
             "output": 1,
         }
@@ -2916,6 +3078,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
             "repair": 1,
             "match": 1,
             "eq": 1,
+            "filters": 1,
             "dynamics": 2,
             "output": 2,
         }
@@ -3061,7 +3224,7 @@ def test_final_limiter_output_ui_ab_export_and_retained_gain(
         np.testing.assert_allclose(window.output[0], expected)
         window.go_continue()
         assert window.views.currentStep() == "export"
-        assert window.export_view.chain.item(5).text() == "Final limiter: ready"
+        assert window.export_view.chain.item(window.export_view.chain.count() - 1).text() == "Final limiter: ready"
         exported = tmp_path / "limited.wav"
         monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(exported), ""))
         window.export_view.export_button.click()
@@ -3210,6 +3373,7 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch, un
             "repair": 1,
             "match": 1,
             "eq": 1,
+            "filters": 1,
             "dynamics": 1,
             "output": 1,
         }

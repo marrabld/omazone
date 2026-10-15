@@ -1,7 +1,7 @@
 # Three-band compression
 
 Three-band mode is an optional alternative to broadband compression in the
-existing Dynamics stage. It follows matching and manual EQ, and precedes output
+existing Dynamics stage. It follows matching, manual EQ and corrective filters, and precedes output
 gain and the final limiter. It does not add another navigation step.
 
 ![Three-band crossover controls, selected-band detector and reduction history](images/omazone-multiband.png)

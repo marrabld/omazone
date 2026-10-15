@@ -18,6 +18,7 @@ from scipy import signal
 
 from omazone.engine import analyse, audition_pair, design_match, render
 from omazone.gui import Window
+from omazone.render_payload import RenderPayload
 from omazone.waveform import PeakIndex, SampleRegion
 
 
@@ -63,7 +64,10 @@ def main():
     )
     spec = design_match(source_spectrum, target_spectrum, rate)
     processed = render(audio, spec)
-    window.processed((processed, analyse(processed, rate), spec, audition_pair(audio, processed, rate)))
+    window.processed(RenderPayload(
+        output=processed, spectrum=analyse(processed, rate), spec=spec,
+        matching_preview=audition_pair(audio, processed, rate),
+    ))
     window.update_buttons()
     window.show_waveform()
     window.waveform.set_selection(SampleRegion(rate, int(rate * 2.5)))

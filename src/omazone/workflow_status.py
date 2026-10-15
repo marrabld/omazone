@@ -5,6 +5,8 @@ from enum import Enum
 
 from .dynamics import settings_from_parameters as dynamics_settings
 from .dynamics import validate_settings as validate_dynamics
+from .filters import filters_from_parameters
+from .filters import validate_settings as validate_filters
 from .limiter import settings_from_parameters as limiter_settings
 from .limiter import validate_settings as validate_limiter
 from .manual_eq import eq_from_parameters, validate_eq
@@ -101,13 +103,14 @@ def matching_analysis_state(project):
 
 
 # What is still missing when a stage is enabled but holds no recipe of its own.
-# Only Manual EQ reaches this today: Repair and Matching pass through until used,
+# Manual EQ and Filters reach this: Repair and Matching pass through until used,
 # and the processor stages all default to a recipe the renderer accepts. The
 # fallback keeps a newly added stage from failing outright.
 CONFIGURE_GUIDANCE = {
     "repair": "Find and accept peaks to repair, or skip this step.",
     "match": "Analyse the reference to build a filter, or skip this step.",
     "eq": "Add a band to use this step, or skip it.",
+    "filters": "Configure corrective filters in a saved recipe, or skip them in Project > Stage bypass.",
     "dynamics": "Set threshold and ratio, then render.",
     "output": "Set output gain, then render.",
     "limiter": "Set the limiter ceiling, then render.",
@@ -137,6 +140,10 @@ def stage_configured(project, stage, sample_rate=48000):
     if stage == "dynamics":
         validate_dynamics(dynamics_settings(parameters, sample_rate), sample_rate)
         return True
+    if stage == "filters":
+        settings = filters_from_parameters(parameters)
+        validate_filters(settings, sample_rate)
+        return any(item.enabled for item in settings.filters)
     if stage == "output":
         validate_output(output_settings(parameters))
         return True
@@ -231,7 +238,7 @@ def derive_workflow_status(
             state = RenderState.NOT_CONFIGURED
             reason = CONFIGURE_GUIDANCE.get(stage, f"Configure or skip {stage_name(stage)}.")
             action = "Configure"
-        elif stage in ("match", "eq", "dynamics", "output", "limiter") and matching_blocked:
+        elif stage in ("match", "eq", "filters", "dynamics", "output", "limiter") and matching_blocked:
             state = RenderState.NEEDS_RENDER
             reason, action = "Analyse or skip Matching before rendering.", "Analyse"
         elif available:
@@ -308,6 +315,7 @@ def stage_name(stage):
         "repair": "Repair",
         "match": "Matching",
         "eq": "Manual EQ",
+        "filters": "Corrective filters",
         "dynamics": "Dynamics",
         "output": "Output",
         "limiter": "Limiter",
