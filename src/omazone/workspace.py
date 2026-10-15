@@ -685,6 +685,8 @@ class SongWorkspace(QtWidgets.QWidget):
                 if self.mode.currentData() != "waveform":
                     self.timer.start()
             self.refresh_reference()
+            if hasattr(self.owner, "stage_measurements"):
+                self.owner.stage_measurements.refresh()
             editable = self.owner.worker is None and self.owner.source is not None
             self.waveform.setEnabled(editable)
             self.overview.setEnabled(editable)
@@ -924,5 +926,6 @@ class SongWorkspace(QtWidgets.QWidget):
     def close_jobs(self):
         self.closing = True
         self.timer.stop()
+        self.owner.stage_measurements.close_jobs()
         if self.job:
             self.job.wait()

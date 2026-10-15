@@ -35,6 +35,7 @@ from .project_controller import ProjectController
 from .render_payload import RenderPayload
 from .section_view import SectionWorkbench
 from .sections import TargetProfile
+from .stage_measurement_view import StageMeasurementView
 from .tool_panel import ToolPanel
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
@@ -407,6 +408,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.output_view.canvas,
             self.filter_view.canvas,
         )
+        self.stage_measurements = StageMeasurementView(self)
+        self.views.settings_layout.addWidget(self.stage_measurements)
         self.workspace_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.workspace_scroll = QtWidgets.QScrollArea()
         self.workspace_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
