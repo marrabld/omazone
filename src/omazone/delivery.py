@@ -1,78 +1,47 @@
-"""Final file delivery: bit depth, explicit headroom, and optional dither.
+"""Export-only conversion. Processing recipes and audition audio stay unchanged.
 
-This runs only when a file is written. It never touches the saved recipe, the
-rendered chain or A/B audition, so what you hear stays what the recipe produced.
-
-Over-range audio is refused rather than clipped. libsndfile clips silently on
-integer writes, and a silently clipped master is the worst outcome this tool can
-produce, so the caller must attenuate first and confirm.
+PCM uses explicit nearest-even quantisation and full-amplitude TPDF dither.
+Left-aligned int32 samples let libsndfile pack 24-bit codes without a second,
+platform-dependent floating-point conversion. Over-range inputs are refused.
 """
 
-from dataclasses import dataclass
+import math
+import os
+import tempfile
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
 from .engine import validate_audio
 
-# Float first: it is the default and the archival choice. Integers follow.
 FORMATS = (
     ("float", "32-bit float WAV", "FLOAT"),
     ("pcm_24", "24-bit WAV", "PCM_24"),
-    ("pcm_16", "16-bit WAV", "PCM_16"),
 )
 SUBTYPES = {key: subtype for key, _, subtype in FORMATS}
 LABELS = {key: title for key, title, _ in FORMATS}
-BITS = {key: 32 if key == "float" else int(subtype.removeprefix("PCM_")) for key, subtype in SUBTYPES.items()}
-# Any |sample| at or above this would wrap or clip on an integer write. libsndfile
-# clamps rather than erroring, so this must be caught before writing.
-CEILING = {"pcm_24": 1.0 - 2.0**-24, "pcm_16": 1.0 - 2.0**-16}
-EPSILON = 1e-12
+PCM_SCALE = 2**23
+PCM_STEP = 1 / PCM_SCALE
+# Highest positive 24-bit code. The negative endpoint is -1. We deliberately
+# use a symmetric input ceiling so stereo gain and either polarity stay safe.
+CEILING = {"pcm_24": 1 - PCM_STEP}
 
 
 @dataclass(frozen=True)
 class DeliverySettings:
-    """What to write, not how to process.
-
-    ``dither`` defaults on for integer targets because the reduction to 24 or
-    16 bits adds quantisation distortion either way; dither trades that for a
-    small noise floor. Float targets have no quantisation step, so the flag is
-    ignored rather than applied.
-    """
-
     format: str = "float"
     dither: bool = True
-    # Only used by tests and by anyone who needs reproducible output. Leaving it
-    # unset uses a fresh generator, so each export is an independent draw.
     seed: int | None = None
-
-
-def validate_settings(settings):
-    if settings.format not in SUBTYPES:
-        raise ValueError("Choose 32-bit float, 24-bit or 16-bit delivery.")
-    if type(settings.dither) is not bool:
-        raise ValueError("Dither must be on or off.")
-    if settings.seed is not None and type(settings.seed) is not int:
-        raise ValueError("Dither seed must be a whole number or unset.")
-
-
-def format_label(settings):
-    return LABELS[settings.format]
-
-
-def quantises(settings):
-    """Integer targets reduce precision; float targets have no step to dither."""
-    return settings.format != "float"
 
 
 @dataclass(frozen=True)
 class DeliveryReport:
-    """What the write will do, so Export can state it before writing."""
-
     peak_dbfs: float
     attenuation_db: float
     dithered: bool
-    steps: int
+    bits: int | None
     clipped: bool
 
     @property
@@ -80,118 +49,167 @@ class DeliveryReport:
         return not self.clipped
 
 
-def peak_dbfs(audio):
-    """Highest absolute sample as dBFS. Silence reports -inf rather than 0."""
-    peak = float(np.max(np.abs(validate_audio(audio))))
-    return 20 * np.log10(peak) if peak > EPSILON else float("-inf")
+def validate_settings(settings):
+    if (
+        not isinstance(settings, DeliverySettings)
+        or type(settings.format) is not str
+        or settings.format not in SUBTYPES
+    ):
+        raise ValueError("Choose 32-bit float or 24-bit PCM delivery.")
+    if type(settings.dither) is not bool:
+        raise ValueError("Dither must be on or off.")
+    if settings.seed is not None and (type(settings.seed) is not int or settings.seed < 0):
+        raise ValueError("Dither seed must be a non-negative integer or unset.")
 
 
-def measure(audio, settings):
-    """Report the render's headroom and the dither it would receive.
-
-    ``attenuation_db`` is the amount needed for an integer target to fit. It is
-    zero for float, which has no ceiling.
-    """
-    validate_settings(settings)
-    peak = peak_dbfs(audio)
-    if not quantises(settings):
-        return DeliveryReport(peak, 0.0, False, None, False)
-    ceiling = CEILING[settings.format]
-    # Work in linear terms so the number stays meaningful when the overshoot is
-    # a fraction of a dB. Rounding this to 0.00 dB would read as "no change".
-    peak_linear = float(np.max(np.abs(validate_audio(audio))))
-    attenuation_db = max(0.0, -20 * np.log10(ceiling / max(peak_linear, EPSILON)))
-    return DeliveryReport(
-        peak,
-        attenuation_db,
-        bool(settings.dither),
-        BITS[settings.format],
-        attenuation_db > EPSILON,
-    )
+def format_label(settings):
+    return LABELS[settings.format]
 
 
-def apply_attenuation(audio, attenuation_db):
-    """Scale the render so an integer target fits. Returns the attenuated copy."""
-    audio = validate_audio(audio)
-    if not np.isfinite(attenuation_db) or attenuation_db > EPSILON:
-        raise ValueError("Delivery attenuation must be zero or negative.")
-    if attenuation_db == 0:
-        return audio.copy()
-    scaled = audio * 10 ** (attenuation_db / 20)
-    if not np.all(np.isfinite(scaled)):
-        raise ValueError("Delivery attenuation produced non-finite audio.")
-    return scaled
+def quantises(settings):
+    return settings.format == "pcm_24"
 
 
 def measured_step(settings):
-    """Quantisation step in linear units for an integer target.
+    """The exact normalised 24-bit quantisation step, not a measured ramp gap."""
+    validate_settings(settings)
+    return PCM_STEP if quantises(settings) else 0.0
 
-    Verified against libsndfile 1.2.2 by encoding a narrow ramp: both 24 and
-    16 bit land on the expected 2**-(bits-1) grid. Float has no step.
-    """
+
+def input_ceiling(settings):
+    validate_settings(settings)
     if not quantises(settings):
+        return float(np.finfo(np.float32).max)
+    # Reserve a full LSB for TPDF's peak, even at the loudest sample. Never
+    # reduce or silently turn off dither because a recording has a loud peak.
+    return CEILING["pcm_24"] - (PCM_STEP if settings.dither else 0)
+
+
+def dbfs(peak):
+    return 20 * math.log10(peak) if peak > 0 else float("-inf")
+
+
+def peak_dbfs(audio):
+    return dbfs(float(np.max(np.abs(validate_audio(audio)))))
+
+
+def measure_peak(peak, settings):
+    """Build the delivery decision from a cached, unrounded sample peak."""
+    validate_settings(settings)
+    if not np.isfinite(peak) or peak < 0:
+        raise ValueError("Sample peak must be finite and non-negative.")
+    ceiling = input_ceiling(settings)
+    clipped = peak > ceiling
+    attenuation = 20 * (math.log10(peak) - math.log10(ceiling)) if clipped else 0.0
+    return DeliveryReport(
+        dbfs(peak), attenuation, quantises(settings) and settings.dither,
+        24 if quantises(settings) else None, clipped,
+    )
+
+
+def measure(audio, settings):
+    return measure_peak(float(np.max(np.abs(validate_audio(audio)))), settings)
+
+
+def suggested_attenuation(report):
+    """Round reduction UP to hundredths of a dB, with no 'attenuate 0.00' prompt."""
+    if not report.clipped:
         return 0.0
-    return 2.0 ** -(BITS[settings.format] - 1)
+    return max(0.01, math.ceil(report.attenuation_db * 100) / 100)
+
+
+def _gain(attenuation_db):
+    if (
+        not isinstance(attenuation_db, (int, float, np.number))
+        or isinstance(attenuation_db, (bool, np.bool_))
+        or not np.isrealobj(attenuation_db)
+        or not np.isfinite(attenuation_db)
+        or attenuation_db > 0
+    ):
+        raise ValueError("Delivery attenuation must be a finite number at or below zero.")
+    gain = 10 ** (float(attenuation_db) / 20)
+    # Round a negative gain toward zero to keep exact-boundary attenuation
+    # inside the input ceiling despite floating-point arithmetic.
+    return float(np.nextafter(gain, 0)) if gain > 0 and attenuation_db < 0 else gain
+
+
+def apply_attenuation(audio, attenuation_db):
+    return validate_audio(audio) * _gain(attenuation_db)
 
 
 def tpdf_noise(shape, amplitude, seed=None):
-    """Triangular dither noise in [-amplitude, amplitude].
+    """TPDF with peak +/-amplitude. For standard dither, amplitude is one LSB."""
+    rng = np.random.default_rng(seed)
+    draws = rng.random((*shape, 2))
+    return (draws[..., 0] - draws[..., 1]) * amplitude
 
-    Triangular-PDF dither is the standard choice for a single reduction: it
-    sums two independent uniform draws because one uniform draw gives
-    rectangular dither, which is measurably worse at the same peak level. The
-    halves matter, so ``amplitude`` is the true peak of the result.
-    """
-    generator = np.random.default_rng(seed)
-    first = generator.uniform(-1.0, 1.0, shape)
-    second = generator.uniform(-1.0, 1.0, shape)
-    return (first + second) * (amplitude / 2)
+
+def _export_input(audio, settings, attenuation_db):
+    validate_settings(settings)
+    audio = validate_audio(audio)
+    gain = 1.0 if attenuation_db is None else _gain(attenuation_db)
+    peak = float(np.max(np.abs(audio))) * gain
+    report = measure_peak(peak, settings)
+    if report.clipped:
+        raise ValueError(
+            f"Peak {report.peak_dbfs:+.2f} dBFS exceeds the {format_label(settings)} "
+            f"ceiling, including dither headroom. Attenuate by at least "
+            f"{suggested_attenuation(report):.2f} dB more, or lower output gain "
+            "or the limiter ceiling."
+        )
+    return audio, gain, report
+
+
+def _convert(block, settings, gain, rng):
+    if not quantises(settings):
+        return (block * gain).astype(np.float32)
+    scaled = block * gain * PCM_SCALE
+    if settings.dither:
+        scaled = scaled + tpdf_noise(block.shape, 1.0, rng)
+    codes = np.rint(scaled)
+    if np.any(codes < -PCM_SCALE) or np.any(codes > PCM_SCALE - 1):
+        raise ValueError("Quantised samples exceed the 24-bit range; no file was written.")
+    # libsndfile takes the most significant 24 bits of each int32 sample.
+    return codes.astype(np.int32) * np.int32(256)
 
 
 def prepare(audio, settings, attenuation_db=None):
-    """Return the samples to write, plus what happened.
-
-    Raises if an integer target would clip and no usable attenuation was given.
-    """
-    validate_settings(settings)
-    report = measure(audio, settings)
-    if report.clipped:
-        if attenuation_db is None:
-            needed = max(report.attenuation_db, 0.1)
-            raise ValueError(
-                f"Peak is {report.peak_dbfs:+.2f} dBFS, above the "
-                f"{format_label(settings)} ceiling. Attenuate by at least "
-                f"{needed:.3f} dB, or lower output gain or the limiter ceiling, "
-                f"before writing this format."
-            )
-        audio = apply_attenuation(audio, attenuation_db)
-        report = measure(audio, settings)
-        if report.clipped:
-            raise ValueError(
-                f"Attenuating by {attenuation_db:.2f} dB still peaks at "
-                f"{report.peak_dbfs:+.2f} dBFS for {format_label(settings)}."
-            )
-    if not quantises(settings) or not settings.dither:
-        return validate_audio(audio), report
-    ceiling = CEILING[settings.format]
-    peak = float(np.max(np.abs(audio)))
-    if peak > ceiling:
-        # measure() already refused this, so reaching here means the ceiling is
-        # exact and the render is exactly full scale. Leave it alone rather than
-        # add noise that cannot fit.
-        return validate_audio(audio), report
-    step = measured_step(settings)
-    # One step of headroom keeps dither from pushing a full-scale sample past the
-    # ceiling: the peaks it protects are exactly the ones at risk.
-    amplitude = min(step * 0.5, ceiling - peak)
-    if amplitude <= 0:
-        return validate_audio(audio), report
-    return validate_audio(audio + tpdf_noise(audio.shape, amplitude, settings.seed)), report
+    """Return representable normalised samples and their actual sample-peak report."""
+    audio, gain, report = _export_input(audio, settings, attenuation_db)
+    samples = _convert(audio, settings, gain, np.random.default_rng(settings.seed))
+    if quantises(settings):
+        samples = samples.astype(np.float64) / 2**31
+    return samples, replace(report, peak_dbfs=dbfs(float(np.max(np.abs(samples)))))
 
 
 def write(path, audio, rate, settings, attenuation_db=None):
-    """Write one delivery file. Returns the report describing what was written."""
-    validate_settings(settings)
-    samples, report = prepare(audio, settings, attenuation_db)
-    sf.write(path, samples, rate, subtype=SUBTYPES[settings.format])
-    return report
+    """Convert in bounded blocks and atomically replace the destination on success.
+
+    Validation completes before opening any output. A failed write leaves an
+    existing destination intact. Dither uses one generator across the whole file.
+    """
+    audio, gain, report = _export_input(audio, settings, attenuation_db)
+    if type(rate) is not int or rate <= 0:
+        raise ValueError("Sample rate must be a positive integer.")
+    path = Path(path)
+    rng = np.random.default_rng(settings.seed)
+    peak = 0.0
+    temporary = None
+    try:
+        # Close the handle before libsndfile opens it, including on Windows.
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".wav", delete=False) as handle:
+            temporary = Path(handle.name)
+        with sf.SoundFile(
+            temporary, "w", samplerate=rate, channels=audio.shape[1],
+            format="WAV", subtype=SUBTYPES[settings.format],
+        ) as output:
+            for start in range(0, len(audio), 65536):
+                block = _convert(audio[start:start + 65536], settings, gain, rng)
+                output.write(block)
+                value = float(np.max(np.abs(block.astype(np.float64))))
+                peak = max(peak, value / 2**31 if quantises(settings) else value)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return replace(report, peak_dbfs=dbfs(peak))

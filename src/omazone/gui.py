@@ -16,7 +16,7 @@ from .clipping_view import ClippingInspector
 from .comparison import ORIGINAL as ORIGINAL_ONLY
 from .comparison import SPECS, Side, StagePair, resolve, spec_for
 from .compressor_view import CompressorView
-from .delivery import format_label, measure, write
+from .delivery import format_label, suggested_attenuation, write
 from .engine import (
     analyse,
     design_match,
@@ -1440,6 +1440,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.filter_view.restore()
             self.compressor_view.restore()
             self.output_view.restore()
+            self.export_view.reset_delivery()
             with QtCore.QSignalBlocker(self.seek_slider):
                 self.seek_slider.setRange(0, len(data[0]))
                 self.seek_slider.setSingleStep(data[1])
@@ -2085,6 +2086,11 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.play()
 
     def export(self):
+        if self.worker is not None:
+            return
+        if not self.workflow_status().export_available:
+            self.error("Render the current full chain before exporting.")
+            return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Export processed audio", "matched.wav", "WAV (*.wav)"
         )
@@ -2094,48 +2100,53 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             path += ".wav"
         audio, rate = self.output[0], self.source[1]
         settings = self.export_view.delivery_settings()
-        report = measure(audio, settings)
+        report = self.export_view.output_view_delivery_report()
         attenuation = None
         if report.clipped:
-            # libsndfile would clamp these samples silently. Ask instead, so a
-            # clipped master is a decision the user makes and can hear.
+            # Never clip or change gain silently. The quieter export is an
+            # explicit choice and does not mutate processing or audition.
             attenuation = self.confirm_delivery_attenuation(report, settings)
             if attenuation is None:
                 return
         label = format_label(settings)
-        dithered = " with dither" if report.dithered else ""
         applied = f", attenuated {attenuation:.2f} dB" if attenuation else ""
         self.start_job(
             lambda: write(path, audio, rate, settings, attenuation),
             lambda written: self.status.setText(
-                f"Exported {label}{dithered}{applied}: {path}. Peak {written.peak_dbfs:+.2f} dBFS."
+                f"Exported {label}{' with TPDF dither' if written.dithered else ''}{applied}: "
+                f"{path}. Peak {written.peak_dbfs:+.2f} dBFS."
             ),
             "Exporting…",
         )
 
     def confirm_delivery_attenuation(self, report, settings):
         """Ask once before attenuating. Returns the dB to apply, or None to cancel."""
+        reduction = suggested_attenuation(report)
         confirmation = QtWidgets.QMessageBox(
             QtWidgets.QMessageBox.Icon.Warning,
             "Delivery level",
             f"The rendered peak is {report.peak_dbfs:+.2f} dBFS, above the ceiling of "
-            f"{format_label(settings)}. Writing it directly would clip the peaks.",
+            f"{format_label(settings)}, including any dither headroom. "
+            "Writing it directly could clip the peaks.",
             QtWidgets.QMessageBox.StandardButton.Cancel,
             parent=self,
         )
         confirmation.setInformativeText(
-            f"Attenuate by {report.attenuation_db:.2f} dB and write a quieter file, or "
-            f"cancel and lower output gain or the limiter ceiling first. Float WAV has "
-            f"no ceiling, so it can keep this level."
+            f"Attenuate by {reduction:.2f} dB and write a quieter file, or cancel "
+            "and lower output gain or the limiter ceiling first. This export-only "
+            "gain change does not update audition or the recipe. Float WAV can "
+            "preserve over-0 dBFS samples, but playback can still clip."
         )
         write_button = confirmation.addButton(
-            f"Attenuate {report.attenuation_db:.2f} dB and export",
+            f"Attenuate {reduction:.2f} dB and export",
             QtWidgets.QMessageBox.ButtonRole.AcceptRole,
         )
+        confirmation.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        confirmation.setEscapeButton(QtWidgets.QMessageBox.StandardButton.Cancel)
         confirmation.exec()
         if confirmation.clickedButton() is not write_button:
             return None
-        return -report.attenuation_db
+        return -reduction
 
     def closeEvent(self, event):
         if getattr(self, "close_approved", False):

@@ -2,16 +2,17 @@
 
 import os
 import time
+from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
 import soundfile as sf
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from omazone.declipping import RepairResult
-from omazone.delivery import CEILING, DeliverySettings, measure
+from omazone.delivery import CEILING, PCM_SCALE, DeliverySettings, measure
 from omazone.gui import Window, load_audio
 
 
@@ -70,51 +71,26 @@ def refuse_dialog(monkeypatch):
 
 @pytest.fixture
 def dialog(monkeypatch):
-    """Capture the delivery-level dialog and let each test choose an answer."""
-    asked = []
+    """Exercise the REAL Qt dialog, including its default and escape buttons."""
+    original_exec = QtWidgets.QMessageBox.exec
 
     class Answer:
         accept = True
         asked = []
 
-        def __init__(self, *args, **kwargs):
-            # The window uses the multi-argument constructor, so the title and
-            # body arrive as arguments rather than through setters.
-            if len(args) > 1 and isinstance(args[1], str):
-                Answer.asked.append(args[1])
-            if len(args) > 2 and isinstance(args[2], str):
-                Answer.asked.append(args[2])
-            self._buttons = []
-
-        def setWindowTitle(self, title):
-            Answer.asked.append(title)
-
-        def setIcon(self, icon):
-            pass
-
-        def setText(self, text):
-            Answer.asked.append(text)
-
-        def setInformativeText(self, text):
-            Answer.asked.append(text)
-
-        def addButton(self, *args, **kwargs):
-            button = QtWidgets.QPushButton(str(args[0]))
-            self._buttons.append(button)
-            return button
-
-        def exec(self):
-            return 0
-
-        def clickedButton(self):
-            return self._buttons[0] if Answer.accept else None
-
-    for name in ("__init__", "setWindowTitle", "setIcon", "setText",
-                 "setInformativeText", "addButton", "exec", "clickedButton"):
-        monkeypatch.setattr(
-            QtWidgets.QMessageBox, name, getattr(Answer, name), raising=False
+    def answer(box):
+        Answer.asked.extend((box.windowTitle(), box.text(), box.informativeText()))
+        cancel = box.button(QtWidgets.QMessageBox.StandardButton.Cancel)
+        assert box.defaultButton() is cancel
+        assert box.escapeButton() is cancel
+        accept = next(
+            button for button in box.buttons()
+            if box.buttonRole(button) == QtWidgets.QMessageBox.ButtonRole.AcceptRole
         )
-    Answer.asked = asked
+        QtCore.QTimer.singleShot(0, (accept if Answer.accept else cancel).click)
+        return original_exec(box)
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "exec", answer)
     return Answer
 
 
@@ -123,7 +99,7 @@ def test_panel_defaults_to_float_and_explains_each_choice(export_session):
     view = window.export_view
     assert view.format.currentData() == "float"
     assert [view.format.itemData(i) for i in range(view.format.count())] == [
-        "float", "pcm_24", "pcm_16",
+        "float", "pcm_24",
     ]
     assert view.dither.isChecked()
     assert not view.dither.isEnabled(), "Float has no quantisation step to dither"
@@ -132,11 +108,9 @@ def test_panel_defaults_to_float_and_explains_each_choice(export_session):
     choose(window, "pcm_24")
     assert view.dither.isEnabled()
     assert "24-bit WAV" in view.export_button.toolTip()
-    choose(window, "pcm_16")
-    assert "16-bit WAV" in view.export_button.toolTip()
 
 
-@pytest.mark.parametrize("fmt", ["pcm_24", "pcm_16"])
+@pytest.mark.parametrize("fmt", ["pcm_24"])
 def test_panel_reports_fitting_peak_and_dither_state(export_session, fmt):
     window, wait, _, _ = export_session
     render_with_gain(window, wait, -12)
@@ -150,7 +124,7 @@ def test_panel_reports_fitting_peak_and_dither_state(export_session, fmt):
     assert "No dither is used" in window.export_view.delivery_note.text()
 
 
-@pytest.mark.parametrize("fmt", ["pcm_24", "pcm_16"])
+@pytest.mark.parametrize("fmt", ["pcm_24"])
 def test_over_range_export_asks_before_attenuating_and_writes_the_quieter_file(
     export_session, tmp_path, monkeypatch, dialog, fmt
 ):
@@ -167,8 +141,8 @@ def test_over_range_export_asks_before_attenuating_and_writes_the_quieter_file(
     window.export()
     wait()
     assert "Delivery level" in dialog.asked
-    assert any("would clip" in item for item in dialog.asked)
-    assert any("Float WAV has no ceiling" in item for item in dialog.asked)
+    assert any("could clip" in item for item in dialog.asked)
+    assert any("does not update audition or the recipe" in item for item in dialog.asked)
     written, rate = sf.read(target, always_2d=True)
     assert sf.info(target).subtype == fmt.upper()
     assert rate == 48000
@@ -176,6 +150,7 @@ def test_over_range_export_asks_before_attenuating_and_writes_the_quieter_file(
     assert not np.array_equal(written.astype(np.float64), chain.astype(np.float32))
     assert "attenuated" in window.status.text()
     assert "dBFS" in window.status.text()
+    np.testing.assert_array_equal(window.output[0], chain)
 
 
 def test_cancelling_the_dialog_writes_nothing(export_session, tmp_path, monkeypatch, dialog):
@@ -183,12 +158,13 @@ def test_cancelling_the_dialog_writes_nothing(export_session, tmp_path, monkeypa
     render_with_gain(window, wait, 6)
     choose(window, "pcm_24")
     target = tmp_path / "cancelled.wav"
+    target.write_bytes(b"existing master")
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
     )
     dialog.accept = False
     window.export()
-    assert not target.exists()
+    assert target.read_bytes() == b"existing master"
     assert window.worker is None
 
 
@@ -211,7 +187,7 @@ def test_float_export_never_asks_even_when_over_zero_dbfs(
     np.testing.assert_allclose(written, chain.astype(np.float32), rtol=1e-7)
 
 
-@pytest.mark.parametrize("fmt", ["pcm_24", "pcm_16"])
+@pytest.mark.parametrize("fmt", ["pcm_24"])
 def test_quiet_integer_export_writes_without_a_prompt(
     export_session, tmp_path, monkeypatch, fmt
 ):
@@ -244,7 +220,7 @@ def test_delivery_choices_do_not_touch_the_saved_recipe_or_audition(export_sessi
     chain = window.output[0].copy()
     preview = window.preview
     audition = window.audition_mode
-    choose(window, "pcm_16")
+    choose(window, "pcm_24")
     window.export_view.dither.setChecked(True)
     window.export_view.dither.setChecked(False)
     choose(window, "float")
@@ -256,8 +232,9 @@ def test_delivery_choices_do_not_touch_the_saved_recipe_or_audition(export_sessi
     assert window.audition_mode == audition
 
 
+@pytest.mark.parametrize("format", ["float", "pcm_24"])
 def test_full_chain_is_exported_even_while_auditioning_a_band_solo(
-    export_session, tmp_path, monkeypatch
+    export_session, tmp_path, monkeypatch, format
 ):
     window, wait, _, _ = export_session
     window.compressor_view.mode.setCurrentIndex(1)
@@ -270,7 +247,7 @@ def test_full_chain_is_exported_even_while_auditioning_a_band_solo(
     assert window.audition_mode == "band-solo"
     solo = window.compressor_view.solo_pair()
     assert solo is not None and not np.array_equal(solo[0], chain)
-    choose(window, "float")
+    choose(window, format, dither=False)
     target = tmp_path / "while-soloed.wav"
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
@@ -278,25 +255,20 @@ def test_full_chain_is_exported_even_while_auditioning_a_band_solo(
     window.export()
     wait()
     written, _ = sf.read(target, always_2d=True)
-    np.testing.assert_allclose(written, chain.astype(np.float32), rtol=1e-7)
+    expected = (
+        chain.astype(np.float32) if format == "float" else
+        np.rint(chain * PCM_SCALE) / PCM_SCALE
+    )
+    np.testing.assert_array_equal(written, expected)
 
 
-@pytest.mark.parametrize("fmt", ["float", "pcm_24", "pcm_16"])
+@pytest.mark.parametrize("fmt", ["float", "pcm_24"])
 def test_silence_exports_at_every_format(export_session, tmp_path, monkeypatch, fmt):
     window, wait, _, _ = export_session
     render_with_gain(window, wait, -60)
     silence = np.zeros_like(window.output[0])
     window.output = (silence, *window.output[1:])
-    window.chain_result = type(window.chain_result)(
-        **{
-            **{
-                field: getattr(window.chain_result, field)
-                for field in window.chain_result.__dataclass_fields__
-                if field != "output"
-            },
-            "output": silence,
-        }
-    )
+    window.chain_result = replace(window.chain_result, output=silence)
     choose(window, fmt)
     target = tmp_path / f"silence-{fmt}.wav"
     monkeypatch.setattr(
@@ -305,7 +277,7 @@ def test_silence_exports_at_every_format(export_session, tmp_path, monkeypatch, 
     window.export()
     wait()
     assert sf.info(target).frames == len(silence)
-    assert sf.info(target).subtype == "FLOAT" if fmt == "float" else fmt.upper()
+    assert sf.info(target).subtype == ("FLOAT" if fmt == "float" else fmt.upper())
     written, _ = sf.read(target, always_2d=True, dtype="float64")
     assert np.max(np.abs(written)) < 1e-3
 
@@ -317,7 +289,7 @@ def test_repaired_source_export_stays_a_64_bit_float_file(
     window, wait, _, _ = export_session
     audio = window.source[0]
     window.repair_result = RepairResult(audio, (), ())
-    choose(window, "pcm_16")
+    choose(window, "pcm_24")
     target = tmp_path / "repaired.wav"
     monkeypatch.setattr(
         QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
@@ -339,11 +311,64 @@ def test_delivery_panel_is_reachable_and_resets_between_projects(export_session,
     )
     window.save_current_project()
     wait()
+    choose(window, "pcm_24", dither=False)
     window.new_project()
     assert window.export_view.format.currentData() == "float"
     assert window.export_view.dither.isChecked()
+    choose(window, "pcm_24", dither=False)
     window.open_project_path(saved)
     wait()
     assert window.export_view.format.currentData() == "float", (
         "Delivery format is a per-export choice, not part of the recipe"
     )
+    assert window.export_view.dither.isChecked()
+
+
+def test_delivery_peak_display_reuses_cached_peak_and_invalidates_after_edit(export_session, monkeypatch):
+    window, wait, _, _ = export_session
+    render_with_gain(window, wait, -12)
+    window.views.setStep("export")
+    window.export_view.refresh_delivery()
+
+    def unexpected_scan(*args, **kwargs):
+        pytest.fail("Redrawing delivery settings scanned the entire recording again")
+
+    # Only scalar decisions should run when changing format/dither or redrawing.
+    with monkeypatch.context() as patch:
+        patch.setattr("omazone.export_view.np.max", unexpected_scan)
+        choose(window, "pcm_24")
+        window.export_view.dither.setChecked(False)
+        window.export_view.draw(window.workflow_status())
+    assert "LUFS" in window.export_view.peaks.text()
+    assert "dBTP" in window.export_view.peaks.text()
+    window.output_view.gain.setValue(-6)
+    assert window.output is None
+    window.export_view.refresh_delivery()
+    assert "Render the chain" in window.export_view.delivery_note.text()
+
+
+def test_tiny_overload_shows_an_actionable_reduction_in_real_dialog(export_session, dialog):
+    window, wait, _, _ = export_session
+    render_with_gain(window, wait, -12)
+    settings = DeliverySettings(format="pcm_24")
+    report = measure(np.ones((2, 2)), settings)
+    dialog.accept = True
+    assert window.confirm_delivery_attenuation(report, settings) == -0.01
+    assert any("0.01 dB" in text for text in dialog.asked)
+    assert not any("Attenuate by 0.00 dB" in text for text in dialog.asked)
+
+
+def test_stale_or_missing_render_cannot_reach_filename_or_writer(export_session, monkeypatch):
+    window, wait, _, _ = export_session
+    called = []
+    monkeypatch.setattr(window, "error", called.append)
+
+    def unexpected_dialog(*args, **kwargs):
+        pytest.fail("Stale export opened the file chooser")
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", unexpected_dialog)
+    window.export()
+    render_with_gain(window, wait, -12)
+    window.output_view.gain.setValue(-6)
+    window.export()
+    assert called == ["Render the current full chain before exporting."] * 2

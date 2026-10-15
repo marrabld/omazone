@@ -35,7 +35,7 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Selected-region clipping inspection with editable rails, channel diagnostics, and waveform markers.
 - Checked-candidate short-gap declipping, original/repaired A/B, reset, and full-precision repair export.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
-- Export as 32-bit float, 24-bit or 16-bit WAV, with explicit headroom and
+- Export as 32-bit float or 24-bit PCM WAV, with explicit headroom and
   optional TPDF dither. Over-range integer writes are refused, never clipped.
 - Versioned saved project recipes, verified source relinking, and retained learned curves.
 - Persistent song overview and shared waveform/spectrum viewer across tool pages.
@@ -107,8 +107,9 @@ if the file is intact.
 
 To publish a numbered release, update the project version in a PR with
 `uv version 0.4.0 --no-sync` (replace the number with your intended version).
-This updates `pyproject.toml` and `uv.lock`. Merge that PR, then push a matching
-tag from the new `main` commit, such as `v0.3.0`. The tag build creates the
+Run `uv lock` and `uv sync --locked`, then commit both `pyproject.toml` and
+`uv.lock`. Merge that PR, then push a matching tag from the new `main` commit,
+such as `v0.4.0`. The tag build creates the
 numbered release and attaches every platform archive, the checksum file and the
 build information. Creating a release in GitHub before bumping the project
 version leaves it empty: the build refuses a mismatched tag. If an empty release
@@ -508,7 +509,7 @@ The original recording stays in memory unchanged. Whole-song matching and sectio
 matching use the repaired input after a successful repair, and their previous
 renders become stale. Mastering audition uses **Input / mastered**; when repair is
 active, its input side is the repaired signal. **Original / repaired** remains a
-separate comparison. Standard mastering export stays 32-bit float.
+separate comparison. Mastering export defaults to 32-bit float, with optional 24-bit PCM delivery.
 Repair saving uses 64-bit float WAV to retain the internal sample precision.
 
 Repair is an offline cubic-Hermite baseline using the intact endpoint samples and
@@ -655,8 +656,6 @@ Output gain and the limiter start bypassed and keep independent settings. See
 
 ![Sample peak, true peak and loudness for the source, pre-output and final export](docs/images/omazone-output-peaks.png)
 
-![Export step choosing 24-bit delivery and reporting that the peak fits](docs/images/omazone-delivery.png)
-
 **True peak is the one to watch before delivery.** A file can sit at exactly
 0 dBFS sample peak and still clip on playback, because the converter rebuilds
 the waveform between samples. Gain and meters alone do not prevent it. The final
@@ -688,10 +687,12 @@ there; it will not quietly export a stale or partial chain.
 3. Click **Export WAV…** and choose where to write the file.
 4. Reopen the exported file if you want to confirm it against the original.
 
-32-bit float is the default and keeps headroom. Choose 24-bit when handing a
-file to an engineer or a distributor; it is dithered by default and Omazone
+32-bit float is the default and preserves samples above 0 dBFS, though playback
+can still clip. Choose 24-bit when the recipient requests it; it is dithered by default and Omazone
 refuses to write an integer file that would clip. See
 [delivery formats, headroom and dither](docs/delivery.md).
+
+![Export step choosing 24-bit delivery and reporting that the peak fits](docs/images/omazone-delivery.png)
 
 Export writes from the recipe, so reopening the project later re-renders rather
 than reusing a baked intermediate. See
@@ -713,7 +714,7 @@ six-minute song, in the background.
 Mastering exports contain the full chain, without preview attenuation. Float
 files can exceed 0 dBFS when limiting is bypassed; integer targets cannot, so
 Export asks you to attenuate first rather than clipping. Dither is applied once,
-only when quantising to 24 or 16-bit. Delay is compensated and the output
+only when quantising to 24-bit. Delay is compensated and the output
 retains the input length. The complete matching-FIR
 convolution tail is available through its processor API, but file rendering trims it.
 

@@ -1,115 +1,101 @@
 # Delivery formats, headroom and dither
 
-The Export step writes the full rendered chain. This page explains what each
-file type is for, why an integer file needs headroom, and what dither does.
-It is written for people who have not had to think about bit depth before.
+Export writes the full rendered chain, never a selected passage, loudness-matched
+preview or solo band. The format and dither choices only affect the written file.
+They do not change the saved processing recipe or what A/B playback auditions.
 
-## The three formats
+## Choose a format
 
-| Choice | File | Use it for |
+| Choice | File subtype | Use it for |
 | --- | --- | --- |
-| 32-bit float WAV | `FLOAT` | Keeping the master. The default. |
-| 24-bit WAV | `PCM_24` | Handing a file to a mastering engineer, a distributor, or a streaming upload. |
-| 16-bit WAV | `PCM_16` | Only if something specifically asks for CD quality. |
+| 32-bit float WAV | `FLOAT` | Keeping a master for further processing. The default. |
+| 24-bit PCM WAV | `PCM_24` | Delivery to a service or another person that accepts 24-bit WAV. |
 
-The render is floating point internally, so nothing is lost while you work. The
-format choice only changes the file written at the end. Nothing about audition
-changes: A/B playback and the saved project always use the full-precision
-render, so what you hear is what the recipe produced.
+16-bit export is deferred. Both choices keep the recording's sample rate, channel
+layout and sample count. There is no resampling or lossy encoding here. Check
+the recipient's requirements rather than assuming one format fits every upload.
 
-Float is the default because it has no ceiling. A float file can hold samples
-above 0 dBFS without damage, so you can write a master now and still attenuate
-it later. Integer files cannot: anything above their ceiling is destroyed
-permanently.
+Float files can preserve samples above 0 dBFS so they can be lowered later, but
+playback devices may still clip them. Float is not a guarantee of safe playback,
+and writing a file cannot repair clipping already present in the source. A
+32-bit float file also has less precision than the internal float64 render.
 
-## Why 24-bit needs headroom
+## Check headroom before writing PCM
 
-An integer WAV stores fixed numbers. At 24-bit the highest value it can hold is
-just under 1.0, which is 0 dBFS. A value above that does not have a
-representation, and the file writer clamps it. That clamping is clipping, and it
-is permanent and audible.
+24-bit PCM has a fixed range. Export checks the highest absolute sample before
+writing and reserves the small amount of additional headroom required by dither.
+If the file would not fit, it asks you to choose between:
 
-Omazone will not do that to your file silently. If the render peaks above the
-format's ceiling, Export asks before writing:
+- **Attenuate and export.** Apply the displayed reduction to this file only.
+- **Cancel.** Review Output, lower output gain or adjust the limiter, then render
+  again so you can audition that change before exporting.
 
-> The rendered peak is +2.14 dBFS, above the ceiling of 24-bit WAV. Writing it
-> directly would clip the peaks.
+The reduction is rounded up to hundredths of a dB. Even a tiny excess gets an
+actionable `0.01 dB` suggestion, never `attenuate 0.00 dB`. Cancel is the dialog's
+default and Escape action. Nothing is clipped or normalised silently.
 
-You can then attenuate by the stated amount and export, or cancel and lower
-output gain or the limiter ceiling instead. There is no hidden normalisation
-anywhere in this app: nothing changes your level unless you choose to change it.
+An export-only reduction makes a quieter file but does not update audition,
+output gain, compression, the limiter or the saved recipe. The completion message
+states the reduction and the actual written sample peak.
 
-### Working practice
+The check concerns sample representation, not reconstructed true peaks. A PCM
+file that fits can still exceed 0 dBTP between samples. Export keeps the final
+LUFS and true-peak readings visible; review Output and the optional limiter if
+those readings warn. A ceiling around -1 dBTP is a common starting point for
+streaming, not a universal upload requirement or a guarantee about later lossy
+encoding. See [true peak](true-peak.md) and [limiting](limiter.md).
 
-Most engineers want your master peaking between about -1 and -3 dBFS, and
-streaming platforms typically expect a true peak around -1 dBTP. The optional
-final limiter can set that ceiling for you, and the Output step shows the
-resulting reconstructed peak. See [true peak](true-peak.md) and the
-[limiter](limiter.md).
+## Dither
 
-If you skip the limiter, watch the "Final export" reading in Output. Anything
-above -1 dBFS will need attenuation before a 24-bit write.
+Reducing the floating-point render to 24-bit PCM puts samples on a fixed grid.
+Without dither, this quantisation error depends on the signal and can produce
+distortion in very quiet material. At 24-bit its level is already very low;
+we do not claim everyone will hear the difference.
 
-## What dither does
+**Apply dither** defaults on for 24-bit and is disabled for float. We add standard
+TPDF noise with a triangular distribution, one quantisation step peak in either
+direction, before rounding to the nearest PCM code. That is two LSBs
+peak-to-peak. The noise amplitude stays fixed throughout the file. Export refuses
+insufficient headroom rather than reducing or silently skipping the dither.
 
-Reducing to 24 or 16 bits rounds every sample to the nearest representable
-value. That rounding is itself a distortion, and on a quiet passage it can be
-heard as distortion rather than as a limit.
+Quantisation happens once, with explicit nearest-even rounding. Integer codes
+are packed into the WAV without another floating-point quantisation pass.
+Tests on decoded files check the error's mean and variance, including signals
+between quantisation levels and both channels. For dithered digital silence,
+the resulting RMS level is approximately -144.5 dBFS in normalised sample units.
 
-Dither adds a very small amount of noise before rounding. The noise pushes each
-sample across a rounding boundary at a random moment, which turns the
-distortion into a steady, gentle noise floor instead. The trade is a noise
-floor of about -66 dBFS in exchange for removing audible distortion. Almost
-nobody can hear -66 dBFS of noise, and many people can hear quantisation.
+Dither once, at the final conversion to integer PCM. If more processing or
+sample-rate conversion is planned, prefer float and let the final tool handle
+the integer conversion and dither. The checkbox can be turned off deliberately.
+Export adds no noise shaping, loudness target or automatic gain boost.
 
-Omazone applies **TPDF** (triangular probability density function) dither, which
-uses two independent uniform random values summed together. Rectangular dither,
-from a single random value, is measurably worse at the same level.
+Unseeded exports use fresh random noise, so separate dithered exports can differ
+at the sample level. Tests supply a seed for repeatable comparisons. Format
+choices persist for repeated exports in the current project but reset to float
+with dither enabled for integers when opening a project or loading a new source.
+They are not stored as processing settings in the project recipe.
 
-Dither is **on by default for 24 and 16-bit**, and **never applied to float**.
-That matches professional practice: Ozone's own documentation says to dither
-only when reducing from a higher bit depth, and to use it when bouncing a 24-bit
-master.
+![Export with 24-bit selected, dither enabled and a fitting sample peak](images/omazone-delivery.png)
 
-Two rules that matter:
+Regenerate with `uv run python tools/render_delivery_demo.py docs/images`.
+The fixture uses generated tones and seeded noise, not a private recording.
 
-- Dither **once, last**. If a later tool will requantise your file, export
-  float and let the final tool dither. Dithering twice adds two noise floors.
-- Dither changes noise, not level. It is not a way to make a file louder or
-  quieter, and it is not normalisation.
-
-If you have somewhere else that will handle the conversion, switch dither off
-here and export float.
-
-![Export step with the delivery format panel showing that the current peak fits 24-bit with dither](images/omazone-delivery.png)
-
-Regenerate with `uv run python tools/render_delivery_demo.py docs/images`. The
-fixture is generated noise and tones, not a private recording.
-
-## Verification
+## Verification and file safety
 
 Run `uv run pytest tests/test_delivery.py tests/test_export_delivery.py -q`.
 
-Tests cover float headroom, refusal and measured attenuation for both integer
-depths, positive and negative overload, quantisation error bounded by one step,
-dither keeping a full-scale peak below the ceiling, silence, low-level tones,
-mono and multi-channel layout, written subtype and frame count, deterministic
-seeded dither, the Export panel's stated headroom, the confirmation dialog in
-both branches, and that export always writes the full chain while auditioning a
-band solo.
+The tests read actual WAV files back, checking PCM codes against an independent
+rounding reference, unbiased dithered error, variance across sub-LSB offsets,
+full-amplitude dither near the ceiling, silence, channel layout, frame count,
+rate, seeded repeatability and float headroom. They also exercise the real Qt
+confirmation dialog, both answers, stale-render guards, saved-project resets,
+cached peak display and full-chain export while a band is soloed.
 
-Dither is stochastic. Tests that assert exact samples pass a fixed seed; the
-application leaves the seed unset so every export is an independent draw. Two
-exports of the same master are therefore not bit-identical when dither is on.
-That is expected and is the same for any dithering tool.
+Conversion uses bounded blocks instead of allocating several extra full-song
+buffers. A temporary file in the destination directory is atomically renamed
+only after a successful write. A failed conversion or write leaves an existing
+destination untouched and removes the temporary file. Validation completes
+before output is opened.
 
-## Limits
-
-There is no sample-rate conversion, MP3 or AAC export, lossy codec, or
-streaming-service preset here. Export writes WAV at the recording's own sample
-rate. If a distributor asks for a different rate, use a converter you trust and
-tell it the file is already dithered, or export float and let that tool handle
-both.
-
-Saving the repaired source is a separate action and is unaffected. It stays
-64-bit float so the internal samples survive.
+Saving the repaired source is separate and remains 64-bit float WAV. No delivery
+conversion, attenuation or dither is applied to that archival export.

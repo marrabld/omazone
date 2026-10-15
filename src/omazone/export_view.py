@@ -1,8 +1,18 @@
 """The final Export step: review the chain, then write the render to disk."""
 
+import weakref
+
+import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from .delivery import FORMATS, DeliverySettings, format_label, measure, quantises
+from .delivery import (
+    FORMATS,
+    DeliverySettings,
+    format_label,
+    measure_peak,
+    quantises,
+    suggested_attenuation,
+)
 from .workflow_status import AnalysisState, describe
 
 STAGE_TITLES = (
@@ -66,7 +76,9 @@ class ExportView(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
         )
         format_row = QtWidgets.QHBoxLayout()
-        format_row.addWidget(QtWidgets.QLabel("Write as"))
+        format_label_widget = QtWidgets.QLabel("Write as")
+        format_label_widget.setProperty("formLabel", True)
+        format_row.addWidget(format_label_widget)
         self.format = QtWidgets.QComboBox()
         for key, title, _ in FORMATS:
             self.format.addItem(title, key)
@@ -76,15 +88,16 @@ class ExportView(QtWidgets.QWidget):
         self.dither = QtWidgets.QCheckBox("Apply dither")
         self.dither.setChecked(True)
         self.dither.setToolTip(
-            "Dither only matters when reducing to 24 or 16-bit, where it trades a "
-            "small noise floor for lower quantisation distortion. Leave it off if a "
-            "later tool will requantise the file."
+            "Adds standard TPDF noise before 24-bit quantisation. Dither once, last. "
+            "If more processing is planned, export float instead."
         )
         delivery_layout.addWidget(self.dither)
         self.delivery_note = QtWidgets.QLabel()
         self.delivery_note.setWordWrap(True)
         delivery_layout.addWidget(self.delivery_note)
         for label in self.delivery.findChildren(QtWidgets.QLabel):
+            if label.property("formLabel"):
+                continue
             label.setSizePolicy(
                 QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
             )
@@ -94,6 +107,8 @@ class ExportView(QtWidgets.QWidget):
         self.export_button.clicked.connect(owner.export)
         self.requested = None
         self.route_target = None
+        self._peak_source = None
+        self._peak = None
         self.format.currentIndexChanged.connect(lambda: self.refresh_delivery())
         self.dither.toggled.connect(lambda: self.refresh_delivery())
         self.refresh_delivery()
@@ -104,25 +119,36 @@ class ExportView(QtWidgets.QWidget):
             format=self.format.currentData(), dither=self.dither.isChecked()
         )
 
+    def reset_delivery(self):
+        with QtCore.QSignalBlocker(self.format), QtCore.QSignalBlocker(self.dither):
+            self.format.setCurrentIndex(0)
+            self.dither.setChecked(True)
+        self._peak_source = None
+        self._peak = None
+        self.refresh_delivery()
+
     def refresh_delivery(self):
         settings = self.delivery_settings()
         self.dither.setEnabled(quantises(settings))
         report = self.output_view_delivery_report()
         if report is None:
             self.delivery_note.setText("Render the chain to see this format's headroom.")
-        elif not quantises(settings):
-            self.delivery_note.setText(
-                f"Float keeps headroom, so the peak of {report.peak_dbfs:+.2f} dBFS "
-                "is written without clipping. No dither is used."
-            )
         elif report.clipped:
             self.delivery_note.setText(
-                f"Peak {report.peak_dbfs:+.2f} dBFS exceeds this format's ceiling. "
-                f"Export will ask to attenuate by {report.attenuation_db:.2f} dB."
+                f"Peak {report.peak_dbfs:+.2f} dBFS exceeds this format's ceiling"
+                + (", including dither headroom. " if report.dithered else ". ")
+                + f"Export will ask to attenuate by {suggested_attenuation(report):.2f} dB."
+            )
+        elif not quantises(settings):
+            self.delivery_note.setText(
+                ("Silence. " if report.peak_dbfs == float("-inf") else
+                 f"Peak {report.peak_dbfs:+.2f} dBFS. ")
+                + "Float preserves over-0 dBFS samples, but playback can still clip. No dither is used."
             )
         else:
             self.delivery_note.setText(
-                f"Peak {report.peak_dbfs:+.2f} dBFS fits this format"
+                ("Silence fits this format" if report.peak_dbfs == float("-inf") else
+                 f"Peak {report.peak_dbfs:+.2f} dBFS fits this format")
                 + (" with dither applied." if report.dithered else " without dither.")
             )
         # The action row is shared by every step and has a fixed narrow-width
@@ -136,8 +162,18 @@ class ExportView(QtWidgets.QWidget):
 
     def output_view_delivery_report(self):
         if self.owner.chain_result is None:
+            self._peak_source = None
+            self._peak = None
             return None
-        return measure(self.owner.chain_result.output, self.delivery_settings())
+        audio = self.owner.chain_result.output
+        if self._peak_source is None or self._peak_source() is not audio:
+            view = self.owner.output_view
+            self._peak = (
+                view.final_peak if view.measured_result is self.owner.chain_result else
+                float(np.max(np.abs(audio)))
+            )
+            self._peak_source = weakref.ref(audio)
+        return measure_peak(self._peak, self.delivery_settings())
 
     def rows(self, workflow):
         """One row per processing stage, in the order the chain renders them."""
@@ -168,12 +204,12 @@ class ExportView(QtWidgets.QWidget):
             self.analysis.setText(
                 "Matching analysis is missing. Analyse or skip Matching before rendering."
             )
-        # The delivery panel is the answer to "can I write this format?", so it
-        # carries the peak. Everything else stays available on the Output step.
+        # Keep LUFS and true-peak warnings visible. A safe sample peak alone
+        # does not guarantee safe reconstruction or a streaming-ready file.
         final = self.owner.output_view.readouts[-1].text() if self.owner.output_view.readouts else ""
-        peak = final.replace("Final export: ", "").split("|")[0].strip()
         self.peaks.setText(
-            f"Final export: {peak}" if peak else "Render to measure the final export peak."
+            final.replace("Final export:", "Render before delivery:", 1)
+            or "Render to measure the final export peak."
         )
         self.summary.setText(
             "Ready to export the rendered chain."
@@ -181,6 +217,7 @@ class ExportView(QtWidgets.QWidget):
             else workflow.render_reason
         )
         busy = self.owner.worker is not None
+        self.delivery.setEnabled(not busy)
         self.export_button.setEnabled(workflow.export_available and not busy)
         self.refresh_delivery()
         self.set_route(workflow, busy)
