@@ -2319,6 +2319,7 @@ def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path)
             "Match: skipped",
             "Manual EQ: ready",
             "Corrective filters: skipped",
+            "Dynamic EQ: skipped",
             "Dynamics: skipped",
             "Output gain: ready",
             "Final limiter: skipped",
@@ -3319,6 +3320,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
             "match": 1,
             "eq": 1,
             "filters": 1,
+            "dynamic-eq": 1,
             "dynamics": 1,
             "output": 1,
         }
@@ -3343,6 +3345,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
             "match": 1,
             "eq": 1,
             "filters": 1,
+            "dynamic-eq": 1,
             "dynamics": 2,
             "output": 2,
         }
@@ -3644,6 +3647,7 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch, un
             "match": 1,
             "eq": 1,
             "filters": 1,
+            "dynamic-eq": 1,
             "dynamics": 1,
             "output": 1,
         }

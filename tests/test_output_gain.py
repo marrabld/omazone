@@ -63,7 +63,7 @@ def test_output_gain_only_recomputes_final_prefix_and_roundtrips(tmp_path):
     second = renderer.render(project)
     assert first.pre_output is second.pre_output
     assert first.compression is second.compression
-    assert renderer.computations == {"repair": 1, "match": 1, "eq": 1, "filters": 1, "dynamics": 1, "output": 2}
+    assert renderer.computations == {"repair": 1, "match": 1, "eq": 1, "filters": 1, "dynamic-eq": 1, "dynamics": 1, "output": 2}
     np.testing.assert_allclose(second.output, first.pre_output * 10 ** (-3 / 20))
     saved = tmp_path / "output.omazone.json"
     save_project(saved, project)

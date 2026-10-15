@@ -61,6 +61,7 @@ class ProjectController:
             ("match", "Skip matching"),
             ("eq", "Skip manual EQ"),
             ("filters", "Skip corrective filters"),
+            ("dynamic-eq", "Skip dynamic EQ"),
             ("dynamics", "Skip compressor"),
             ("output", "Skip output gain"),
             ("limiter", "Skip final limiter"),
@@ -151,7 +152,7 @@ class ProjectController:
             item.setEnabled(
                 not busy
                 and (
-                    key in ("repair", "match", "eq", "filters", "dynamics", "output", "limiter")
+                    key in ("repair", "match", "eq", "filters", "dynamic-eq", "dynamics", "output", "limiter")
                     or not self.project.stages[key].bypassed
                 )
             )
@@ -240,6 +241,7 @@ class ProjectController:
         self.refresh_named_regions()
         self.manual_eq_view.restore()
         self.filter_view.restore()
+        self.dynamic_eq_view.restore()
         self.compressor_view.restore()
         self.output_view.restore()
         self.export_view.reset_delivery()
@@ -432,6 +434,7 @@ class ProjectController:
         self.update_project_title()
         self.manual_eq_view.restore()
         self.filter_view.restore()
+        self.dynamic_eq_view.restore()
         self.compressor_view.restore()
         self.output_view.restore()
         self.export_view.reset_delivery()
@@ -481,6 +484,9 @@ class ProjectController:
         elif stage == "dynamics":
             self.invalidate_dynamics()
             self.compressor_view.restore()
+        elif stage == "dynamic-eq":
+            self.invalidate_dynamic_eq()
+            self.dynamic_eq_view.restore()
         elif stage == "output":
             self.invalidate_output()
             self.output_view.restore()

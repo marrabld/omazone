@@ -62,6 +62,8 @@ STEPS = (
     Step("filters", "Corrective filters", "filters", part_of="eq", spectral=True,
          skippable=True, secondary=True, short="Filters"),
     Step("dynamics", "Dynamics", "dynamics", spectral=True, skippable=True, aliases=("band-solo",), short="Dynamics"),
+    Step("dynamic-eq", "Dynamic EQ", "dynamic-eq", part_of="dynamics", spectral=True,
+         skippable=True, secondary=True, short="Dynamic EQ"),
     Step(
         "output",
         "Output",

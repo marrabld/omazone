@@ -59,6 +59,7 @@ def test_processor_steps_name_the_stage_they_explain():
         "repair": "repair",
         "eq": "eq",
         "filters": "filters",
+        "dynamic-eq": "dynamic-eq",
         "dynamics": "dynamics",
         "output": "output",
     }
@@ -80,6 +81,7 @@ def test_spectral_pages_are_the_ones_that_plot_a_response():
         "match",
         "eq",
         "filters",
+        "dynamic-eq",
         "dynamics",
         "output",
     }

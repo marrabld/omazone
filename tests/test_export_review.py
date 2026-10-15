@@ -117,13 +117,14 @@ def test_the_chain_is_listed_in_processing_order(session, match, eq, dynamics, e
     render_output(window, wait)
     window.views.setStep("export")
     found = rows(window)
-    assert found[:-2] == [*expected[:3], "Corrective filters: skipped", *expected[3:]]
+    assert found[:-2] == [*expected[:3], "Corrective filters: skipped", "Dynamic EQ: skipped", *expected[3:]]
     assert found[-2:] == ["Output gain: ready", "Final limiter: skipped"]
     assert [text.split(":")[0] for text in found] == [
         "Repair",
         "Match",
         "Manual EQ",
         "Corrective filters",
+        "Dynamic EQ",
         "Dynamics",
         "Output gain",
         "Final limiter",

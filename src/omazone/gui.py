@@ -18,6 +18,7 @@ from .comparison import ORIGINAL as ORIGINAL_ONLY
 from .comparison import SPECS, Side, StagePair, resolve, spec_for
 from .compressor_view import CompressorView
 from .delivery import format_label, suggested_attenuation, write
+from .dynamic_eq_view import DynamicEQView
 from .engine import (
     analyse,
     design_match,
@@ -230,6 +231,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.eq_preview = None
         self.eq_before = None
         self.filters_preview = self.filters_before = self.filters_after = None
+        self.dynamic_eq_preview = self.dynamic_eq_before = self.dynamic_eq_after = None
+        self.dynamic_eq_result = None
         self.dynamics_preview = None
         self.dynamics_before = None
         self.output_preview = None
@@ -368,6 +371,10 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.manual_eq_view = ManualEQView(self)
         self.filter_view = FilterView(self)
         self.compressor_view = CompressorView(self)
+        self.dynamic_eq_view = DynamicEQView(self)
+        self.dynamic_eq_link = QtWidgets.QPushButton("Dynamic EQ...")
+        self.dynamic_eq_link.clicked.connect(lambda: self.views.setStep("dynamic-eq"))
+        self.compressor_view.layout().insertWidget(1, self.dynamic_eq_link)
         self.audio_device_view = AudioDeviceView(self)
         self.output_view = OutputView(self)
         self.export_view = ExportView(self)
@@ -382,6 +389,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             (self.manual_eq_view, "eq"),
             (self.filter_view, "filters"),
             (self.compressor_view, "dynamics"),
+            (self.dynamic_eq_view, "dynamic-eq"),
             (self.output_view, "output"),
             (self.export_view, "export"),
         ):
@@ -495,6 +503,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.task_actions.append(self.manual_eq_view.render_button)
         self.views.action_layout.addWidget(self.filter_view.render_button)
         self.task_actions.append(self.filter_view.render_button)
+        self.views.action_layout.addWidget(self.dynamic_eq_view.render_button)
+        self.task_actions.append(self.dynamic_eq_view.render_button)
         self.views.action_layout.addWidget(self.compressor_view.render_button)
         self.task_actions.append(self.compressor_view.render_button)
         self.views.layout().insertWidget(
@@ -727,6 +737,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 self.filters_after,
                 self.filters_preview,
             )
+        if stage == "dynamic-eq":
+            return StagePair(self.dynamic_eq_before, self.dynamic_eq_after, self.dynamic_eq_preview)
         if stage == "limiter":
             return StagePair(
                 self.limiter_before,
@@ -786,6 +798,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return step_for("output")
         if stage == "filters":
             return step_for("filters")
+        if stage == "dynamic-eq":
+            return step_for("dynamic-eq")
         return next((item for item in STEPS if item.stage == stage and not item.secondary), None)
 
     def apply_comparison(self, key=None, side=None):
@@ -915,6 +929,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.filter_view.canvas.setEnabled(not busy and self.source is not None)
         self.filter_view.render_button.setEnabled(not busy and workflow.render_allowed)
         self.filter_view.listen_button.setEnabled(not busy and self.comparison("filters").available)
+        self.dynamic_eq_view.setEnabled(not busy and self.source is not None)
+        self.dynamic_eq_view.render_button.setEnabled(not busy and workflow.render_allowed)
+        self.dynamic_eq_view.listen_button.setEnabled(not busy and self.comparison("dynamic-eq").available)
         self.compressor_view.setEnabled(not busy and self.source is not None)
         self.compressor_view.set_rendering(busy)
         self.compressor_view.canvas.setEnabled(not busy and self.source is not None)
@@ -940,10 +957,14 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         for stage, view in (
             ("eq", self.manual_eq_view),
             ("filters", self.filter_view),
+            ("dynamic-eq", self.dynamic_eq_view),
             ("dynamics", self.compressor_view),
             ("output", self.output_view),
         ):
             status = self.eq_status(workflow) if stage == "eq" else workflow.stages[stage]
+            if stage == "dynamic-eq":
+                view.draw()
+                continue
             if stage == "filters":
                 view.summary.setText(
                     view.invalid_recipe or (
@@ -964,6 +985,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         clipping = self.views.currentWidget() is self.clipping_inspector
         manual_eq = self.views.currentWidget() is self.manual_eq_view
         filters = self.views.currentWidget() is self.filter_view
+        dynamic_eq = self.views.currentWidget() is self.dynamic_eq_view
         compressor = self.views.currentWidget() is self.compressor_view
         output = self.views.currentWidget() is self.output_view
         exporting = self.views.currentWidget() is self.export_view
@@ -988,6 +1010,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             shown.add(self.manual_eq_view.render_button)
         elif filters:
             shown.add(self.filter_view.render_button)
+        elif dynamic_eq:
+            shown.add(self.dynamic_eq_view.render_button)
         elif compressor:
             shown.add(self.compressor_view.render_button)
         elif output:
@@ -1061,6 +1085,9 @@ class Window(ProjectController, QtWidgets.QMainWindow):
                 if stage.state is RenderState.READY
                 else stage.reason
             )
+        elif dynamic_eq:
+            stage = workflow.stages["dynamic-eq"]
+            message = "Dynamic EQ rendered. Compare this stage or export the full chain." if stage.state is RenderState.READY else stage.reason
         elif output:
             stage = self.output_status(workflow)
             limiting = self.chain_result.limiting if self.chain_result is not None else None
@@ -1246,6 +1273,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             following = None
         if step.key == "eq" and not self.project.stages["filters"].bypassed:
             following = step_for("filters") if not bypassing else None
+        if step.key == "dynamics" and not self.project.stages["dynamic-eq"].bypassed:
+            following = step_for("dynamic-eq") if not bypassing else None
         if following is not None:
             self.views.setStep(following.key)
 
@@ -1261,6 +1290,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return self.output_status(workflow)
         if step.key == "eq":
             return self.eq_status(workflow)
+        if step.key == "dynamics":
+            return self.dynamics_status(workflow)
         return workflow.stages[step.stage]
 
     def eq_status(self, workflow):
@@ -1277,6 +1308,15 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             return limiter if limiter.state is not RenderState.SKIPPED else gain
         return gain
 
+    def dynamics_status(self, workflow):
+        """The Dynamics group contains independent dynamic EQ and compression."""
+        dynamic_eq, compressor = workflow.stages["dynamic-eq"], workflow.stages["dynamics"]
+        if not dynamic_eq.can_continue:
+            return dynamic_eq
+        if compressor.state is RenderState.SKIPPED and dynamic_eq.state is not RenderState.SKIPPED:
+            return dynamic_eq
+        return compressor
+
     def update_step_navigation(self, workflow):
         """Show each step's state on its navigation entry, and control Continue."""
         states = {}
@@ -1284,6 +1324,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             status = (
                 self.output_status(workflow) if step.key == "output"
                 else self.eq_status(workflow) if step.key == "eq"
+                else self.dynamics_status(workflow) if step.key == "dynamics"
                 else workflow.stages[step.stage] if step.stage else None
             )
             if step.key == "export":
@@ -1464,6 +1505,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.renderer_key = None
             self.manual_eq_view.restore()
             self.filter_view.restore()
+            self.dynamic_eq_view.restore()
             self.compressor_view.restore()
             self.output_view.restore()
             self.export_view.reset_delivery()
@@ -1494,6 +1536,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.mastering_preview = self.match_after = None
         self.eq_preview = self.eq_before = self.eq_after = self.chain_result = None
         self.filters_preview = self.filters_before = self.filters_after = None
+        self.dynamic_eq_preview = self.dynamic_eq_before = self.dynamic_eq_after = None
+        self.dynamic_eq_result = None
         self.dynamics_preview = self.dynamics_before = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
         self.limiter_preview = self.limiter_before = self.limiter_after = None
@@ -1508,6 +1552,8 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         self.output = None
         self.eq_preview = self.eq_after = None
         self.filters_preview = self.filters_before = self.filters_after = None
+        self.dynamic_eq_preview = self.dynamic_eq_before = self.dynamic_eq_after = None
+        self.dynamic_eq_result = None
         self.dynamics_preview = None
         self.dynamics_before = self.dynamics_after = None
         self.output_preview = self.output_before = self.output_after = None
@@ -1520,6 +1566,12 @@ class Window(ProjectController, QtWidgets.QMainWindow):
 
     def invalidate_filters(self):
         self.filters_preview = self.filters_after = None
+        self.dynamic_eq_before = None
+        self.invalidate_dynamic_eq()
+
+    def invalidate_dynamic_eq(self):
+        self.dynamic_eq_preview = self.dynamic_eq_after = None
+        self.dynamic_eq_result = None
         self.dynamics_before = None
         self.invalidate_dynamics()
 
@@ -1652,7 +1704,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             self.filters_before = chain.equalized
             self.filters_after = chain.filtered
             self.filters_preview = result.filters_preview
-            self.dynamics_before = chain.filtered
+            self.dynamic_eq_before = chain.filtered
+            self.dynamic_eq_after = (
+                chain.dynamic_equalized if chain.dynamic_equalized is not None else chain.filtered
+            )
+            self.dynamic_eq_preview = result.dynamic_eq_preview
+            self.dynamic_eq_result = chain.dynamic_eq
+            self.dynamics_before = self.dynamic_eq_after
             self.dynamics_after = chain.pre_output
             self.dynamics_preview = result.dynamics_preview
             self.output_before = chain.pre_output
@@ -1697,6 +1755,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         key = {
             id(self.manual_eq_view): "eq",
             id(self.filter_view): "filters",
+            id(self.dynamic_eq_view): "dynamic-eq",
             id(self.compressor_view): self.compressor_view.comparison_key,
             id(self.output_view): self.output_view.comparison_key,
         }.get(id(tool))
@@ -2275,7 +2334,7 @@ def main():
         finally:
             window.project.mark_saved()
             window.close()
-        print("Omazone selftest OK: window, three-band reconstruction and limiter")
+        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ and limiter")
         return
     sys.exit(app.exec())
 

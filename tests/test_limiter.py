@@ -182,6 +182,7 @@ def test_chain_limiter_follows_gain_reuses_prefixes_and_saved_bypass_keeps_choic
         "match": 1,
         "eq": 1,
         "filters": 1,
+        "dynamic-eq": 1,
         "dynamics": 1,
         "output": 1,
         "limiter": 2,

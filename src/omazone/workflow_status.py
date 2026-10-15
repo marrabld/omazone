@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from .dynamic_eq import settings_from_parameters as dynamic_eq_settings
+from .dynamic_eq import validate_settings as validate_dynamic_eq
 from .dynamics import settings_from_parameters as dynamics_settings
 from .dynamics import validate_settings as validate_dynamics
 from .filters import filters_from_parameters
@@ -140,6 +142,9 @@ def stage_configured(project, stage, sample_rate=48000):
     if stage == "dynamics":
         validate_dynamics(dynamics_settings(parameters, sample_rate), sample_rate)
         return True
+    if stage == "dynamic-eq":
+        validate_dynamic_eq(dynamic_eq_settings(parameters, sample_rate), sample_rate)
+        return True
     if stage == "filters":
         settings = filters_from_parameters(parameters)
         validate_filters(settings, sample_rate)
@@ -238,7 +243,7 @@ def derive_workflow_status(
             state = RenderState.NOT_CONFIGURED
             reason = CONFIGURE_GUIDANCE.get(stage, f"Configure or skip {stage_name(stage)}.")
             action = "Configure"
-        elif stage in ("match", "eq", "filters", "dynamics", "output", "limiter") and matching_blocked:
+        elif stage in ("match", "eq", "filters", "dynamic-eq", "dynamics", "output", "limiter") and matching_blocked:
             state = RenderState.NEEDS_RENDER
             reason, action = "Analyse or skip Matching before rendering.", "Analyse"
         elif available:
@@ -316,6 +321,7 @@ def stage_name(stage):
         "match": "Matching",
         "eq": "Manual EQ",
         "filters": "Corrective filters",
+        "dynamic-eq": "Dynamic EQ",
         "dynamics": "Dynamics",
         "output": "Output",
         "limiter": "Limiter",

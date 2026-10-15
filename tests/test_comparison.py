@@ -57,6 +57,7 @@ def test_every_comparison_names_a_stage_and_the_original_names_none():
         "eq",
         "filters",
         "dynamics",
+        "dynamic-eq",
         "output-gain",
         "limiter",
         "band-solo",

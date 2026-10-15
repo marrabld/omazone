@@ -71,6 +71,10 @@ Spectrum and Both remain available without leaving the current step, and each
 tool remembers explicit overrides. Preserve the user's detailed-view preference, mix
 selection, zoom/pan, playback cursor, and loop bounds when navigating.
 
+Dynamics includes a secondary [Dynamic EQ](dynamic-eq.md) inspector. Its one
+downward bell runs after corrective filters and before compression, independently
+of the broadband/three-band mode and its saved settings. It adds no navigation-bar step.
+
 The time-domain overview locates the selected passage in the song. Matching hides
 it by default to reserve space for the plots; its View menu can show it, and seeking
 and elapsed/total time remain visible. Spectrum analysis should identify whether it represents

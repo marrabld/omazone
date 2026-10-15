@@ -53,8 +53,8 @@ jobs:
           fi
       - name: Test release publishing rules
         run: uv run pytest tests/test_windows_release.py tests/test_release_assets.py -q
-      - name: Verify delivery PCM codes and dither
-        run: uv run pytest tests/test_delivery.py -q
+      - name: Verify delivery codes, dither and dynamic EQ
+        run: uv run pytest tests/test_delivery.py tests/test_dynamic_eq.py tests/test_dynamic_eq_integration.py -q
       - name: Build with PyInstaller
         run: uv run pyinstaller --noconfirm --distpath dist omazone.spec
       - name: Smoke test the bundled executable

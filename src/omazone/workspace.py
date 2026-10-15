@@ -10,6 +10,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .comparison import ORIGINAL as ORIGINAL_ONLY
 from .comparison import Side
 from .engine import analyse
+from .tool_panel import CurrentPageStack
 from .waveform import PeakIndex
 from .workflow_status import AnalysisState
 from .workflow_steps import legacy_step_key, step_for
@@ -181,12 +182,13 @@ class SongWorkspace(QtWidgets.QWidget):
         mix_layout.setContentsMargins(0, 0, 0, 0)
         self.mix_detail = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.mix_detail.addWidget(waveform)
-        self.plot_stack = QtWidgets.QStackedWidget()
+        self.plot_stack = CurrentPageStack()
         self.plot_stack.addWidget(spectra)
         self.eq_canvas = eq_canvas
         self.plot_stack.addWidget(eq_canvas)
         self.filter_canvas = filter_canvas
         self.plot_stack.addWidget(filter_canvas)
+        self.plot_stack.addWidget(owner.dynamic_eq_view.canvas)
         self.compressor_canvas = compressor_canvas
         self.plot_stack.addWidget(compressor_canvas)
         self.output_canvas = output_canvas
@@ -227,7 +229,11 @@ class SongWorkspace(QtWidgets.QWidget):
         # area honours these minima even when the stacked viewer has less room.
         owner.spectrum_plot.setMinimumHeight(150)
         owner.eq_plot.setMinimumHeight(154)
-        for plot, drawing_height in ((owner.spectrum_plot, 100), (owner.eq_plot, 80)):
+        for plot, drawing_height in (
+            (owner.spectrum_plot, 100), (owner.eq_plot, 80),
+            (owner.dynamic_eq_view.canvas.response_plot, 100),
+            (owner.dynamic_eq_view.canvas.reduction_plot, 100),
+        ):
             plot.getViewBox().sigResized.connect(
                 lambda _, plot=plot, height=drawing_height: self.protect_plot_height(plot, height)
             )
@@ -331,6 +337,8 @@ class SongWorkspace(QtWidgets.QWidget):
             if tool is self.owner.manual_eq_view
             else self.filter_canvas
             if tool is self.owner.filter_view
+            else self.owner.dynamic_eq_view.canvas
+            if tool is self.owner.dynamic_eq_view
             else self.compressor_canvas
             if tool is self.owner.compressor_view
             else self.output_canvas
@@ -375,6 +383,7 @@ class SongWorkspace(QtWidgets.QWidget):
         for view, key in (
             (self.owner.manual_eq_view, "eq"),
             (self.owner.filter_view, "filters"),
+            (self.owner.dynamic_eq_view, "dynamic-eq"),
             (self.owner.compressor_view, self.owner.compressor_view.comparison_key),
             (self.owner.output_view, self.owner.output_view.comparison_key),
         ):
@@ -391,6 +400,8 @@ class SongWorkspace(QtWidgets.QWidget):
             return "Manual EQ" + (" (bypassed)" if stages["eq"].bypassed else "")
         if key == "filters":
             return "Corrective filters | whole recording" + (" (bypassed)" if stages["filters"].bypassed else "")
+        if key == "dynamic-eq":
+            return "Dynamic EQ" + (" (bypassed)" if stages["dynamic-eq"].bypassed else "")
         if key == "dynamics":
             return "Compression" + (" (bypassed)" if stages["dynamics"].bypassed else "")
         if key == "band-solo":
@@ -625,6 +636,9 @@ class SongWorkspace(QtWidgets.QWidget):
                 elif self.owner.views.currentWidget() is self.owner.filter_view:
                     self.waveform.set_eq_scope(None)
                     self.owner.filter_view.draw_response()
+                elif self.owner.views.currentWidget() is self.owner.dynamic_eq_view:
+                    self.waveform.set_eq_scope(None)
+                    self.owner.dynamic_eq_view.draw()
                 elif self.owner.views.currentWidget() is self.owner.compressor_view:
                     self.owner.compressor_view.draw()
                 elif self.owner.views.currentWidget() is self.owner.output_view:
@@ -653,11 +667,18 @@ class SongWorkspace(QtWidgets.QWidget):
                         self.owner.project.match_mode != "none"
                         or not self.owner.project.stages["eq"].bypassed
                         or not self.owner.project.stages["filters"].bypassed
+                        or not self.owner.project.stages["dynamic-eq"].bypassed
                     )
                 ):
                     messages.append(
                         "Render the chain for the compressor input after EQ and filters. Showing earlier source context."
                     )
+                if (
+                    self.owner.views.currentWidget() is self.owner.dynamic_eq_view
+                    and self.owner.dynamic_eq_before is None
+                    and any(not self.owner.project.stages[key].bypassed for key in ("match", "eq", "filters"))
+                ):
+                    messages.append("Render the chain for dynamic EQ input after corrective filters. Showing earlier source context.")
                 if (
                     self.owner.views.currentWidget() is self.owner.output_view
                     and self.owner.output_before is None
@@ -666,6 +687,7 @@ class SongWorkspace(QtWidgets.QWidget):
                         or not self.owner.project.stages["eq"].bypassed
                         or not self.owner.project.stages["filters"].bypassed
                         or not self.owner.project.stages["dynamics"].bypassed
+                        or not self.owner.project.stages["dynamic-eq"].bypassed
                     )
                 ):
                     messages.append(
@@ -921,6 +943,7 @@ class SongWorkspace(QtWidgets.QWidget):
         )
         self.overview_cursor.setValue(self.owner.position / rate)
         self.compressor_canvas.set_position(self.owner.position / rate)
+        self.owner.dynamic_eq_view.canvas.set_position(self.owner.position / rate)
         self.owner.output_view.canvas.set_position(self.owner.position / rate)
 
     def close_jobs(self):
