@@ -8,61 +8,86 @@
  · [Build details and checksums](https://github.com/marrabld/omazone/releases/tag/development)
  · [Numbered releases](https://github.com/marrabld/omazone/releases)
 
-A Python desktop playground for learning audio signal processing and building
-useful mastering tools. Load a mix and a reference, inspect their spectra, design
-a matching EQ, then listen to the result with level-matched A/B playback.
+Omazone is a free, GPLv3 desktop mastering app for home musicians. Match a
+reference, shape your mix with EQ and dynamics, compare changes at matched
+loudness, and export the full processing chain. No paid mastering suite required.
 
-The aim is to make the processing understandable: show what the algorithm
-measures, what correction it requests, and what the resulting filter actually
-does. This is an early, working prototype. Contributions from musicians, DSP
-developers, and people who enjoy building audio interfaces are welcome.
+The plots show what is measured, what correction is requested, and what the
+processing actually does. Omazone is under active development, with musicians
+and developers helping through listening reports, code and documentation.
 
-![Current Omazone Matching workspace with large spectrum and filter plots, compact side controls, and A/B playback](docs/images/omazone-matching-plots.png)
+![Omazone Match workspace showing a measured reference envelope, density shading and the rendered EQ response](docs/images/omazone-reference-variation.png)
 
-## What works now
+## Main features
 
-- Reference-matching EQ with adjustable amount, octave smoothing, and boost/cut limits.
-- Mix, reference, and processed spectrum plots.
-- Requested correction versus actual linear-phase FIR response.
-- Offline, block-based rendering with compensated filter delay.
-- Loudness-matched original/processed A/B playback at the same song position,
-  with short linear crossfades between sides.
-- Click-and-drag seeking, elapsed/total time, and faded seek/pause/resume transitions.
-- Linked mono/stereo waveform views with peak-preserving zoom and region selection.
-- One-shot selection playback and sample-aligned loops with shared original/processed A/B.
-- Named targets captured from reference passages, with JSON profile save/load.
-- Per-section matching settings and full-song rendering with aligned EQ transitions.
-- Selected-region clipping inspection with editable rails, channel diagnostics, and waveform markers.
-- Checked-candidate short-gap declipping, original/repaired A/B, reset, and full-precision repair export.
-- Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
-- Export as 32-bit float or 24-bit PCM WAV, with explicit headroom and
-  optional TPDF dither. Over-range integer writes are refused, never clipped.
-- Versioned saved project recipes, verified source relinking, and retained learned curves.
-- Persistent song overview and shared waveform/spectrum viewer across tool pages.
-- Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
-- Stereo-linked broadband compression with peak/RMS detection, timed gain reduction and step A/B.
-- Explicit output gain, original/pre-output/final sample peaks, and output-only A/B.
-- Optional final lookahead limiter with a ceiling, linked stereo gain reduction,
-  aligned limiter-only A/B and a reported reconstructed-peak safety correction.
-- Three-band Dynamics mode with draggable crossovers, per-band linked compression,
-  reduction history and audition-only solo. Bands start neutral at 1:1.
-- Integrated LUFS per ITU-R BS.1770-4, shown beside the peaks and used to
-  loudness-match A/B playback without changing exported samples.
-- Oversampled true peak, so a file at 0 dBFS sample peak that still clips on
-  playback is visible before you deliver it.
-- Cached repair/matching/EQ/compression/output prefixes rendered from the original and saved recipe.
-- A guided seven-step workflow, `Listen and Mark`, `Repair`, `Match`, `Manual EQ`,
-  `Dynamics`, `Output`, `Export`, with Back/Continue/Skip and a status label on
-  every step.
-- One comparison contract for every stage, so A/B always means "before/after
-  this step" rather than original versus the whole chain.
-- Unsaved-work prompts before any destructive action, and an Export review that
-  routes you to whichever stage is holding up delivery.
+### Reference matching you can inspect
 
-Output gain, LUFS, true-peak metering and an optional final limiter are implemented.
-Three-band compression is implemented. Dynamic EQ remains planned; see the roadmap.
-See the [approved workflow](docs/workflow.md) and [roadmap](roadmap.md) for
-implementation priorities and contribution tasks.
+- Match a whole song or give different passages their own reference targets.
+  Adjust the amount, octave smoothing and boost/cut limits.
+- Compare the requested correction with the actual linear-phase FIR response.
+  Rendering compensates filter delay and preserves the song's length.
+- See a reference's measured tonal variation with an optional percentile envelope,
+  median and empirical density shading. This describes variation within the
+  reference passage, not confidence, an ideal sound or a quality score.
+- Capture named reference passages and save their profiles without embedding
+  the recordings. References can use a different sample rate from your mix.
+
+The envelope is a display only. Ordinary reference EQ matching is unchanged;
+optional range-aware correction is still planned. See
+[reference variation](docs/reference-variation.md) for how the picture is made.
+
+### EQ and dynamics, with isolated before/after listening
+
+- Up to 12 draggable manual bell EQ bands, applied to the whole recording or a
+  named passage with entry/exit fades.
+- Independent high-pass, low-pass and notch [corrective filters](docs/filters.md).
+- One downward [dynamic EQ band](docs/dynamic-eq.md) for intermittent excess in
+  a frequency range, with attack/release, maximum cut and rendered gain history.
+- Stereo-linked broadband compression with peak/RMS detection, or
+  [three-band compression](docs/multiband.md) with draggable crossovers,
+  per-band controls and gain-reduction traces. Band solo is audition-only.
+- Explicit output gain and an optional final lookahead limiter, with its own A/B.
+
+![Three-band compression with crossover controls and rendered gain-reduction histories](docs/images/omazone-multiband.png)
+
+![Dynamic EQ with a potential bell-cut response and actual rendered gain envelope](docs/images/omazone-dynamic-eq.png)
+
+### Hear the change, keep your work
+
+- Aligned, loudness-matched A/B compares before and after the selected stage.
+  Preview gain matching never changes exported samples.
+- Seek, zoom and loop passages in linked mono/stereo waveforms. Selection,
+  position and loop context follow you between workflow steps.
+- Inspect clipping and try selective short-gap repair, with candidate review,
+  original/repaired listening and undo. Reconstruction is not guaranteed.
+- Save versioned project recipes, targets and learned curves. Reopen or relink
+  recordings without silently relearning matching. Downstream edits retain
+  earlier processing choices and calibration.
+- Choose an output device, with the preference remembered locally. An unavailable
+  or incompatible device blocks playback rather than silently choosing another.
+
+### Measure and deliver
+
+- Compare raw before/after sample peaks and integrated LUFS for the whole recording
+  or selected passage. Check final oversampled true peak before delivery.
+- Import mono/stereo WAV, FLAC and AIFF. Export the complete chain as 32-bit float
+  WAV by default, or 24-bit PCM with TPDF dither enabled by default.
+- Review every stage before export. Stale renders and over-range integer writes
+  are refused; attenuation requires your consent. No silent clipping.
+
+![Export review with 24-bit delivery, dither and headroom checks](docs/images/omazone-delivery.png)
+
+Follow the seven-step workflow, skipping processing you do not need:
+
+**Listen and Mark → Repair → Match → Manual EQ → Dynamics → Output → Export**
+
+Plots keep their space while detailed settings scroll. See the
+[workflow guide](docs/workflow.md) for the processing steps and the
+[roadmap](roadmap.md) for planned work.
+
+The features above describe this source branch. Development downloads update
+after merge and successful platform builds; numbered releases remain fixed
+snapshots and may not include the latest additions.
 
 ## Quick start
 
@@ -153,8 +178,9 @@ To try the matching engine without recordings or a GUI, follow the
 The desktop app is developed on Linux, and every packaged build is verified by
 running the bundled application on the CI runner before publication. Real audio
 hardware is still validated by people, so playback quality on your own machine is
-worth confirming (#14). Playback uses the default output device through
-PortAudio, which each platform bundle includes. See
+worth confirming (#14). Playback uses PortAudio, which each platform bundle
+includes. Choose the system default or a specific device in the app's output
+device controls; the selected device must support the recording's format. See
 [platform builds](docs/packaging.md) for what is and is not yet proven per
 platform.
 
@@ -170,7 +196,8 @@ Use the **Project** menu:
   matching curves, without silently relearning. Rendered audio is not stored in
   the project file. **Analyse + process** and section analysis explicitly learn
   new matching curves.
-- **Stage bypass** skips repair, matching, manual EQ, compression, output gain or limiting
+- **Stage bypass** skips repair, matching, manual EQ, corrective filters, dynamic EQ,
+  compression, output gain or limiting
   while retaining that stage's choices.
 - **Name current selection** adds a stable region independent of matching; the
   **Named regions** submenu returns to it.
@@ -183,11 +210,12 @@ can still be used when its reference recording is unavailable. Moving an earlier
 processing choice marks later calibration as needing analysis, but stored curves
 remain available when their configuration still matches. Updating matching
 settings or assignments requires explicit analysis for newly requested matching
-curves. Manual EQ, compressor, output-gain and limiter edits only need rendering;
+curves. Manual EQ, corrective-filter, dynamic-EQ, compressor, output-gain and limiter edits only need rendering;
 they do not relearn matching.
 
-The implemented chain is repair -> learned matching -> manual EQ -> compressor
--> output gain -> optional limiter. Old reserved output metadata is retained; enabling an unknown
+The implemented chain is repair -> learned matching -> manual EQ -> corrective filters
+-> dynamic EQ -> broadband or three-band compressor -> output gain -> optional limiter.
+Old reserved output metadata is retained; enabling an unknown
 output processor fails rather than silently acting like a limiter. New, Open,
 source replacement, and Close offer Save, Discard, or Cancel when the project has
 unsaved changes. Audio originals are not overwritten by saving projects. Session
@@ -298,6 +326,10 @@ capture named targets.
 
 The plots take most of the Matching workspace. **Match amount** is shown in a
 compact panel, with smoothing and gain limits under **Advanced matching settings**.
+The **Reference variation** panel is below the matching settings, not on Listen
+and Mark. Load a reference or capture a passage with at least four full seconds
+to see **Show envelope and density**. Scroll the settings panel if needed. Older
+mean-only targets need new analysis before they can show an envelope.
 At narrower widths, controls become a strip below the plots. Basic matching
 playback across all tools is Play/Stop, A/B, seeking, and time; looping and view
 options are in **View**. The tabs and primary action bar do not scroll. **Analyse + process** stays visible
@@ -594,8 +626,12 @@ Preview gain matching/headroom is not exported. See [the chain and EQ design](do
 
 ## Control whole-mix dynamics
 
-Compression sits after manual EQ and applies to the whole recording. It can work
-without a reference or EQ. It does not split the song into frequency bands.
+Compression follows manual EQ, corrective filters and the independent dynamic EQ
+stage, and applies to the whole recording. It can work without a reference or EQ.
+Choose broadband or three-band mode in **Dynamics**. The steps below describe
+broadband compression; see [three-band compression](docs/multiband.md) for the
+crossover and per-band controls. Open **Dynamics > Dynamic EQ...** for the
+separate [dynamic EQ stage](docs/dynamic-eq.md).
 
 1. Open **Compression**, set **Threshold** around the louder passages and start
    with a modest **Ratio**, such as 2:1. The graph shows the input-to-output level
