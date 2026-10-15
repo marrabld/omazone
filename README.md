@@ -35,7 +35,8 @@ developers, and people who enjoy building audio interfaces are welcome.
 - Selected-region clipping inspection with editable rails, channel diagnostics, and waveform markers.
 - Checked-candidate short-gap declipping, original/repaired A/B, reset, and full-precision repair export.
 - Mono/stereo WAV, FLAC, and AIFF input; references can have a different sample rate.
-- 32-bit floating-point WAV export.
+- Export as 32-bit float or 24-bit PCM WAV, with explicit headroom and
+  optional TPDF dither. Over-range integer writes are refused, never clipped.
 - Versioned saved project recipes, verified source relinking, and retained learned curves.
 - Persistent song overview and shared waveform/spectrum viewer across tool pages.
 - Up to 12 manual bell EQ bands, global or region-limited, after matching with per-step A/B.
@@ -84,7 +85,7 @@ Every push or PR merge into `main` builds all three platforms, and publishes onl
 when each build and its bundled self-test succeed. A broken platform leaves the
 last public downloads in place rather than replacing them with a partial update.
 The development release is marked **pre-release** because it follows ongoing
-changes. Numbered releases such as `v0.2.0` remain fixed snapshots.
+changes. Numbered releases such as `v0.3.0` remain fixed snapshots.
 
 Each download includes a shared `SHA256SUMS.txt` listing all three platform
 archives, plus a per-platform `BUILD-INFO` file recording the exact source commit.
@@ -105,9 +106,10 @@ Each command prints the expected hash beside your download; the two agree only
 if the file is intact.
 
 To publish a numbered release, update the project version in a PR with
-`uv version 0.2.0 --no-sync` (replace the number with your intended version).
-This updates `pyproject.toml` and `uv.lock`. Merge that PR, then push a matching
-tag from the new `main` commit, such as `v0.2.0`. The tag build creates the
+`uv version 0.4.0 --no-sync` (replace the number with your intended version).
+Run `uv lock` and `uv sync --locked`, then commit both `pyproject.toml` and
+`uv.lock`. Merge that PR, then push a matching tag from the new `main` commit,
+such as `v0.4.0`. The tag build creates the
 numbered release and attaches every platform archive, the checksum file and the
 build information. Creating a release in GitHub before bumping the project
 version leaves it empty: the build refuses a mismatched tag. If an empty release
@@ -507,7 +509,7 @@ The original recording stays in memory unchanged. Whole-song matching and sectio
 matching use the repaired input after a successful repair, and their previous
 renders become stale. Mastering audition uses **Input / mastered**; when repair is
 active, its input side is the repaired signal. **Original / repaired** remains a
-separate comparison. Standard mastering export stays 32-bit float.
+separate comparison. Mastering export defaults to 32-bit float, with optional 24-bit PCM delivery.
 Repair saving uses 64-bit float WAV to retain the internal sample precision.
 
 Repair is an offline cubic-Hermite baseline using the intact endpoint samples and
@@ -681,11 +683,19 @@ needs rendering or analysis, the review says which one and offers to take you
 there; it will not quietly export a stale or partial chain.
 
 1. Open **Export** and check the summary of what will be rendered.
-2. Click **Export WAV…** and choose where to write the file.
-3. Reopen the exported file if you want to confirm it against the original.
+2. Choose a delivery format. The panel shows whether the current peak fits it.
+3. Click **Export WAV…** and choose where to write the file.
+4. Reopen the exported file if you want to confirm it against the original.
 
-Export writes 32-bit floating-point WAV from the recipe, so reopening the
-project later re-renders rather than reusing a baked intermediate. See
+32-bit float is the default and preserves samples above 0 dBFS, though playback
+can still clip. Choose 24-bit when the recipient requests it; it is dithered by default and Omazone
+refuses to write an integer file that would clip. See
+[delivery formats, headroom and dither](docs/delivery.md).
+
+![Export step choosing 24-bit delivery and reporting that the peak fits](docs/images/omazone-delivery.png)
+
+Export writes from the recipe, so reopening the project later re-renders rather
+than reusing a baked intermediate. See
 [the workflow specification](docs/workflow.md) for the full journey.
 
 ## Current limitations
@@ -701,9 +711,11 @@ A/B switches are crossfaded; arbitrary loop boundaries are not smoothed.
 Measuring integrated loudness and true peaks adds a few seconds to rendering a
 six-minute song, in the background.
 
-Mastering exports are 32-bit floating-point WAVs containing the full chain, without
-preview attenuation. Samples can exceed 0 dBFS when limiting is bypassed. Delay is
-compensated and the output retains the input length. The complete matching-FIR
+Mastering exports contain the full chain, without preview attenuation. Float
+files can exceed 0 dBFS when limiting is bypassed; integer targets cannot, so
+Export asks you to attenuate first rather than clipping. Dither is applied once,
+only when quantising to 24-bit. Delay is compensated and the output
+retains the input length. The complete matching-FIR
 convolution tail is available through its processor API, but file rendering trims it.
 
 Audio files and outputs are ignored by version control. Dependencies are pinned

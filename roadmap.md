@@ -251,7 +251,7 @@ Work in small stages so a louder export cannot be mistaken for a safer one:
 - [x] A modest lookahead limiter with ceiling and gain-reduction display.
 - [x] Crossfaded A/B changes and smoother seek/pause/resume transitions (#10).
 - [ ] Audio output-device selection ([#86](https://github.com/marrabld/omazone/issues/86)).
-- [ ] Export options for bit depth, headroom, and deliberate dither when quantising ([#85](https://github.com/marrabld/omazone/issues/85)).
+- [x] Export options for bit depth, headroom, and deliberate dither when quantising ([#85](https://github.com/marrabld/omazone/issues/85)). See [delivery](docs/delivery.md).
 
 A limiter prevents new overload; declipping treats existing damage. Check
 metering against known reference results, then inspect limiter overshoot,

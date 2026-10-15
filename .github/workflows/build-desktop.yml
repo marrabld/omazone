@@ -42,6 +42,8 @@ jobs:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --locked
+      - name: Verify delivery PCM codes and dither
+        run: uv run pytest tests/test_delivery.py -q
       - name: Read project version
         id: version
         shell: bash

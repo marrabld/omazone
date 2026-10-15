@@ -316,6 +316,9 @@ def test_nothing_in_a_gui_test_can_stop_the_run_for_a_click(tmp_path, no_blockin
         window.loaded("source", load_audio(source))
         window.error("an operation failed")
         window.export()
+        # Export now rejects an unrendered chain before opening a chooser.
+        # Exercise the shared file-dialog guard through the reference loader.
+        window.load("reference")
         window.close()
         assert window.worker is None
         assert "QMessageBox.warning" in no_blocking_dialogs
