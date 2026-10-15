@@ -2,7 +2,7 @@
 
 Each processing inspector has a **Stage measurements** panel below its settings.
 It follows that inspector's A/B comparison: Repair, Matching, Manual EQ,
-Corrective filters, Dynamics, Output gain or Final limiter. On Output, use the
+Corrective filters, Dynamic EQ, Dynamics, Output gain or Final limiter. On Output, use the
 comparison selector to choose gain or limiter. The panel names the comparison
 and the scope it measures.
 

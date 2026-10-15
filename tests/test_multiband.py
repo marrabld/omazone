@@ -185,7 +185,7 @@ def test_saved_chain_crossover_changes_reuse_earlier_prefixes_and_preserve_bypas
     project.stages["dynamics"].parameters = dynamics_parameters(edited)
     second = renderer.render(project)
     assert second.matched is first.matched and second.equalized is first.equalized
-    assert renderer.computations == {"repair": 1, "match": 1, "eq": 1, "filters": 1, "dynamics": 2, "output": 2}
+    assert renderer.computations == {"repair": 1, "match": 1, "eq": 1, "filters": 1, "dynamic-eq": 1, "dynamics": 2, "output": 2}
     saved = tmp_path / "three-band.omazone.json"
     save_project(saved, project)
     reopened = load_project(saved)

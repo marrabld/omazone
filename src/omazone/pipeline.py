@@ -1,4 +1,4 @@
-"""Fixed-order repair -> matching -> EQ -> filters -> dynamics -> output rendering.
+"""Fixed repair -> match -> EQ -> filters -> dynamic EQ -> compression -> output chain.
 
 Prefix caches depend on numerical recipes and upstream inputs, not GUI selection.
 Matching never relearns during rendering. Reserved stages fail if enabled.
@@ -10,6 +10,8 @@ from typing import Protocol
 import numpy as np
 
 from .compressor import CompressionResult
+from .dynamic_eq import render_dynamic_eq
+from .dynamic_eq import settings_from_parameters as dynamic_eq_settings
 from .dynamics import render_dynamics, settings_from_parameters
 from .engine import render, validate_audio
 from .filters import filters_from_parameters, render_filters
@@ -63,6 +65,8 @@ class ChainResult:
     pre_limiter: np.ndarray | None = None
     limiting: LimitingResult | None = None
     filtered: np.ndarray | None = None
+    dynamic_equalized: np.ndarray | None = None
+    dynamic_eq: CompressionResult | None = None
 
 
 class ChainRenderer:
@@ -75,7 +79,9 @@ class ChainRenderer:
             if self.repair_preview.shape != self.original.shape:
                 raise ValueError("Repair preview and original formats differ.")
         self.cache = {}
-        self.computations = {key: 0 for key in ("repair", "match", "eq", "filters", "dynamics", "output")}
+        self.computations = {
+            key: 0 for key in ("repair", "match", "eq", "filters", "dynamic-eq", "dynamics", "output")
+        }
 
     def prefix(self, stage, key, function):
         entry = self.cache.get(stage)
@@ -188,9 +194,24 @@ class ChainRenderer:
                 else render_filters(equalized, self.rate, filter_settings, block_size)
             ),
         )
+        dynamic_eq_stage = project.stages["dynamic-eq"]
+        dynamic_eq_key = digest_json({
+            "input": filters_key, "bypass": dynamic_eq_stage.bypassed,
+            "parameters": dynamic_eq_stage.parameters,
+        })
+        dynamic_eq = self.prefix(
+            "dynamic-eq", dynamic_eq_key,
+            lambda: (
+                None if dynamic_eq_stage.bypassed else render_dynamic_eq(
+                    filtered, self.rate,
+                    dynamic_eq_settings(dynamic_eq_stage.parameters, self.rate), block_size,
+                )
+            ),
+        )
+        dynamic_equalized = filtered if dynamic_eq is None else dynamic_eq.audio
         dynamics = project.stages["dynamics"]
         dynamics_key = digest_json(
-            {"input": filters_key, "bypass": dynamics.bypassed, "parameters": dynamics.parameters}
+            {"input": dynamic_eq_key, "bypass": dynamics.bypassed, "parameters": dynamics.parameters}
         )
         compressed = self.prefix(
             "dynamics",
@@ -199,11 +220,11 @@ class ChainRenderer:
                 None
                 if dynamics.bypassed
                 else render_dynamics(
-                    filtered, self.rate, settings_from_parameters(dynamics.parameters, self.rate), block_size
+                    dynamic_equalized, self.rate, settings_from_parameters(dynamics.parameters, self.rate), block_size
                 )
             ),
         )
-        pre_output = filtered if compressed is None else compressed.audio
+        pre_output = dynamic_equalized if compressed is None else compressed.audio
         output_key = digest_json(
             {
                 "input": dynamics_key,
@@ -232,7 +253,8 @@ class ChainRenderer:
         )
         output = pre_limiter if limiting is None else limiting.audio
         loudness = _measure_loudness(
-            [self.original, repaired, matched, equalized, filtered, pre_output, pre_limiter, output], self.rate
+            [self.original, repaired, matched, equalized, filtered, dynamic_equalized,
+             pre_output, pre_limiter, output], self.rate
         )
         true_peak = {
             id(audio): measured_true_peak(audio, self.rate)
@@ -252,6 +274,8 @@ class ChainRenderer:
             pre_limiter=pre_limiter,
             limiting=limiting,
             filtered=filtered,
+            dynamic_equalized=dynamic_equalized,
+            dynamic_eq=dynamic_eq,
         )
 
 

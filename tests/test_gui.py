@@ -877,7 +877,9 @@ def test_selection_playback_looping_edits_and_mode_changes(monkeypatch, unsmooth
         window.loop_selection.setChecked(True)
         window.waveform.set_selection(SampleRegion(30, 35))
         window.stop()  # Cancels pending resume after editing.
-        QtTest.QTest.qWait(180)
+        assert not window.selection_timer.isActive()
+        # Even an already-queued timeout must not resume after an explicit Stop.
+        window.selection_timer.timeout.emit()
         app.processEvents()
         assert not window.playing
         window.play_selection()
@@ -2319,6 +2321,7 @@ def test_navigation_shows_each_step_state_and_export_reviews_the_chain(tmp_path)
             "Match: skipped",
             "Manual EQ: ready",
             "Corrective filters: skipped",
+            "Dynamic EQ: skipped",
             "Dynamics: skipped",
             "Output gain: ready",
             "Final limiter: skipped",
@@ -3003,6 +3006,30 @@ def test_multiband_canvas_edits_and_shared_viewer_without_relearning(tmp_path):
         window.close()
 
 
+class ControlledRenderClock:
+    """Advance elapsed time without sleeping or relying on Qt timer delivery."""
+
+    def __init__(self):
+        self.milliseconds = 0
+        self.starts = 0
+        self.valid = False
+
+    def start(self):
+        self.milliseconds = 0
+        self.starts += 1
+        self.valid = True
+
+    def isValid(self):
+        return self.valid
+
+    def invalidate(self):
+        self.valid = False
+
+    def elapsed(self):
+        assert self.valid, "An inactive render must not read the clock"
+        return self.milliseconds
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, monkeypatch, fail):
     from threading import Event
@@ -3021,11 +3048,13 @@ def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, 
         window.views.setStep("dynamics")
         comp = window.compressor_view
         comp.enabled.setChecked(True)
+        clock = ControlledRenderClock()
+        monkeypatch.setattr(comp, "render_elapsed", clock)
         renderer = window.get_renderer()
         render = renderer.render
 
         def delayed_render(*args, **kwargs):
-            assert release.wait(15)
+            assert release.wait(60)
             if fail:
                 raise ValueError("Test render failed")
             return render(*args, **kwargs)
@@ -3041,26 +3070,43 @@ def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, 
         assert comp.render_progress.minimum() == comp.render_progress.maximum() == 0
         assert "full song" in comp.render_message.text()
         assert "0s elapsed" in comp.render_message.text()
+        assert comp.render_timer.isActive()
+        assert comp.render_timer.interval() == 1000
         assert window.views.layout().indexOf(comp.render_activity) < window.views.layout().indexOf(
             window.tool_scroll
         )
-        deadline = time.monotonic() + 5
-        while "0s elapsed" in comp.render_message.text() and time.monotonic() < deadline:
-            QtTest.QTest.qWait(20)
-        assert "0s elapsed" not in comp.render_message.text()
+        # A full suite under load can spend seconds in a single qWait(20).
+        # Test clock arithmetic and each refresh path, not runner scheduling.
+        clock.milliseconds = 3250
+        window.update_buttons()
+        assert "3s elapsed" in comp.render_message.text()
+        clock.milliseconds = 7750
+        window.check_playback()
+        assert "7s elapsed" in comp.render_message.text()
+        clock.milliseconds = 12500
+        comp.render_timer.timeout.emit()
+        assert "12s elapsed" in comp.render_message.text()
         window.views.setStep("export")
         assert comp.render_activity.isHidden()
+        clock.milliseconds = 18300
         window.views.setStep("dynamics")
         assert comp.render_activity.isVisible()
+        assert "18s elapsed" in comp.render_message.text()
+        assert clock.starts == 1
 
         release.set()
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 30
         while window.worker is not None and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(0.005)
         assert window.worker is None
         assert comp.render_activity.isHidden()
         assert not comp.render_timer.isActive()
+        assert not comp.rendering and not clock.isValid()
+        last_message = comp.render_message.text()
+        comp.render_timer.timeout.emit()  # Late timer delivery after completion.
+        window.check_playback()
+        assert comp.render_message.text() == last_message
         assert comp.render_button.isEnabled()
         assert errors == (["Test render failed"] if fail else [])
         if not fail:
@@ -3070,6 +3116,32 @@ def test_dynamics_render_activity_stays_visible_until_worker_finishes(tmp_path, 
         if window.worker is not None:
             window.worker.wait()
             app.processEvents()
+        window.close()
+
+
+def test_render_clock_restarts_only_for_a_new_operation(monkeypatch):
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = Window()
+    comp = window.compressor_view
+    clock = ControlledRenderClock()
+    monkeypatch.setattr(comp, "render_elapsed", clock)
+    try:
+        comp.update_render_message()  # Invalid idle clock is never read.
+        comp.set_rendering(True)
+        assert clock.starts == 1
+        clock.milliseconds = 65400
+        comp.render_timer.stop()  # Simulate loss of timer scheduling, not a new job.
+        comp.set_rendering(True)
+        assert comp.render_timer.isActive()
+        assert clock.starts == 1
+        assert "65s elapsed" in comp.render_message.text()
+        comp.set_rendering(False)
+        assert not clock.isValid()
+        comp.set_rendering(True)
+        assert clock.starts == 2
+        assert "0s elapsed" in comp.render_message.text()
+    finally:
+        comp.set_rendering(False)
         window.close()
 
 
@@ -3319,6 +3391,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
             "match": 1,
             "eq": 1,
             "filters": 1,
+            "dynamic-eq": 1,
             "dynamics": 1,
             "output": 1,
         }
@@ -3343,6 +3416,7 @@ def test_compressor_stage_ab_save_and_bypass(tmp_path, monkeypatch, unsmoothed_a
             "match": 1,
             "eq": 1,
             "filters": 1,
+            "dynamic-eq": 1,
             "dynamics": 2,
             "output": 2,
         }
@@ -3644,6 +3718,7 @@ def test_output_gain_peaks_export_ab_and_saved_project(tmp_path, monkeypatch, un
             "match": 1,
             "eq": 1,
             "filters": 1,
+            "dynamic-eq": 1,
             "dynamics": 1,
             "output": 1,
         }

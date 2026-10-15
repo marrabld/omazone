@@ -19,6 +19,7 @@ class RenderPayload(NamedTuple):
     dynamics_preview: tuple | None = None
     output_preview: tuple | None = None
     limiter_preview: tuple | None = None
+    dynamic_eq_preview: tuple | None = None
 
     @classmethod
     def from_chain(cls, chain, spec, rate):
@@ -38,7 +39,15 @@ class RenderPayload(NamedTuple):
                 pair(chain.equalized, chain.filtered)
                 if chain.filtered is not chain.equalized else None
             ),
-            dynamics_preview=pair(chain.filtered, chain.pre_output),
+            dynamics_preview=pair(
+                chain.dynamic_equalized if chain.dynamic_equalized is not None else chain.filtered,
+                chain.pre_output,
+            ),
             output_preview=pair(chain.pre_output, chain.pre_limiter),
             limiter_preview=pair(chain.pre_limiter, chain.output),
+            dynamic_eq_preview=(
+                pair(chain.filtered, chain.dynamic_equalized)
+                if chain.dynamic_equalized is not None and chain.dynamic_equalized is not chain.filtered
+                else None
+            ),
         )

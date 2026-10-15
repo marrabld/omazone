@@ -102,6 +102,7 @@ SPECS = (
         "before compression",
         "after compression",
     ),
+    ComparisonSpec("dynamic-eq", "dynamic-eq", "Dynamic EQ", "Chain before dynamic EQ", "Chain after dynamic EQ", "before dynamic EQ", "after dynamic EQ"),
     ComparisonSpec(
         "output-gain",
         "output",

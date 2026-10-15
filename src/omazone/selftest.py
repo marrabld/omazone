@@ -2,6 +2,7 @@
 
 import numpy as np
 
+from .dynamic_eq import DynamicEQSettings, dynamic_eq_parameters
 from .engine import analyse
 from .multiband import MultibandResult
 
@@ -25,3 +26,11 @@ def verify(window):
         raise RuntimeError("Bundled neutral three-band reconstruction failed.")
     if len(result.compression.solo_audio) != 3:
         raise RuntimeError("Bundled render is missing band-solo buffers.")
+    stage = window.project.stages["dynamic-eq"]
+    stage.bypassed = False
+    stage.parameters = dynamic_eq_parameters(DynamicEQSettings(frequency=1200, threshold_db=-48))
+    dynamic = window.get_renderer().render(window.project, block_size=257)
+    if dynamic.dynamic_eq is None or dynamic.dynamic_eq.max_reduction_db <= 0:
+        raise RuntimeError("Bundled dynamic EQ did not attenuate the target band.")
+    if dynamic.output.shape != audio.shape or not np.all(np.isfinite(dynamic.output)):
+        raise RuntimeError("Bundled dynamic EQ produced invalid audio.")

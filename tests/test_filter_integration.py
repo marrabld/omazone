@@ -112,7 +112,7 @@ def test_filter_edits_reuse_match_and_eq_while_eq_edits_recompute_filters(chain)
     assert second.matched is first.matched and second.equalized is first.equalized
     assert second.filtered is not first.filtered
     assert renderer.computations == {
-        "repair": 1, "match": 1, "eq": 1, "filters": 2, "dynamics": 2, "output": 2, "limiter": 2,
+        "repair": 1, "match": 1, "eq": 1, "filters": 2, "dynamic-eq": 2, "dynamics": 2, "output": 2, "limiter": 2,
     }
     assert project.stages["eq"].parameters == eq_recipe
     assert project.can_render_saved_match and not project.needs_reanalysis
@@ -122,7 +122,7 @@ def test_filter_edits_reuse_match_and_eq_while_eq_edits_recompute_filters(chain)
     assert third.matched is first.matched
     assert third.equalized is not second.equalized and third.filtered is not second.filtered
     assert renderer.computations == {
-        "repair": 1, "match": 1, "eq": 2, "filters": 3, "dynamics": 3, "output": 3, "limiter": 3,
+        "repair": 1, "match": 1, "eq": 2, "filters": 3, "dynamic-eq": 3, "dynamics": 3, "output": 3, "limiter": 3,
     }
 
 

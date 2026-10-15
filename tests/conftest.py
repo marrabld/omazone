@@ -1,7 +1,14 @@
 """Shared GUI test defaults: an unattended run must never stop for a click."""
 
+import os
+
 import pytest
-from PySide6 import QtCore, QtWidgets
+
+# A targeted test run must be headless too, not depend on test_workspace being
+# collected first to override a desktop's Wayland/X11 platform preference.
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+from PySide6 import QtCore, QtWidgets  # noqa: E402
 
 _OK = QtWidgets.QMessageBox.StandardButton.Ok
 _DISCARD = QtWidgets.QMessageBox.StandardButton.Discard

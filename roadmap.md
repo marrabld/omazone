@@ -60,10 +60,11 @@ optional View action and a persistent seek/time display. See
    with verified neutral reconstruction, per-band compression and audition-only
    solo. See [three-band compression](docs/multiband.md). Listen on real mixes
    before expanding processing or starting the selective-filtering research #83.
-   The single downward dynamic-EQ band remains planned.
+   One independent downward dynamic-EQ band is also implemented before compression;
+   see [dynamic EQ](docs/dynamic-eq.md).
 
 #46 still benefits from real-mix listening and review. The corrective filters in
-#6 are implemented; #8 remains the next scoped dynamic-EQ task. Selective-filtering
+#6 and the one-band dynamic EQ in #8 are implemented. Selective-filtering
 research #83 remains gated on using the three-band prototype.
 Neither #6 nor
 #14 appears in the plan above:
@@ -196,7 +197,7 @@ Keep one application, with independently usable and testable processing modules.
 - [x] Extend stage comparisons and measured rendering to broadband compression.
 - [x] Extend stage comparisons and sample-peak readings to output gain.
 - [x] Extend measured rendering to true peaks, LUFS and limiting.
-- [ ] Show measurements before and after each stage ([#87](https://github.com/marrabld/omazone/issues/87)).
+- [x] Show measurements before and after each stage ([#87](https://github.com/marrabld/omazone/issues/87)).
 - [x] Add high-pass, low-pass, and notch filters with frequency-response plots.
 - [x] Make filter slope, phase behaviour, and latency explicit. See [corrective filters](docs/filters.md).
 - [ ] Add parametric bell and shelving EQ bands.
@@ -252,7 +253,7 @@ Work in small stages so a louder export cannot be mistaken for a safer one:
 - [x] Oversampled true-peak estimation.
 - [x] A modest lookahead limiter with ceiling and gain-reduction display.
 - [x] Crossfaded A/B changes and smoother seek/pause/resume transitions (#10).
-- [ ] Audio output-device selection ([#86](https://github.com/marrabld/omazone/issues/86)).
+- [x] Audio output-device selection ([#86](https://github.com/marrabld/omazone/issues/86)). Real-device listening remains under #14.
 - [x] Export options for bit depth, headroom, and deliberate dither when quantising ([#85](https://github.com/marrabld/omazone/issues/85)). See [delivery](docs/delivery.md).
 
 A limiter prevents new overload; declipping treats existing damage. Check
@@ -261,12 +262,13 @@ transient distortion, and reported latency.
 
 ## 5. Advanced dynamics
 
-Start with one downward-acting dynamic-EQ bell (#8) for intermittent excess
-energy. A three-band compressor (#46) is a separate follow-up that must first
-prove its crossover paths recombine without unintended changes.
+One downward-acting dynamic-EQ bell (#8) handles intermittent excess energy
+before either compressor mode. Three-band compression (#46) remains a separate
+processor with verified neutral crossover reconstruction. See [dynamic EQ](docs/dynamic-eq.md)
+and [three-band compression](docs/multiband.md).
 
-- [ ] Dynamic EQ: frequency, bandwidth, threshold, maximum cut, and attack/release.
-- [ ] Dynamic EQ: stable time-varying gain, stereo-linked detection, bypass and
+- [x] Dynamic EQ: frequency, bandwidth, threshold, maximum cut, and attack/release.
+- [x] Dynamic EQ: stable time-varying gain, stereo-linked detection, bypass and
   rendered gain-envelope plots. Add upward processing or more bands later.
 - [x] Three-band compression: two draggable crossovers with verified phase,
   latency and uncompressed reconstruction, plus per-band gain-reduction plots.
