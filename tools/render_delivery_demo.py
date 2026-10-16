@@ -1,10 +1,11 @@
 """Capture the Export delivery panel using generated, redistributable audio.
 
 uv run python tools/render_delivery_demo.py docs/images
+uv run python tools/render_delivery_demo.py docs/images --sample-rate 44100
 """
 
+import argparse
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -18,7 +19,11 @@ from omazone.gui import Window
 
 
 def main():
-    directory = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("directory", type=Path)
+    parser.add_argument("--sample-rate", type=int, choices=(44100, 48000, 88200, 96000))
+    arguments = parser.parse_args()
+    directory = arguments.directory
     directory.mkdir(parents=True, exist_ok=True)
     app = QtWidgets.QApplication([])
     app.setStyle("Fusion")
@@ -45,6 +50,8 @@ def main():
                 window.worker is None
                 and window.workspace.job is None
                 and not window.workspace.timer.isActive()
+                and window.export_view.review_job is None
+                and not window.export_view.review_timer.isActive()
             ):
                 if errors:
                     raise RuntimeError(str(errors))
@@ -65,13 +72,22 @@ def main():
         window.render_saved_recipe()
         wait()
         window.views.setStep("export")
-        window.export_view.format.setCurrentIndex(
-            window.export_view.format.findData("pcm_24")
-        )
+        window.export_view.format.setCurrentIndex(window.export_view.format.findData("pcm_24"))
         window.export_view.draw(window.workflow_status())
+        if arguments.sample_rate:
+            window.export_view.sample_rate.setCurrentIndex(
+                window.export_view.sample_rate.findData(arguments.sample_rate)
+            )
+        wait()
+        window.tool_scroll.ensureWidgetVisible(window.export_view.delivery)
         for _ in range(5):
             app.processEvents()
-        path = directory / "omazone-delivery.png"
+        window.tool_scroll.ensureWidgetVisible(window.export_view.delivery_note, 0, 12)
+        for _ in range(5):
+            app.processEvents()
+        path = directory / (
+            "omazone-sample-rate.png" if arguments.sample_rate else "omazone-delivery.png"
+        )
         if not window.grab().save(str(path)):
             raise RuntimeError("Could not save screenshot")
         print(f"Captured delivery screenshot in {directory}: {path}")

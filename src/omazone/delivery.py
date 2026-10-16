@@ -14,7 +14,9 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from .delivery_measurements import StreamMeter, measure_blocks
 from .engine import validate_audio
+from .sample_rate import OUTPUT_RATES, converted_blocks, validate_rates
 
 FORMATS = (
     ("float", "32-bit float WAV", "FLOAT"),
@@ -34,6 +36,7 @@ class DeliverySettings:
     format: str = "float"
     dither: bool = True
     seed: int | None = None
+    sample_rate: int | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,10 @@ class DeliveryReport:
     dithered: bool
     bits: int | None
     clipped: bool
+    sample_rate: int | None = None
+    frames: int | None = None
+    true_peak_db: float | None = None
+    lufs: float | None = None
 
     @property
     def fits(self):
@@ -60,6 +67,39 @@ def validate_settings(settings):
         raise ValueError("Dither must be on or off.")
     if settings.seed is not None and (type(settings.seed) is not int or settings.seed < 0):
         raise ValueError("Dither seed must be a non-negative integer or unset.")
+    if settings.sample_rate is not None and (
+        type(settings.sample_rate) is not int or settings.sample_rate not in OUTPUT_RATES
+    ):
+        raise ValueError("Choose the source rate or 44.1, 48, 88.2 or 96 kHz delivery.")
+
+
+def measure_converted(audio, source_rate, target_rate, cancelled=None):
+    """Post-conversion float measurements, before delivery gain/quantisation."""
+    audio = _delivery_audio(audio)
+    validate_rates(source_rate, target_rate)
+
+    def blocks():
+        for block in converted_blocks(audio, source_rate, target_rate):
+            if cancelled is not None and cancelled():
+                raise RuntimeError("Delivery measurement cancelled.")
+            yield block
+
+    return measure_blocks(blocks(), target_rate, audio.shape[1])
+
+
+def _delivery_audio(audio):
+    audio = np.asarray(audio, dtype=np.float64)
+    if audio.ndim != 2 or len(audio) < 2 or audio.shape[1] < 1:
+        raise ValueError("Audio must have shape (samples, channels), with at least two samples.")
+    for start in range(0, len(audio), 65536):
+        if not np.all(np.isfinite(audio[start:start + 65536])):
+            raise ValueError("Audio contains non-finite samples.")
+    return audio
+
+
+def _sample_peak(audio):
+    return max(float(np.max(np.abs(audio[start:start + 65536])))
+               for start in range(0, len(audio), 65536))
 
 
 def format_label(settings):
@@ -108,6 +148,7 @@ def measure_peak(peak, settings):
 
 
 def measure(audio, settings):
+    """Format headroom of supplied samples; this helper does not resample."""
     return measure_peak(float(np.max(np.abs(validate_audio(audio)))), settings)
 
 
@@ -146,9 +187,9 @@ def tpdf_noise(shape, amplitude, seed=None):
 
 def _export_input(audio, settings, attenuation_db):
     validate_settings(settings)
-    audio = validate_audio(audio)
+    audio = _delivery_audio(audio)
     gain = 1.0 if attenuation_db is None else _gain(attenuation_db)
-    peak = float(np.max(np.abs(audio))) * gain
+    peak = _sample_peak(audio) * gain
     report = measure_peak(peak, settings)
     if report.clipped:
         raise ValueError(
@@ -174,7 +215,7 @@ def _convert(block, settings, gain, rng):
 
 
 def prepare(audio, settings, attenuation_db=None):
-    """Return representable normalised samples and their actual sample-peak report."""
+    """Quantise supplied delivery-rate samples; rate conversion belongs to write."""
     audio, gain, report = _export_input(audio, settings, attenuation_db)
     samples = _convert(audio, settings, gain, np.random.default_rng(settings.seed))
     if quantises(settings):
@@ -188,28 +229,42 @@ def write(path, audio, rate, settings, attenuation_db=None):
     Validation completes before opening any output. A failed write leaves an
     existing destination intact. Dither uses one generator across the whole file.
     """
-    audio, gain, report = _export_input(audio, settings, attenuation_db)
-    if type(rate) is not int or rate <= 0:
-        raise ValueError("Sample rate must be a positive integer.")
+    validate_settings(settings)
+    target = settings.sample_rate or rate
+    validate_rates(rate, target)
+    if rate == target:
+        audio, gain, report = _export_input(audio, settings, attenuation_db)
+    else:
+        audio = _delivery_audio(audio)
+        gain = 1. if attenuation_db is None else _gain(attenuation_db)
+        peak = max(float(np.max(np.abs(block))) for block in converted_blocks(audio, rate, target))
+        report = measure_peak(peak * gain, settings)
+        if report.clipped:
+            raise ValueError(f"Converted peak exceeds the delivery ceiling. Attenuate by at least {suggested_attenuation(report):.2f} dB more, or change output gain/limiting.")
     path = Path(path)
     rng = np.random.default_rng(settings.seed)
-    peak = 0.0
+    meter = StreamMeter(target, audio.shape[1])
     temporary = None
     try:
         # Close the handle before libsndfile opens it, including on Windows.
         with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".wav", delete=False) as handle:
             temporary = Path(handle.name)
         with sf.SoundFile(
-            temporary, "w", samplerate=rate, channels=audio.shape[1],
+            temporary, "w", samplerate=target, channels=audio.shape[1],
             format="WAV", subtype=SUBTYPES[settings.format],
         ) as output:
-            for start in range(0, len(audio), 65536):
-                block = _convert(audio[start:start + 65536], settings, gain, rng)
+            for source in converted_blocks(audio, rate, target):
+                block = _convert(source, settings, gain, rng)
                 output.write(block)
-                value = float(np.max(np.abs(block.astype(np.float64))))
-                peak = max(peak, value / 2**31 if quantises(settings) else value)
+                actual = block.astype(np.float64)
+                if quantises(settings):
+                    actual /= 2**31
+                meter.feed(actual)
+        measurements = meter.finish()
         os.replace(temporary, path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    return replace(report, peak_dbfs=dbfs(peak))
+    return replace(report, peak_dbfs=dbfs(measurements.peak), sample_rate=target,
+                   frames=measurements.frames, true_peak_db=measurements.true_peak_db,
+                   lufs=measurements.lufs)

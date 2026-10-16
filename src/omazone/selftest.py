@@ -2,6 +2,7 @@
 
 import numpy as np
 
+from .delivery import measure_converted
 from .dynamic_eq import DynamicEQSettings, dynamic_eq_parameters
 from .engine import MatchSettings, analyse
 from .multiband import MultibandResult
@@ -46,6 +47,9 @@ def verify(window):
     range_spec = design_range_match(reference, rate, variation, MatchSettings(method="range-aware-v1"))
     if np.max(np.abs(range_spec.requested_db)) > 1e-9:
         raise RuntimeError("Bundled range-aware matching changed an identical reference.")
+    delivered = measure_converted(audio, rate, 44100)
+    if delivered.rate != 44100 or delivered.frames != 8820 or delivered.peak <= 0 or delivered.true_peak_db is None:
+        raise RuntimeError("Bundled delivery sample-rate conversion failed.")
     target = TargetProfile("selftest", "Generated reference", analyse(reference, rate), rate,
                            SampleRegion(0, len(reference)), "Generated", variation)
     window.project.reference_target = target

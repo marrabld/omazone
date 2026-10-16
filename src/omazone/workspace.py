@@ -965,5 +965,6 @@ class SongWorkspace(QtWidgets.QWidget):
         self.closing = True
         self.timer.stop()
         self.owner.stage_measurements.close_jobs()
+        self.owner.export_view.close_jobs()
         if self.job:
             self.job.wait()

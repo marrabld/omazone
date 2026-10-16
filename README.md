@@ -8,15 +8,28 @@
  · [Build details and checksums](https://github.com/marrabld/omazone/releases/tag/development)
  · [Numbered releases](https://github.com/marrabld/omazone/releases)
 
+## In brief
+
 Omazone is a free, GPLv3 desktop mastering app for home musicians. Match a
 reference, shape your mix with EQ and dynamics, compare changes at matched
 loudness, and export the full processing chain. No paid mastering suite required.
 
+- Reference EQ and optional range-aware matching, with measured reference variation on the plots.
+- Manual and dynamic EQ, broadband or three-band compression, and final limiting.
+- Level-matched A/B and saved projects, so you can hear changes and revisit decisions.
+- 32-bit float or 24-bit PCM WAV delivery, with peak/LUFS checks and no silent clipping.
+
+Available for Windows x64, Apple Silicon Macs running macOS 14 or newer, and
+Arch / Omarchy x86-64.
+
+[Download and install](#quick-start) · [Full feature guide](#main-features) ·
+[Run from source](#from-source) · [Roadmap](roadmap.md)
+
+![Omazone showing stereo waveforms, a measured reference envelope and the matching EQ response](docs/images/hero_omazone.png)
+
 The plots show what is measured, what correction is requested, and what the
 processing actually does. Omazone is under active development, with musicians
 and developers helping through listening reports, code and documentation.
-
-![Omazone Match workspace showing a measured reference envelope, density shading and the rendered EQ response](docs/images/omazone-reference-variation.png)
 
 ## Main features
 
@@ -76,6 +89,9 @@ common-frequency normalisation. Ordinary reference EQ matching is unchanged. See
   or selected passage. Check final oversampled true peak before delivery.
 - Import mono/stereo WAV, FLAC and AIFF. Export the complete chain as 32-bit float
   WAV by default, or 24-bit PCM with TPDF dither enabled by default.
+- Keep the source rate or choose [export-only sample-rate conversion](docs/sample-rate-conversion.md)
+  to 44.1, 48, 88.2 or 96 kHz, with converted sample peak, true peak and LUFS
+  review. Audition stays at the source rate.
 - Review every stage before export. Stale renders and over-range integer writes
   are refused; attenuation requires your consent. No silent clipping.
 
@@ -736,6 +752,11 @@ there; it will not quietly export a stale or partial chain.
 can still clip. Choose 24-bit when the recipient requests it; it is dithered by default and Omazone
 refuses to write an integer file that would clip. See
 [delivery formats, headroom and dither](docs/delivery.md).
+
+**Sample rate** defaults to the source rate. Optional conversion is applied
+before quantisation/dither, with a separate final-rate review and no hidden
+attenuation or limiting. Delivery preferences are saved without changing
+processing or audition. See [supported rates and conversion](docs/sample-rate-conversion.md).
 
 ![Export step choosing 24-bit delivery and reporting that the peak fits](docs/images/omazone-delivery.png)
 

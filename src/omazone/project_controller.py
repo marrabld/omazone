@@ -116,6 +116,8 @@ class ProjectController:
             )
         if hasattr(self, "workspace"):
             self.project.view.update(self.workspace.preferences())
+        if hasattr(self, "export_view"):
+            self.project.view["delivery"] = self.export_view.preferences()
 
     def project_changed(self, processing=True):
         if self.restoring_project:
@@ -444,7 +446,7 @@ class ProjectController:
         self.dynamic_eq_view.restore()
         self.compressor_view.restore()
         self.output_view.restore()
-        self.export_view.reset_delivery()
+        self.export_view.restore_delivery(project.view.get("delivery"))
         self.plot_spectra()
         self.refresh_file_labels()
         self.update_transport()

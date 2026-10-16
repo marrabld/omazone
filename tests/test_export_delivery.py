@@ -31,10 +31,17 @@ def export_session(tmp_path):
 
     def wait():
         deadline = time.monotonic() + 25
-        while window.worker is not None and time.monotonic() < deadline:
+        while (
+            window.worker is not None
+            or window.export_view.review_job is not None
+            or window.export_view.review_timer.isActive()
+        ) and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(0.005)
         assert window.worker is None and not errors
+        assert (
+            window.export_view.review_job is None and not window.export_view.review_timer.isActive()
+        )
 
     yield window, wait, tmp_path, app
     if window.worker is not None:
@@ -84,7 +91,8 @@ def dialog(monkeypatch):
         assert box.defaultButton() is cancel
         assert box.escapeButton() is cancel
         accept = next(
-            button for button in box.buttons()
+            button
+            for button in box.buttons()
             if box.buttonRole(button) == QtWidgets.QMessageBox.ButtonRole.AcceptRole
         )
         QtCore.QTimer.singleShot(0, (accept if Answer.accept else cancel).click)
@@ -99,7 +107,8 @@ def test_panel_defaults_to_float_and_explains_each_choice(export_session):
     view = window.export_view
     assert view.format.currentData() == "float"
     assert [view.format.itemData(i) for i in range(view.format.count())] == [
-        "float", "pcm_24",
+        "float",
+        "pcm_24",
     ]
     assert view.dither.isChecked()
     assert not view.dither.isEnabled(), "Float has no quantisation step to dither"
@@ -117,7 +126,10 @@ def test_panel_reports_fitting_peak_and_dither_state(export_session, fmt):
     choose(window, fmt)
     note = window.export_view.delivery_note.text()
     assert "fits this format" in note and "with dither" in note
-    assert f"{measure(window.output[0], window.export_view.delivery_settings()).peak_dbfs:+.2f}" in note
+    assert (
+        f"{measure(window.output[0], window.export_view.delivery_settings()).peak_dbfs:+.2f}"
+        in note
+    )
     window.export_view.dither.setChecked(False)
     assert "without dither" in window.export_view.delivery_note.text()
     choose(window, "float")
@@ -134,9 +146,7 @@ def test_over_range_export_asks_before_attenuating_and_writes_the_quieter_file(
     assert measure(chain, DeliverySettings(format=fmt)).clipped
     assert "exceeds this format's ceiling" in window.export_view.delivery_note.text()
     target = tmp_path / f"attenuated-{fmt}.wav"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     dialog.accept = True
     window.export()
     wait()
@@ -159,26 +169,20 @@ def test_cancelling_the_dialog_writes_nothing(export_session, tmp_path, monkeypa
     choose(window, "pcm_24")
     target = tmp_path / "cancelled.wav"
     target.write_bytes(b"existing master")
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     dialog.accept = False
     window.export()
     assert target.read_bytes() == b"existing master"
     assert window.worker is None
 
 
-def test_float_export_never_asks_even_when_over_zero_dbfs(
-    export_session, tmp_path, monkeypatch
-):
+def test_float_export_never_asks_even_when_over_zero_dbfs(export_session, tmp_path, monkeypatch):
     window, wait, _, _ = export_session
     chain = render_with_gain(window, wait, 18)
     assert np.max(np.abs(chain)) > 1.0
     choose(window, "float")
     target = tmp_path / "float-loud.wav"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     refuse_dialog(monkeypatch)
     window.export()
     wait()
@@ -188,16 +192,12 @@ def test_float_export_never_asks_even_when_over_zero_dbfs(
 
 
 @pytest.mark.parametrize("fmt", ["pcm_24"])
-def test_quiet_integer_export_writes_without_a_prompt(
-    export_session, tmp_path, monkeypatch, fmt
-):
+def test_quiet_integer_export_writes_without_a_prompt(export_session, tmp_path, monkeypatch, fmt):
     window, wait, _, _ = export_session
     render_with_gain(window, wait, -18)
     choose(window, fmt)
     target = tmp_path / f"quiet-{fmt}.wav"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     refuse_dialog(monkeypatch)
     window.export()
     wait()
@@ -249,15 +249,12 @@ def test_full_chain_is_exported_even_while_auditioning_a_band_solo(
     assert solo is not None and not np.array_equal(solo[0], chain)
     choose(window, format, dither=False)
     target = tmp_path / "while-soloed.wav"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     window.export()
     wait()
     written, _ = sf.read(target, always_2d=True)
     expected = (
-        chain.astype(np.float32) if format == "float" else
-        np.rint(chain * PCM_SCALE) / PCM_SCALE
+        chain.astype(np.float32) if format == "float" else np.rint(chain * PCM_SCALE) / PCM_SCALE
     )
     np.testing.assert_array_equal(written, expected)
 
@@ -271,9 +268,7 @@ def test_silence_exports_at_every_format(export_session, tmp_path, monkeypatch, 
     window.chain_result = replace(window.chain_result, output=silence)
     choose(window, fmt)
     target = tmp_path / f"silence-{fmt}.wav"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     window.export()
     wait()
     assert sf.info(target).frames == len(silence)
@@ -282,18 +277,14 @@ def test_silence_exports_at_every_format(export_session, tmp_path, monkeypatch, 
     assert np.max(np.abs(written)) < 1e-3
 
 
-def test_repaired_source_export_stays_a_64_bit_float_file(
-    export_session, tmp_path, monkeypatch
-):
+def test_repaired_source_export_stays_a_64_bit_float_file(export_session, tmp_path, monkeypatch):
     """Repair export is a separate archival path and must not follow the panel."""
     window, wait, _, _ = export_session
     audio = window.source[0]
     window.repair_result = RepairResult(audio, (), ())
     choose(window, "pcm_24")
     target = tmp_path / "repaired.wav"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
     window.export_repair()
     wait()
     assert sf.info(target).subtype == "DOUBLE"
@@ -301,30 +292,34 @@ def test_repaired_source_export_stays_a_64_bit_float_file(
     np.testing.assert_array_equal(written, audio)
 
 
-def test_delivery_panel_is_reachable_and_resets_between_projects(export_session, tmp_path, monkeypatch):
+def test_delivery_panel_is_reachable_and_resets_between_projects(
+    export_session, tmp_path, monkeypatch
+):
     window, wait, _, _ = export_session
     window.views.setStep("export")
     assert window.export_view.delivery.isVisibleTo(window.export_view)
     saved = tmp_path / "delivery.omazone.json"
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved), "")
-    )
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(saved), ""))
     window.save_current_project()
     wait()
     choose(window, "pcm_24", dither=False)
+    window.project.mark_saved()  # This test deliberately discards delivery preferences.
     window.new_project()
     assert window.export_view.format.currentData() == "float"
     assert window.export_view.dither.isChecked()
     choose(window, "pcm_24", dither=False)
+    window.project.mark_saved()
     window.open_project_path(saved)
     wait()
     assert window.export_view.format.currentData() == "float", (
-        "Delivery format is a per-export choice, not part of the recipe"
+        "The saved project's float preference must replace the current choice"
     )
     assert window.export_view.dither.isChecked()
 
 
-def test_delivery_peak_display_reuses_cached_peak_and_invalidates_after_edit(export_session, monkeypatch):
+def test_delivery_peak_display_reuses_cached_peak_and_invalidates_after_edit(
+    export_session, monkeypatch
+):
     window, wait, _, _ = export_session
     render_with_gain(window, wait, -12)
     window.views.setStep("export")
@@ -372,3 +367,245 @@ def test_stale_or_missing_render_cannot_reach_filename_or_writer(export_session,
     window.output_view.gain.setValue(-6)
     window.export()
     assert called == ["Render the current full chain before exporting."] * 2
+
+
+def choose_rate(window, rate):
+    view = window.export_view
+    view.sample_rate.setCurrentIndex(view.sample_rate.findData(rate))
+
+
+def test_converted_review_is_in_worker_cached_and_does_not_change_processing(
+    export_session, monkeypatch
+):
+    from omazone.delivery import measure_converted
+
+    window, wait, _, app = export_session
+    output = render_with_gain(window, wait, -12)
+    window.views.setStep("export")
+    assert window.export_view.sample_rate.currentData() is None
+    preview = window.preview
+    config, calibration, computations = (
+        window.project.config_key(),
+        window.project.calibration,
+        dict(window.renderer.computations),
+    )
+    called = []
+
+    def measured(*args, **kwargs):
+        called.append(QtCore.QThread.currentThread())
+        return measure_converted(*args, **kwargs)
+
+    monkeypatch.setattr("omazone.export_view.measure_converted", measured)
+    choose_rate(window, 44100)
+    assert not window.export_view.export_button.isEnabled()
+    wait()
+    view = window.export_view
+    assert called and all(thread is not app.thread() for thread in called)
+    assert view.review_measurements.rate == 44100
+    assert "After conversion" in view.converted_readout.text()
+    assert "LUFS" in view.converted_readout.text() and "dBTP" in view.converted_readout.text()
+    assert "not a converted-file preview" in view.rate_note.text()
+    for fmt in ("pcm_24", "float", "pcm_24"):
+        choose(window, fmt)
+        view.draw(window.workflow_status())
+    wait()
+    assert len(called) == 1
+    assert window.output[0] is output and window.preview is preview
+    assert window.source[1] == 48000
+    assert window.project.config_key() == config and window.project.calibration is calibration
+    assert window.renderer.computations == computations and not window.project.needs_render
+
+
+def test_converted_export_writes_chosen_rate_and_actual_measurements(
+    export_session, tmp_path, monkeypatch
+):
+    from omazone.sample_rate import converted_blocks
+
+    window, wait, _, _ = export_session
+    output = render_with_gain(window, wait, -12)
+    choose_rate(window, 44100)
+    wait()
+    target = tmp_path / "44100.wav"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
+    refuse_dialog(monkeypatch)
+    window.export()
+    wait()
+    written, rate = sf.read(target, always_2d=True)
+    expected = np.concatenate(list(converted_blocks(output, 48000, 44100))).astype(np.float32)
+    assert rate == 44100 and sf.info(target).subtype == "FLOAT"
+    np.testing.assert_array_equal(written, expected)
+    assert "44.1 kHz" in window.status.text() and "dBTP" in window.status.text()
+    assert "LUFS" in window.status.text()
+    assert "Last written file: 44.1 kHz" in window.export_view.written_note.text()
+    assert window.export_view.written_note.isVisibleTo(window.export_view)
+
+
+def test_pending_review_does_not_open_filename_dialog(export_session, monkeypatch):
+    window, wait, _, _ = export_session
+    render_with_gain(window, wait, -12)
+    choose_rate(window, 44100)
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: pytest.fail("Unmeasured conversion reached a filename dialog"),
+    )
+    window.export()
+    assert "Wait for converted" in window.status.text()
+    wait()
+
+
+def test_rate_choice_and_format_persist_without_invalidating_calibration(export_session, tmp_path):
+    import json
+
+    from omazone.project import load_project, save_project
+
+    window, wait, _, _ = export_session
+    render_with_gain(window, wait, -12)
+    before = window.project.config_key()
+    choose_rate(window, 44100)
+    choose(window, "pcm_24", dither=False)
+    wait()
+    assert not window.project.needs_render and window.project.dirty
+    window.sync_project()
+    path = tmp_path / "delivery.omazone.json"
+    save_project(path, window.project)
+    assert load_project(path).config_key() == before
+    window.project.mark_saved()
+    window.load_project_path(path)
+    wait()
+    assert window.export_view.delivery_settings() == DeliverySettings(
+        format="pcm_24", dither=False, sample_rate=44100
+    )
+    assert not window.project.dirty
+    window.render_saved_recipe()
+    window.views.setStep("export")
+    wait()
+    assert window.export_view.review_measurements.rate == 44100
+    # A pre-feature project has no delivery preferences at all.
+    data = json.loads(path.read_text())
+    del data["view"]["delivery"]
+    path.write_text(json.dumps(data))
+    window.project.mark_saved()
+    window.load_project_path(path)
+    wait()
+    assert window.export_view.delivery_settings() == DeliverySettings()
+
+
+@pytest.mark.parametrize("replacement", [96000, None])
+def test_stale_conversion_results_are_discarded_after_rate_changes(
+    export_session, monkeypatch, replacement
+):
+    import threading
+
+    from omazone.delivery import measure_converted
+
+    window, wait, _, app = export_session
+    render_with_gain(window, wait, -12)
+    started, release = threading.Event(), threading.Event()
+
+    def delayed(audio, source, target, cancelled=None):
+        if target == 44100:
+            started.set()
+            assert release.wait(10)
+        return measure_converted(audio, source, target)
+
+    monkeypatch.setattr("omazone.export_view.measure_converted", delayed)
+    try:
+        choose_rate(window, 44100)
+        deadline = time.monotonic() + 5
+        while not started.is_set() and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.005)
+        assert started.is_set()
+        choose_rate(window, replacement)
+        release.set()
+        wait()
+        reading = window.export_view.review_measurements
+        assert reading is None if replacement is None else reading.rate == replacement
+        assert not window.export_view.review_error
+    finally:
+        release.set()
+
+
+def test_unsupported_input_rate_never_falls_back_to_a_different_export_rate(
+    export_session, tmp_path, monkeypatch
+):
+    window, wait, _, _ = export_session
+    source = tmp_path / "unusual.wav"
+    sf.write(source, window.source[0], 48001, subtype="DOUBLE")
+    window.loaded("source", load_audio(source))
+    render_with_gain(window, wait, -12)
+    choose_rate(window, 44100)
+    wait()
+    assert "Unsupported delivery conversion" in window.export_view.delivery_note.text()
+    assert not window.export_view.export_button.isEnabled()
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: pytest.fail("Unsupported conversion opened file chooser"),
+    )
+    window.export()
+    choose_rate(window, None)
+    window.views.setStep("export")
+    assert window.export_view.output_view_delivery_report() is not None
+    assert "48.001" in window.export_view.converted_readout.text()
+    assert window.export_view.export_button.isEnabled()
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_converted_true_peak_warning_requires_consent_even_for_float(
+    export_session, tmp_path, monkeypatch, dialog, accept
+):
+    window, wait, _, _ = export_session
+    render_with_gain(window, wait, 18)
+    choose_rate(window, 44100)
+    wait()
+    assert window.export_view.review_measurements.true_peak_db > 0
+    target = tmp_path / "converted-hot.wav"
+    target.write_bytes(b"original")
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (str(target), ""))
+    dialog.accept = accept
+    window.export()
+    wait()
+    assert "Converted delivery peak" in dialog.asked
+    assert any("no further level changes" in message for message in dialog.asked)
+    if accept:
+        assert sf.info(target).samplerate == 44100
+        assert np.max(np.abs(sf.read(target)[0])) > 1
+    else:
+        assert target.read_bytes() == b"original"
+
+
+def test_failed_review_never_enables_export_or_uses_source_readings(export_session, monkeypatch):
+    window, wait, _, _ = export_session
+    render_with_gain(window, wait, -12)
+    window.views.setStep("export")
+
+    def fail(*args, **kwargs):
+        raise OSError("conversion measurement failed")
+
+    monkeypatch.setattr("omazone.export_view.measure_converted", fail)
+    choose_rate(window, 44100)
+    wait()
+    assert "conversion measurement failed" in window.export_view.delivery_note.text()
+    assert window.export_view.output_view_delivery_report() is None
+    assert not window.export_view.export_button.isEnabled()
+
+
+@pytest.mark.parametrize("width,height", [(820, 560), (1280, 800)])
+def test_converted_delivery_controls_scroll_without_clipping(export_session, width, height):
+    window, wait, _, app = export_session
+    render_with_gain(window, wait, -12)
+    window.views.setStep("export")
+    choose_rate(window, 44100)
+    wait()
+    window.resize(width, height)
+    for _ in range(8):
+        app.processEvents()
+    assert window.width() == width and window.height() == height
+    assert window.tool_scroll.horizontalScrollBar().maximum() == 0
+    assert not window.tool_scroll.isAncestorOf(window.export_view.export_button)
+    assert (
+        window.export_view.sample_rate.width()
+        >= window.export_view.sample_rate.minimumSizeHint().width()
+    )

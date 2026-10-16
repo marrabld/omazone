@@ -1,8 +1,9 @@
 # Delivery formats, headroom and dither
 
 Export writes the full rendered chain, never a selected passage, loudness-matched
-preview or solo band. The format and dither choices only affect the written file.
-They do not change the saved processing recipe or what A/B playback auditions.
+preview or solo band. Format, sample rate and dither only affect delivery.
+They are saved as delivery preferences, not processing stages, and do not change
+the learned curves, chain render or what A/B playback auditions.
 
 ## Choose a format
 
@@ -11,9 +12,13 @@ They do not change the saved processing recipe or what A/B playback auditions.
 | 32-bit float WAV | `FLOAT` | Keeping a master for further processing. The default. |
 | 24-bit PCM WAV | `PCM_24` | Delivery to a service or another person that accepts 24-bit WAV. |
 
-16-bit export is deferred. Both choices keep the recording's sample rate, channel
-layout and sample count. There is no resampling or lossy encoding here. Check
-the recipient's requirements rather than assuming one format fits every upload.
+16-bit export is deferred. **Sample rate** defaults to the source rate, with
+optional export-only conversion to 44.1, 48, 88.2 or 96 kHz. Channel layout stays
+unchanged. Converted frame count is rounded up to preserve duration within one
+output sample. There is no lossy encoding. See
+[sample-rate conversion](sample-rate-conversion.md) for supported input rates and
+the measurement/safety policy. Check the recipient's requirements rather than
+assuming one format or rate fits every upload.
 
 Float files can preserve samples above 0 dBFS so they can be lowered later, but
 playback devices may still clip them. Float is not a guarantee of safe playback,
@@ -22,7 +27,8 @@ and writing a file cannot repair clipping already present in the source. A
 
 ## Check headroom before writing PCM
 
-24-bit PCM has a fixed range. Export checks the highest absolute sample before
+24-bit PCM has a fixed range. Export checks the highest absolute sample **after
+any sample-rate conversion**, before
 writing and reserves the small amount of additional headroom required by dither.
 If the file would not fit, it asks you to choose between:
 
@@ -36,12 +42,17 @@ default and Escape action. Nothing is clipped or normalised silently.
 
 An export-only reduction makes a quieter file but does not update audition,
 output gain, compression, the limiter or the saved recipe. The completion message
-states the reduction and the actual written sample peak.
+states the reduction, written rate and actual written sample peak, true peak and
+integrated LUFS. Those final meters include the chosen attenuation/quantisation;
+the review panel measures converted float audio before those steps.
 
 The check concerns sample representation, not reconstructed true peaks. A PCM
 file that fits can still exceed 0 dBTP between samples. Export keeps the final
 LUFS and true-peak readings visible; review Output and the optional limiter if
-those readings warn. A ceiling around -1 dBTP is a common starting point for
+those readings warn. Converted delivery has its own worker-based review and an
+explicit warning/confirmation if its peak exceeds full scale or an enabled
+limiter's earlier ceiling. It never silently limits the converted audio.
+A ceiling around -1 dBTP is a common starting point for
 streaming, not a universal upload requirement or a guarantee about later lossy
 encoding. See [true peak](true-peak.md) and [limiting](limiter.md).
 
@@ -71,9 +82,10 @@ Export adds no noise shaping, loudness target or automatic gain boost.
 
 Unseeded exports use fresh random noise, so separate dithered exports can differ
 at the sample level. Tests supply a seed for repeatable comparisons. Format
-choices persist for repeated exports in the current project but reset to float
-with dither enabled for integers when opening a project or loading a new source.
-They are not stored as processing settings in the project recipe.
+choices and the delivery sample rate are saved with the project's delivery
+preferences. New projects and new sources default to source-rate float with
+dither enabled for integers. Older projects without preferences use those same
+defaults. They are not stored as processing-stage settings or audition settings.
 
 ![Export with 24-bit selected, dither enabled and a fitting sample peak](images/omazone-delivery.png)
 
@@ -82,7 +94,7 @@ The fixture uses generated tones and seeded noise, not a private recording.
 
 ## Verification and file safety
 
-Run `uv run pytest tests/test_delivery.py tests/test_export_delivery.py -q`.
+Run `uv run pytest tests/test_delivery.py tests/test_delivery_conversion.py tests/test_sample_rate.py tests/test_export_delivery.py -q`.
 
 The tests read actual WAV files back, checking PCM codes against an independent
 rounding reference, unbiased dithered error, variance across sub-LSB offsets,
