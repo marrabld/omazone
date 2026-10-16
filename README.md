@@ -4,14 +4,14 @@
 
 # Omazone
 
-[**Download Windows app: latest development build**](https://github.com/marrabld/omazone/releases/download/development/Omazone-windows-x64.zip)
- · [Build details and checksums](https://github.com/marrabld/omazone/releases/tag/development)
- · [Numbered releases](https://github.com/marrabld/omazone/releases)
+[**Download Windows app: 0.4.0 beta 1**](https://github.com/marrabld/omazone/releases/download/v0.4.0b1/Omazone-0.4.0b1-windows-x64.zip)
+ · [Mac, Arch, release notes and checksums](https://github.com/marrabld/omazone/releases/tag/v0.4.0b1)
+ · [All releases](https://github.com/marrabld/omazone/releases)
 
-**Community beta preparation:** 0.4.0 beta 1 (`0.4.0b1`) is the planned testing
-snapshot before 1.0. See the [testing guide](docs/beta-testing.md) for the numbered
-download link, checklist and feedback form. The link works once the beta is
-published; the development download above keeps changing.
+**Community beta available:** 0.4.0 beta 1 (`0.4.0b1`) is a fixed testing snapshot
+on the way to 1.0, not a finished stable release. Start with the
+[testing guide](docs/beta-testing.md) for a short checklist and feedback form.
+Use copies of your recordings and save beta projects under new names.
 
 ## In brief
 
@@ -119,34 +119,41 @@ snapshots and may not include the latest additions.
 
 ## Quick start
 
-Downloads for all three platforms are published together in the
-[development release](https://github.com/marrabld/omazone/releases/tag/development)
-after every merge into `main`. Choose the file for your system:
+For community testing, download the fixed
+[0.4.0 beta 1 release](https://github.com/marrabld/omazone/releases/tag/v0.4.0b1).
+Choose the file for your system:
 
 | Platform | Download | Install |
 | --- | --- | --- |
-| Windows x64 | `Omazone-windows-x64.zip` | Extract, keep `_internal` beside `Omazone.exe` |
-| Apple Silicon Mac | `Omazone-macos-arm64.zip` | Extract, then move `Omazone.app` to Applications |
-| Arch / Omarchy x86-64 | `Omazone-arch-x86_64.pkg.tar.zst` | `sudo pacman -U Omazone-arch-x86_64.pkg.tar.zst` |
+| Windows x64 | [Omazone-0.4.0b1-windows-x64.zip](https://github.com/marrabld/omazone/releases/download/v0.4.0b1/Omazone-0.4.0b1-windows-x64.zip) | Extract, keep `_internal` beside `Omazone.exe` |
+| Apple Silicon Mac | [Omazone-0.4.0b1-macos-arm64.zip](https://github.com/marrabld/omazone/releases/download/v0.4.0b1/Omazone-0.4.0b1-macos-arm64.zip) | Extract, then move `Omazone.app` to Applications |
+| Arch / Omarchy x86-64 | [Omazone-0.4.0b1-arch-x86_64.pkg.tar.zst](https://github.com/marrabld/omazone/releases/download/v0.4.0b1/Omazone-0.4.0b1-arch-x86_64.pkg.tar.zst) | `sudo pacman -U Omazone-0.4.0b1-arch-x86_64.pkg.tar.zst` |
 
 None of these need Python installed. The Mac build targets macOS 14 or newer on
 Apple Silicon; Intel Macs are not supported yet. The Arch package installs the
 bundled application to `/opt/omazone` and adds an `omazone` command plus a
 desktop-menu entry.
 
-Every push or PR merge into `main` builds all three platforms, and publishes only
-when each build and its bundled self-test succeed. A broken platform leaves the
-last public downloads in place rather than replacing them with a partial update.
-The development release is marked **pre-release** because it follows ongoing
-changes. Numbered releases such as `v0.3.0` remain fixed snapshots.
+For newer changes or a requested fix retest, use the separate
+[rolling development build](https://github.com/marrabld/omazone/releases/tag/development).
+It changes after successful `main` builds, so include its exact source commit in
+reports. Use the numbered beta above for the community checklist unless asked
+to test a newer build.
 
-Each download includes a shared `SHA256SUMS.txt` listing all three platform
-archives, plus a per-platform `BUILD-INFO` file recording the exact source commit.
-Verify the file you downloaded by comparing only its own hash against that list:
+All three platforms publish together only after their builds and bundled
+self-tests succeed. A broken platform leaves previous downloads in place.
+Both the beta and rolling development build are marked **Pre-release**; numbered
+snapshots stay fixed. GitHub's **Latest** link still points to the older stable
+`v0.3.0`, not this beta.
+
+The [beta release page](https://github.com/marrabld/omazone/releases/tag/v0.4.0b1)
+also provides `SHA256SUMS.txt` for all three archives and per-platform `BUILD-INFO`
+files recording the version and exact source commit. Download the checksum file
+alongside your archive. Verify only the archive you downloaded:
 
 ```powershell
 # Windows
-Get-FileHash .\Omazone-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\Omazone-0.4.0b1-windows-x64.zip -Algorithm SHA256
 ```
 
 ```bash
@@ -155,8 +162,8 @@ grep 'macos-arm64.zip' SHA256SUMS.txt | shasum -a 256 -c -
 grep 'arch-x86_64' SHA256SUMS.txt | sha256sum -c -
 ```
 
-Each command prints the expected hash beside your download; the two agree only
-if the file is intact.
+On Windows, compare the printed hash with the matching entry in `SHA256SUMS.txt`.
+The macOS/Arch commands report `OK` only if that archive matches its checksum.
 
 To publish a numbered release, update the project version in a PR with
 `uv version 0.4.0 --no-sync` (replace the number with your intended version).
@@ -167,7 +174,10 @@ numbered release and attaches every platform archive, the checksum file and the
 build information. Creating a release in GitHub before bumping the project
 version leaves it empty: the build refuses a mismatched tag. If an empty release
 with a matching tag already exists, the workflow can fill it. It never replaces
-assets on an existing numbered release.
+assets on an existing numbered release. For beta approval, canonical prerelease
+tags and the full publication procedure, follow the
+[maintainer checklist](docs/beta-release-checklist.md). Beta tags do not replace
+the stable release's Latest designation.
 
 The Windows executable is unsigned, and the Mac app is not Apple-signed or
 notarized. On macOS, an unnotarized app is opened by Control-clicking it,
@@ -192,6 +202,10 @@ cd omazone
 uv sync --python 3.13
 uv run omazone
 ```
+
+That runs the current source branch, which may be newer than the beta. To test
+the exact beta from a fresh clone, run `git switch --detach v0.4.0b1` before
+`uv sync --python 3.13`. Don't switch an existing checkout with unsaved changes.
 
 For an existing checkout:
 
