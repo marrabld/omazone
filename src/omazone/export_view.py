@@ -38,11 +38,19 @@ class DeliveryReviewTask(QtCore.QThread):
         self.source_rate, self.target_rate = source_rate, target_rate
         self.key = (id(audio), source_rate, target_rate)
         self.result, self.error = None, None
+        self.cancel_requested = False
+
+    def cancel(self):
+        self.cancel_requested = True
+        self.requestInterruption()
+
+    def cancelled(self):
+        return self.cancel_requested or self.isInterruptionRequested()
 
     def run(self):
         try:
             self.result = measure_converted(self.audio, self.source_rate, self.target_rate,
-                                            self.isInterruptionRequested)
+                                            self.cancelled)
         except Exception as error:
             self.error = str(error)
 
@@ -136,6 +144,7 @@ class ExportView(QtWidgets.QWidget):
         self.written_note.setWordWrap(True)
         self.written_note.hide()
         delivery_layout.addWidget(self.written_note)
+        self._written_report = self._written_source = self._written_settings = None
         for label in self.delivery.findChildren(QtWidgets.QLabel):
             if label.property("formLabel"):
                 continue
@@ -188,22 +197,34 @@ class ExportView(QtWidgets.QWidget):
         self._peak_source = None
         self._peak = None
         self.written_note.hide()
+        self._written_report = self._written_source = self._written_settings = None
         self.refresh_delivery()
 
     def delivery_changed(self, *_):
         self.written_note.hide()
+        self._written_report = self._written_source = self._written_settings = None
         if not self.owner.restoring_project:
             self.owner.project_changed(processing=False)
         self.refresh_delivery()
         self.owner.update_buttons()
 
-    def record_written(self, report):
+    def record_written(self, report, settings=None):
+        self._written_report = report
+        self._written_source = weakref.ref(self.owner.chain_result.output) if self.owner.chain_result else None
+        self._written_settings = settings or self.delivery_settings()
         self.written_note.setText(
             f"Last written file: {report.sample_rate / 1000:g} kHz, {report.frames} frames. "
             f"Sample peak {report.peak_dbfs:+.2f} dBFS; {format_true_peak(report.true_peak_db)}; "
             f"{format_lufs(report.lufs)}. Includes final attenuation/quantisation and any dither."
         )
         self.written_note.show()
+
+    def current_written_report(self):
+        if (self.owner.chain_result is not None and self._written_source is not None
+                and self._written_source() is self.owner.chain_result.output
+                and self._written_settings == self.delivery_settings()):
+            return self._written_report
+        return None
 
     def review_request(self):
         if self.owner.chain_result is None or self.owner.source is None:
@@ -231,7 +252,7 @@ class ExportView(QtWidgets.QWidget):
         if not self.closing and request is not None:
             audio, source, target = request
             if (job.audio is audio and job.key == (id(audio), source, target)
-                    and not job.isInterruptionRequested()):
+                    and not job.cancel_requested):
                 self.review_key = job.key
                 self.review_measurements, self.review_error = job.result, job.error
                 self.owner.update_buttons()
@@ -243,7 +264,7 @@ class ExportView(QtWidgets.QWidget):
         self.closing = True
         self.review_timer.stop()
         if self.review_job is not None:
-            self.review_job.requestInterruption()
+            self.review_job.cancel()
             self.review_job.wait()
 
     def refresh_delivery(self):
@@ -291,7 +312,7 @@ class ExportView(QtWidgets.QWidget):
             self.review_measurements = self.review_error = None
             self.review_timer.stop()
             if self.review_job is not None:
-                self.review_job.requestInterruption()
+                self.review_job.cancel()
             if request is not None:
                 try:
                     validate_rates(request[1], request[2])

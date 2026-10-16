@@ -118,6 +118,8 @@ class ProjectController:
             self.project.view.update(self.workspace.preferences())
         if hasattr(self, "export_view"):
             self.project.view["delivery"] = self.export_view.preferences()
+        if hasattr(self, "output_view"):
+            self.project.view["loudness_target"] = self.output_view.targeting.preferences()
 
     def project_changed(self, processing=True):
         if self.restoring_project:

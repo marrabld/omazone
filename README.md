@@ -17,7 +17,7 @@ loudness, and export the full processing chain. No paid mastering suite required
 - Reference EQ and optional range-aware matching, with measured reference variation on the plots.
 - Manual and dynamic EQ, broadband or three-band compression, and final limiting.
 - Level-matched A/B and saved projects, so you can hear changes and revisit decisions.
-- 32-bit float or 24-bit PCM WAV delivery, with peak/LUFS checks and no silent clipping.
+- Loudness targeting and 32-bit float or 24-bit PCM WAV delivery, with peak/LUFS checks and no silent clipping.
 
 Available for Windows x64, Apple Silicon Macs running macOS 14 or newer, and
 Arch / Omarchy x86-64.
@@ -85,6 +85,9 @@ common-frequency normalisation. Ordinary reference EQ matching is unchanged. See
 
 ### Measure and deliver
 
+- Set your own [loudness target and peak ceiling](docs/loudness-targeting.md).
+  Inspect gain-only or limiter proposals before applying them, then check the
+  measured delivery. No automatic platform presets or hidden gain stage.
 - Compare raw before/after sample peaks and integrated LUFS for the whole recording
   or selected passage. Check final oversampled true peak before delivery.
 - Import mono/stereo WAV, FLAC and AIFF. Export the complete chain as 32-bit float
@@ -687,6 +690,12 @@ This causal compressor has no lookahead or limiter and may exceed 0 dBFS after
 manual makeup. See [the compressor design](docs/compressor.md).
 
 ## Check the final output
+
+Expand **Loudness target...** in Output for optional LUFS/peak targeting.
+**Calculate proposal** leaves audio unchanged; **Apply proposal and render**
+commits the displayed settings to output gain and the existing limiter. The
+request and actual delivery-rate result remain distinct, including when the
+target cannot be reached. See [the targeting guide](docs/loudness-targeting.md).
 
 The Output step sits after dynamics. It shows three rows: the original recording,
 the signal before output gain, and the final float-WAV export. Each row carries

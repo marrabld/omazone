@@ -230,10 +230,13 @@ class SongWorkspace(QtWidgets.QWidget):
         # area honours these minima even when the stacked viewer has less room.
         owner.spectrum_plot.setMinimumHeight(150)
         owner.eq_plot.setMinimumHeight(154)
+        self.output_canvas.peaks.setMinimumHeight(160)
+        self.output_canvas.reduction.setMinimumHeight(160)
         for plot, drawing_height in (
             (owner.spectrum_plot, 100), (owner.eq_plot, 80),
             (owner.dynamic_eq_view.canvas.response_plot, 100),
             (owner.dynamic_eq_view.canvas.reduction_plot, 100),
+            (self.output_canvas.peaks, 100), (self.output_canvas.reduction, 100),
         ):
             plot.getViewBox().sigResized.connect(
                 lambda _, plot=plot, height=drawing_height: self.protect_plot_height(plot, height)
@@ -964,6 +967,7 @@ class SongWorkspace(QtWidgets.QWidget):
     def close_jobs(self):
         self.closing = True
         self.timer.stop()
+        self.owner.output_view.targeting.close_jobs()
         self.owner.stage_measurements.close_jobs()
         self.owner.export_view.close_jobs()
         if self.job:
