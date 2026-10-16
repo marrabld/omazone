@@ -1,6 +1,6 @@
 [project]
 name = "omazone"
-version = "0.3.0"
+version = "0.4.0b1"
 description = "An offline spectral-matching DSP playground"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
@@ -18,7 +18,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.9", "pyinstaller>=6.10"]
+dev = ["pytest>=8", "ruff>=0.9", "pyinstaller>=6.10", "packaging>=24"]
 
 [tool.ruff]
 line-length = 100

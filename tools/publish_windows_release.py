@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from packaging.version import Version
+
 
 def publication_target(event, ref):
     if event not in ("push", "workflow_dispatch"):
@@ -46,8 +48,15 @@ def read_release(repo, tag):
     pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
     matches = [release for page in pages for release in page if release.get("tag_name") == tag]
     if len(matches) > 1:
-        raise ValueError(f"Multiple releases use {tag}; choose the intended draft before publishing.")
+        raise ValueError(
+            f"Multiple releases use {tag}; choose the intended draft before publishing."
+        )
     return matches[0] if matches else None
+
+
+def version_notes(tag):
+    path = Path(__file__).resolve().parents[1] / "docs" / "releases" / f"{tag}.md"
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
 
 
 def publish(repo, event, ref, sha, version, assets, run_url):
@@ -72,6 +81,7 @@ def publish(repo, event, ref, sha, version, assets, run_url):
     ):
         raise ValueError("Verified release assets are missing.")
     development = tag == "development"
+    prerelease = development or Version(version).is_prerelease
     if development:
         main_sha = json.loads(gh("api", f"repos/{repo}/git/ref/heads/main"))["object"]["sha"]
         if main_sha != sha:
@@ -105,6 +115,8 @@ def publish(repo, event, ref, sha, version, assets, run_url):
         "This development build is updated automatically after successful main builds.\n"
         "It contains the latest changes and may be less tested than numbered releases.\n\n"
         if development
+        else "This is a prerelease for community testing, not a stable release.\n\n"
+        if prerelease
         else "Standalone desktop builds from this version tag.\n\n"
     )
     notes += (
@@ -117,8 +129,14 @@ def publish(repo, event, ref, sha, version, assets, run_url):
         "SHA256SUMS.txt contains all three package checksums. Each BUILD-INFO file identifies its platform build.\n"
         "The Windows executable is unsigned, and the Mac app is not Apple-notarized.\n"
     )
-    if not development and release is not None and release.get("body", "").strip():
-        notes = release["body"].strip() + "\n\n## Build and download verification\n\n" + notes
+    if not development:
+        existing_notes = release.get("body", "").strip() if release is not None else ""
+        # A failed upload can leave our draft intact. Rebuild its generated
+        # footer once, preserving the maintainer's introduction on retries.
+        introduction = existing_notes.split("\n\n## Build and download verification\n\n", 1)[0]
+        introduction = introduction or version_notes(tag)
+        if introduction:
+            notes = introduction + "\n\n## Build and download verification\n\n" + notes
     title = "Latest development builds" if development else tag
     with tempfile.TemporaryDirectory() as directory:
         notes_file = Path(directory) / "release-notes.md"
@@ -168,8 +186,8 @@ def publish(repo, event, ref, sha, version, assets, run_url):
             "--notes-file",
             str(notes_file),
             "--draft=false",
-            f"--prerelease={'true' if development else 'false'}",
-            f"--latest={'false' if development else 'true'}",
+            f"--prerelease={'true' if prerelease else 'false'}",
+            f"--latest={'false' if prerelease else 'true'}",
         )
     return f"Published https://github.com/{repo}/releases/tag/{tag}"
 

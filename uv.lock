@@ -303,7 +303,7 @@ wheels = [
 
 [[package]]
 name = "omazone"
-version = "0.3.0"
+version = "0.4.0b1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -318,6 +318,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "packaging" },
     { name = "pyinstaller" },
     { name = "pytest" },
     { name = "ruff" },
@@ -335,6 +336,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "packaging", specifier = ">=24" },
     { name = "pyinstaller", specifier = ">=6.10" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.9" },

@@ -49,7 +49,15 @@ def assets(tmp_path, *, version="0.1.0", numbered=False):
     return files
 
 
-def fake_github(monkeypatch, *, main_sha=SHA, release=None, tag_exists=True, fail_upload=False, draft_release=None):
+def fake_github(
+    monkeypatch,
+    *,
+    main_sha=SHA,
+    release=None,
+    tag_exists=True,
+    fail_upload=False,
+    draft_release=None,
+):
     calls = []
     notes = []
 
@@ -140,6 +148,45 @@ def test_numbered_release_is_separate_and_reruns_preserve_assets(tmp_path, monke
     calls, _ = fake_github(monkeypatch, release={"draft": False, "assets": ["existing.zip"]})
     assert "already exists" in publish(tmp_path, ref="refs/tags/v0.1.0")
     assert not any(args[:2] in (("release", "upload"), ("release", "edit")) for args in calls)
+
+
+@pytest.mark.parametrize("version", ["0.4.0a1", "0.4.0b1", "1.0.0rc1", "0.4.0.dev1"])
+def test_numbered_prereleases_never_replace_latest_stable(tmp_path, monkeypatch, version):
+    calls, notes = fake_github(monkeypatch)
+    publish(tmp_path, ref=f"refs/tags/v{version}", version=version)
+    assert "--prerelease=true" in calls[-1] and "--latest=false" in calls[-1]
+    assert not any("PATCH" in args for args in calls)
+    assert all("not a stable release" in note for note in notes)
+    calls, _ = fake_github(monkeypatch, release={"draft": False, "assets": ["existing.zip"]})
+    assert "preserving" in publish(tmp_path, ref=f"refs/tags/v{version}", version=version)
+    assert not any(args[:2] in (("release", "upload"), ("release", "edit")) for args in calls)
+
+
+def test_versioned_notes_are_included_without_losing_generated_verification(tmp_path, monkeypatch):
+    calls, notes = fake_github(monkeypatch)
+    monkeypatch.setattr(publisher, "version_notes", lambda tag: "Community beta introduction")
+    publish(tmp_path, ref="refs/tags/v0.4.0b1", version="0.4.0b1")
+    assert notes and all("Community beta introduction" in note and SHA in note for note in notes)
+    assert "--latest=false" in calls[-1]
+
+
+def test_draft_retry_preserves_custom_notes_without_duplicating_build_footer(tmp_path, monkeypatch):
+    body = "My testing instructions\n\n## Build and download verification\n\nOld generated footer"
+    calls, notes = fake_github(
+        monkeypatch,
+        draft_release={
+            "tag_name": "v0.4.0b1",
+            "draft": True,
+            "assets": [],
+            "body": body,
+        },
+    )
+    publish(tmp_path, ref="refs/tags/v0.4.0b1", version="0.4.0b1")
+    assert all(note.count("## Build and download verification") == 1 for note in notes)
+    assert all(
+        "My testing instructions" in note and "Old generated footer" not in note for note in notes
+    )
+    assert "--prerelease=true" in calls[-1]
 
 
 def test_empty_published_numbered_release_gets_assets(tmp_path, monkeypatch):

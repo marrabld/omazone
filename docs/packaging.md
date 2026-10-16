@@ -29,6 +29,18 @@ the previous downloads stay live.
 The rolling `development` release advances only by a non-forced fast-forward.
 Numbered releases are immutable: a rerun never replaces their assets.
 
+Prerelease versions use canonical Python spelling, for example `0.4.0b1` and
+the exact tag `v0.4.0b1`. They are published as **Pre-release**, never Latest;
+the previous stable release keeps that designation. Stable tags can become Latest.
+Version-specific introductions are read from `docs/releases/<tag>.md`, followed
+by generated build/download verification details. Existing draft notes are
+preserved on retries.
+
+macOS uses a numeric short bundle version (`0.4.0`) and an Apple-style build
+version (`0.4.0b1`; release candidates use `fc`). The full Python version remains
+in the app metadata and build identity. Arch uses the canonical version directly.
+See the [beta release checklist](beta-release-checklist.md) for approval and tagging.
+
 ## Windows
 
 A portable zip, not an installer. Extract it and run `Omazone.exe` with

@@ -46,6 +46,10 @@ use the project's [GPLv3 license](LICENSE).
 
 ## Desktop builds and publication
 
+For the community beta, follow the [release checklist](docs/beta-release-checklist.md).
+The [testing guide](docs/beta-testing.md) and [announcement](docs/beta-announcement.md)
+are written for musicians; reports don't require coding experience.
+
 Merging a PR into `main` automatically starts **Desktop release and publish**. It
 builds Windows x64, an Apple Silicon macOS app and an Arch Linux package, runs each
 bundled application's self-test, and publishes all three together. There is no

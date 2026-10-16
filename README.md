@@ -8,6 +8,11 @@
  · [Build details and checksums](https://github.com/marrabld/omazone/releases/tag/development)
  · [Numbered releases](https://github.com/marrabld/omazone/releases)
 
+**Community beta preparation:** 0.4.0 beta 1 (`0.4.0b1`) is the planned testing
+snapshot before 1.0. See the [testing guide](docs/beta-testing.md) for the numbered
+download link, checklist and feedback form. The link works once the beta is
+published; the development download above keeps changing.
+
 ## In brief
 
 Omazone is a free, GPLv3 desktop mastering app for home musicians. Match a
