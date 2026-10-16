@@ -26,6 +26,7 @@ from .engine import (
 )
 from .export_view import ExportView
 from .filter_view import FilterView
+from .loudness import format_lufs
 from .manual_eq_view import ManualEQView
 from .output_view import OutputView
 from .pipeline import ChainRenderer
@@ -40,6 +41,7 @@ from .section_view import SectionWorkbench
 from .sections import TargetProfile
 from .stage_measurement_view import StageMeasurementView
 from .tool_panel import ToolPanel
+from .truepeak import format_true_peak
 from .waveform import PeakIndex, SampleRegion
 from .waveform_view import WaveformView
 from .workflow_status import (
@@ -2263,6 +2265,13 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if not self.workflow_status().export_available:
             self.error("Render the current full chain before exporting.")
             return
+        settings = self.export_view.delivery_settings()
+        report = self.export_view.output_view_delivery_report()
+        if report is None:
+            self.views.setStep("export")
+            self.export_view.refresh_delivery()
+            self.status.setText(self.export_view.review_error or "Wait for converted delivery measurements, or choose the source rate.")
+            return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Export processed audio", "matched.wav", "WAV (*.wav)"
         )
@@ -2271,8 +2280,6 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         if not path.lower().endswith(".wav"):
             path += ".wav"
         audio, rate = self.output[0], self.source[1]
-        settings = self.export_view.delivery_settings()
-        report = self.export_view.output_view_delivery_report()
         attenuation = None
         if report.clipped:
             # Never clip or change gain silently. The quieter export is an
@@ -2280,16 +2287,51 @@ class Window(ProjectController, QtWidgets.QMainWindow):
             attenuation = self.confirm_delivery_attenuation(report, settings)
             if attenuation is None:
                 return
+        if settings.sample_rate is not None and settings.sample_rate != rate:
+            measurements = self.export_view.review_measurements
+            from .limiter import settings_from_parameters as limiter_settings
+
+            stage = self.project.stages["limiter"]
+            ceiling = 0. if stage.bypassed else limiter_settings(stage.parameters).ceiling_db
+            true_peak = measurements.true_peak_db
+            units = "dBTP"
+            if true_peak is None:
+                true_peak = 20 * np.log10(measurements.peak) if measurements.peak else float("-inf")
+                units = "dBFS"
+            if true_peak is not None and true_peak + (attenuation or 0.) > ceiling + 1e-6:
+                if not self.confirm_converted_peak(true_peak + (attenuation or 0.), ceiling, units):
+                    return
         label = format_label(settings)
         applied = f", attenuated {attenuation:.2f} dB" if attenuation else ""
+
+        def completed(written):
+            self.export_view.record_written(written)
+            self.status.setText(
+                f"Exported {label}{' with TPDF dither' if written.dithered else ''}{applied}: "
+                f"{path}. {written.sample_rate / 1000:g} kHz, peak {written.peak_dbfs:+.2f} dBFS; "
+                f"{format_true_peak(written.true_peak_db)}; {format_lufs(written.lufs)}."
+            )
+
         self.start_job(
             lambda: write(path, audio, rate, settings, attenuation),
-            lambda written: self.status.setText(
-                f"Exported {label}{' with TPDF dither' if written.dithered else ''}{applied}: "
-                f"{path}. Peak {written.peak_dbfs:+.2f} dBFS."
-            ),
+            completed,
             "Exporting…",
         )
+
+    def confirm_converted_peak(self, true_peak, ceiling, units="dBTP"):
+        confirmation = QtWidgets.QMessageBox(
+            QtWidgets.QMessageBox.Icon.Warning, "Converted delivery peak",
+            f"Converted audio measures {true_peak:+.2f} {units}, above the delivery ceiling under review of {ceiling:+.2f} dBTP. "
+            "Sample-rate conversion can exceed the earlier limiter ceiling. "
+            "Export with no further level changes, or cancel and adjust output gain/limiting. "
+            "Peaks above 0 dBTP may clip on playback.",
+            QtWidgets.QMessageBox.StandardButton.Cancel, parent=self,
+        )
+        accept = confirmation.addButton("Export without further changes", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        confirmation.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        confirmation.setEscapeButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        confirmation.exec()
+        return confirmation.clickedButton() is accept
 
     def confirm_delivery_attenuation(self, report, settings):
         """Ask once before attenuating. Returns the dB to apply, or None to cancel."""
@@ -2297,7 +2339,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         confirmation = QtWidgets.QMessageBox(
             QtWidgets.QMessageBox.Icon.Warning,
             "Delivery level",
-            f"The rendered peak is {report.peak_dbfs:+.2f} dBFS, above the ceiling of "
+            f"The delivery sample peak is {report.peak_dbfs:+.2f} dBFS, above the ceiling of "
             f"{format_label(settings)}, including any dither headroom. "
             "Writing it directly could clip the peaks.",
             QtWidgets.QMessageBox.StandardButton.Cancel,
@@ -2375,7 +2417,7 @@ def main():
         finally:
             window.project.mark_saved()
             window.close()
-        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter, reference variation and range-aware matching")
+        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter, reference variation, range-aware matching and delivery sample-rate conversion")
         return
     sys.exit(app.exec())
 

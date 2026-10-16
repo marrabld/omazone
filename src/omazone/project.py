@@ -531,6 +531,14 @@ def validate_project(project):
         raise ValueError("Invalid saved matching overview preference.")
     if type(project.view.get("show_reference_variation", True)) is not bool:
         raise ValueError("Invalid saved reference variation preference.")
+    if "delivery" in project.view:
+        from .delivery import DeliverySettings
+        from .delivery import validate_settings as validate_delivery
+
+        delivery = project.view["delivery"]
+        if not isinstance(delivery, dict) or set(delivery) != {"format", "dither", "sample_rate"}:
+            raise ValueError("Invalid saved delivery preferences.")
+        validate_delivery(DeliverySettings(**delivery))
     reference_rate = (
         project.reference.sample_rate
         if project.reference
