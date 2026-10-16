@@ -491,7 +491,7 @@ def test_rate_choice_and_format_persist_without_invalidating_calibration(export_
     assert window.export_view.delivery_settings() == DeliverySettings()
 
 
-@pytest.mark.parametrize("replacement", [96000, None])
+@pytest.mark.parametrize("replacement", [96000, None, 44100])
 def test_stale_conversion_results_are_discarded_after_rate_changes(
     export_session, monkeypatch, replacement
 ):
@@ -502,11 +502,15 @@ def test_stale_conversion_results_are_discarded_after_rate_changes(
     window, wait, _, app = export_session
     render_with_gain(window, wait, -12)
     started, release = threading.Event(), threading.Event()
+    calls = []
 
     def delayed(audio, source, target, cancelled=None):
-        if target == 44100:
+        calls.append(target)
+        if target == 44100 and calls.count(44100) == 1:
             started.set()
             assert release.wait(10)
+            if cancelled is not None and cancelled():
+                raise RuntimeError("Old conversion cancelled")
         return measure_converted(audio, source, target)
 
     monkeypatch.setattr("omazone.export_view.measure_converted", delayed)
@@ -517,6 +521,8 @@ def test_stale_conversion_results_are_discarded_after_rate_changes(
             app.processEvents()
             time.sleep(0.005)
         assert started.is_set()
+        if replacement == 44100:
+            choose_rate(window, 96000)
         choose_rate(window, replacement)
         release.set()
         wait()

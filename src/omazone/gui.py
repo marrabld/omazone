@@ -2305,7 +2305,7 @@ class Window(ProjectController, QtWidgets.QMainWindow):
         applied = f", attenuated {attenuation:.2f} dB" if attenuation else ""
 
         def completed(written):
-            self.export_view.record_written(written)
+            self.export_view.record_written(written, settings)
             self.status.setText(
                 f"Exported {label}{' with TPDF dither' if written.dithered else ''}{applied}: "
                 f"{path}. {written.sample_rate / 1000:g} kHz, peak {written.peak_dbfs:+.2f} dBFS; "
@@ -2417,7 +2417,7 @@ def main():
         finally:
             window.project.mark_saved()
             window.close()
-        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter, reference variation, range-aware matching and delivery sample-rate conversion")
+        print("Omazone selftest OK: window, three-band reconstruction, dynamic EQ, limiter, reference variation, range-aware matching, delivery sample-rate conversion and explicit loudness targeting")
         return
     sys.exit(app.exec())
 

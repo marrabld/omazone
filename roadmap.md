@@ -285,6 +285,7 @@ Work in small stages so a louder export cannot be mistaken for a safer one:
 - [x] Audio output-device selection ([#86](https://github.com/marrabld/omazone/issues/86)). Real-device listening remains under #14.
 - [x] Export options for bit depth, headroom, and deliberate dither when quantising ([#85](https://github.com/marrabld/omazone/issues/85)). See [delivery](docs/delivery.md).
 - [x] Export-only sample-rate conversion to 44.1/48/88.2/96 kHz, converted-rate review and final written-file meters (#101). See [sample-rate conversion](docs/sample-rate-conversion.md); source-rate audition remains unchanged.
+- [x] Explicit loudness/peak targeting proposals using existing output gain and limiter settings, with separate Apply/Render, bounded evaluation and measured delivery outcomes (#102). See [loudness targeting](docs/loudness-targeting.md); listening review remains important.
 
 A limiter prevents new overload; declipping treats existing damage. Check
 metering against known reference results, then inspect limiter overshoot,

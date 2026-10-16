@@ -132,7 +132,7 @@ class LimiterProcessor:
         return audio * gain[:, None]
 
 
-def reconstructed_peak(audio, block_size=65536):
+def reconstructed_peak(audio, block_size=65536, cancelled=None):
     """Conservative 8x peak, with zero-padded interior and reflected edge checks.
 
     Unlike the display meter this protection pass cannot omit short files or
@@ -146,6 +146,8 @@ def reconstructed_peak(audio, block_size=65536):
         return 0.0
     overlap = 32
     for start in range(0, len(audio), block_size):
+        if cancelled is not None and cancelled():
+            raise RuntimeError("Limiter rendering cancelled.")
         stop = min(len(audio), start + block_size)
         low, high = max(0, start - overlap), min(len(audio), stop + overlap)
         upsampled = signal.resample_poly(
@@ -180,7 +182,7 @@ class LimitingResult:
     reconstructed_peak_db: float | None
 
 
-def render_limiter(audio, rate, settings, block_size=4096):
+def render_limiter(audio, rate, settings, block_size=4096, cancelled=None):
     audio = validate_audio(audio)
     validate_settings(settings)
     if type(block_size) is not int or block_size <= 0:
@@ -208,11 +210,13 @@ def render_limiter(audio, rate, settings, block_size=4096):
         reduction[first:last] = processor.last_reduction_db[indices[first:last] - start]
 
     for start in range(0, len(audio), block_size):
+        if cancelled is not None and cancelled():
+            raise RuntimeError("Limiter rendering cancelled.")
         process(audio[start : start + block_size], start)
     for tail in range(0, delay, block_size):
         process(np.zeros((min(block_size, delay - tail), audio.shape[1])), len(audio) + tail)
 
-    peak = reconstructed_peak(output)
+    peak = reconstructed_peak(output, cancelled=cancelled)
     ceiling = 10 ** (settings.ceiling_db / 20)
     guard = min(1.0, ceiling * 10 ** (-GUARD_MARGIN_DB / 20) / peak) if peak else 1.0
     guard_db = 20 * np.log10(guard)

@@ -539,6 +539,10 @@ def validate_project(project):
         if not isinstance(delivery, dict) or set(delivery) != {"format", "dither", "sample_rate"}:
             raise ValueError("Invalid saved delivery preferences.")
         validate_delivery(DeliverySettings(**delivery))
+    if "loudness_target" in project.view:
+        from .loudness_target import settings_from_parameters as target_settings
+
+        target_settings(project.view["loudness_target"])
     reference_rate = (
         project.reference.sample_rate
         if project.reference

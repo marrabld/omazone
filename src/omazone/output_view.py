@@ -8,6 +8,7 @@ from .limiter import LimiterSettings, limiter_parameters
 from .limiter import settings_from_parameters as limiter_settings
 from .limiter import validate_settings as validate_limiter
 from .loudness import format_lufs
+from .loudness_target_view import LoudnessTargetView
 from .output_gain import (
     OutputGainSettings,
     output_parameters,
@@ -140,6 +141,14 @@ class OutputView(QtWidgets.QWidget):
         prompt.setWordWrap(True)
         layout.addWidget(prompt)
         layout.addWidget(owner.audio_device_view)
+        self.target_toggle = QtWidgets.QToolButton()
+        self.target_toggle.setText("Loudness target...")
+        self.target_toggle.setCheckable(True)
+        layout.addWidget(self.target_toggle)
+        self.targeting = LoudnessTargetView(owner)
+        layout.addWidget(self.targeting)
+        self.target_toggle.toggled.connect(self.targeting.setVisible)
+        self.target_toggle.toggled.connect(lambda *_: self.draw())
         layout.addWidget(QtWidgets.QLabel("Output gain"))
         self.gain = QtWidgets.QDoubleSpinBox()
         self.gain.setRange(-36, 18)
@@ -235,6 +244,7 @@ class OutputView(QtWidgets.QWidget):
             self.owner.update_buttons()
 
     def restore(self):
+        self.targeting.restore()
         self.restoring = True
         try:
             try:
@@ -422,6 +432,7 @@ class OutputView(QtWidgets.QWidget):
             if self.limiter_enabled.isChecked()
             else ""
         )
+        self.targeting.refresh()
 
     def rendered(self):
         self.draw()
