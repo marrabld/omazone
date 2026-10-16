@@ -1,0 +1,68 @@
+name: Beta feedback
+description: Report a problem, confusing workflow, or successful test. No coding experience needed.
+title: "[Beta] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Omazone. Use one report per distinct problem.
+        Successful sessions are welcome too. Don't upload private music or personal file paths.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What are you reporting?
+      options:
+        - Something went wrong
+        - Something was confusing
+        - A successful test
+        - A suggestion for later
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Exact app version or build
+      placeholder: "For example: 0.4.0b1 from the numbered beta download"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: OS and version
+      placeholder: "For example: Windows 11, macOS 15 on Apple Silicon, or Arch Linux"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Audio device and backend shown in Omazone
+      placeholder: "Device name and backend, or 'could not launch'"
+  - type: input
+    id: display
+    attributes:
+      label: Display resolution and scaling
+      description: Useful for clipped labels or layout problems.
+  - type: input
+    id: audio
+    attributes:
+      label: Input audio details
+      placeholder: "Mono/stereo, sample rate, approximate length; no upload needed"
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you try?
+      description: Steps, settings and which parts of the testing guide you completed.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What did you expect, and what happened?
+      description: For successful sessions, tell us which checks worked. Include repeatability or timestamps if useful.
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Export settings, measurements, screenshots or other details
+      description: Include format/rate and external meter name/readings if relevant. Remove private details before attaching files.

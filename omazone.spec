@@ -9,6 +9,27 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.version import Version
+
+
+def macos_versions(version):
+    """Apple's short version is numeric; its build version carries a/b/fc."""
+    parsed = Version(version)
+    if (
+        parsed.epoch or parsed.local or parsed.dev is not None
+        or parsed.post is not None or len(parsed.release) > 3
+    ):
+        raise ValueError("Mac bundles need a numeric release with optional alpha/beta/RC suffix.")
+    parts = parsed.release + (0,) * (3 - len(parsed.release))
+    release = ".".join(map(str, parts))
+    build = release
+    if parsed.pre is not None:
+        stage, number = parsed.pre
+        if not 1 <= number <= 255:
+            raise ValueError("Mac prerelease build number must be 1 through 255.")
+        build += {"a": "a", "b": "b", "rc": "fc"}[stage] + str(number)
+    return release, build
+
 
 with open("pyproject.toml", "rb") as metadata:
     app_version = tomllib.load(metadata)["project"]["version"]
@@ -65,15 +86,18 @@ coll = COLLECT(
 )
 
 if sys.platform == "darwin":
+    short_version, build_version = macos_versions(app_version)
     app = BUNDLE(
         coll,
         name="Omazone.app",
         bundle_identifier="au.com.omazone.app",
-        version=app_version,
+        version=short_version,
         icon=ICNS,
         info_plist={
             "LSMinimumSystemVersion": "14.0",
             "NSHighResolutionCapable": True,
             "CFBundleIconFile": "Omazone.icns",
+            "CFBundleVersion": build_version,
+            "CFBundleGetInfoString": f"Omazone {app_version}",
         },
     )

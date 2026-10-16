@@ -26,10 +26,11 @@ def bundles(tmp_path, version="0.2.0", numbered=False):
 
 
 @pytest.mark.parametrize("numbered", [False, True])
-def test_assemble_all_platform_assets_with_single_checksum_file(tmp_path, numbered):
-    source = bundles(tmp_path, numbered=numbered)
+@pytest.mark.parametrize("version", ["0.2.0", "0.4.0b1"])
+def test_assemble_all_platform_assets_with_single_checksum_file(tmp_path, numbered, version):
+    source = bundles(tmp_path, version=version, numbered=numbered)
     output = tmp_path / "release"
-    gathered = assembler.assemble(source, output, "0.2.0", SHA, numbered)
+    gathered = assembler.assemble(source, output, version, SHA, numbered)
     assert len(gathered) == 7 and all(path.is_file() for path in gathered)
     lines = (output / "SHA256SUMS.txt").read_text().splitlines()
     assert len(lines) == 3
