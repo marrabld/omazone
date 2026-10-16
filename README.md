@@ -8,15 +8,28 @@
  · [Build details and checksums](https://github.com/marrabld/omazone/releases/tag/development)
  · [Numbered releases](https://github.com/marrabld/omazone/releases)
 
+## In brief
+
 Omazone is a free, GPLv3 desktop mastering app for home musicians. Match a
 reference, shape your mix with EQ and dynamics, compare changes at matched
 loudness, and export the full processing chain. No paid mastering suite required.
 
+- Reference EQ and optional range-aware matching, with measured reference variation on the plots.
+- Manual and dynamic EQ, broadband or three-band compression, and final limiting.
+- Level-matched A/B and saved projects, so you can hear changes and revisit decisions.
+- 32-bit float or 24-bit PCM WAV delivery, with peak/LUFS checks and no silent clipping.
+
+Available for Windows x64, Apple Silicon Macs running macOS 14 or newer, and
+Arch / Omarchy x86-64.
+
+[Download and install](#quick-start) · [Full feature guide](#main-features) ·
+[Run from source](#from-source) · [Roadmap](roadmap.md)
+
+![Omazone showing stereo waveforms, a measured reference envelope and the matching EQ response](docs/images/hero_omazone.png)
+
 The plots show what is measured, what correction is requested, and what the
 processing actually does. Omazone is under active development, with musicians
 and developers helping through listening reports, code and documentation.
-
-![Omazone Match workspace showing a measured reference envelope, density shading and the rendered EQ response](docs/images/omazone-reference-variation.png)
 
 ## Main features
 
